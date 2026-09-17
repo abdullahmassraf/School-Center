@@ -368,7 +368,15 @@ let state = {
   jobsDrawerOpen: false,
   audioRecorderOpen: false,
   practiceStudioOpen: false,
-  focusActive: false
+  focusActive: false,
+  // Modal state
+  assignmentModalOpen: false,
+  assignmentModalPreset: {}, // { courseId, dueDate }
+  assignmentDetailId: null,  // id of assignment to show in detail modal
+  noteModalOpen: false,
+  noteModalPreset: {},        // { courseId }
+  flashcardsModalOpen: false,
+  flashcardIndex: 0
 };
 
 let recorderInstance = null;
@@ -484,6 +492,10 @@ function render() {
       ${renderCaptureSheet()}
       ${renderAudioRecorderSheet()}
       ${renderPracticeStudioOverlay()}
+      ${renderAssignmentModal()}
+      ${renderNoteModal()}
+      ${renderFlashcardsModal()}
+      ${renderAssignmentDetailModal()}
     `;
 
     try {
@@ -700,16 +712,20 @@ function renderCalendarView() {
     return new Date(a.dueDate).toDateString() === state.selectedCalendarDay;
   });
 
+  const calendarSelectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   return `
     <div class="panel" style="padding:16px 14px;">
       <h2 style="padding:0 4px;margin-bottom:12px;">Academic Calendar</h2>
       <div class="date-strip">${stripHtml}</div>
 
-      <div class="dim-divider">${selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+      <div class="dim-divider" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>${calendarSelectedDateStr}</span>
+        <button class="btn-primary" id="add-deadline-btn" style="min-height:30px;font-size:0.75rem;padding:0 12px;">+ Add Deadline</button>
+      </div>
 
       <div class="agenda-list">
         ${dayClasses.map(c => `
-          <div class="agenda-item" style="--item-color:${c.course.accent};" data-course-id="${c.course.id}">
+          <div class="agenda-item" style="--item-color:${c.course.accent};cursor:pointer;" data-agenda-course-id="${c.course.id}">
             <div class="agenda-time">${c.schedule.start}</div>
             <div class="agenda-main">
               <div class="agenda-course">${c.course.code}</div>
@@ -721,7 +737,7 @@ function renderCalendarView() {
         ${dayAssignments.map(a => {
           const course = courseById(a.courseId);
           return `
-            <div class="agenda-item" style="--item-color:${course?course.accent:'var(--accent-3)'};" data-asg-id="${a.id}">
+            <div class="agenda-item" style="--item-color:${course?course.accent:'var(--accent-3)'};cursor:pointer;" data-agenda-asg-id="${a.id}">
               <div class="agenda-time">Due Date</div>
               <div class="agenda-main">
                 <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
@@ -867,7 +883,7 @@ function renderCourseDetailView(c) {
       ${courseAsgs.length ? `
         <div style="display:flex;flex-direction:column;gap:12px;">
           ${courseAsgs.map(a => `
-            <div class="assignment-card">
+            <div class="assignment-card" style="cursor:pointer;" data-open-asg-id="${a.id}">
               <div class="assignment-head">
                 <div>
                   <div class="assignment-title">${a.title}</div>
@@ -1174,6 +1190,247 @@ function renderAudioRecorderSheet() {
 }
 
 /* =========================================================================
+   MODAL: ASSIGNMENT CREATION / EDIT
+   ========================================================================= */
+function renderAssignmentModal() {
+  if (!state.assignmentModalOpen) return '';
+  const preset = state.assignmentModalPreset || {};
+  const courseOptions = COURSES.map(c =>
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId) ? 'selected' : ''}>${c.code} — ${c.name}</option>`
+  ).join('');
+  const todayISO = new Date().toISOString().split('T')[0];
+  const presetDate = preset.dueDate ? new Date(preset.dueDate).toISOString().split('T')[0] : todayISO;
+
+  return `
+    <div class="modal-overlay open" id="assignment-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 class="headfont">New Assignment</h3>
+          <div class="icon-btn sm" id="close-assignment-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="field-label">Title</div>
+          <input type="text" id="asg-title-input" class="modal-input" placeholder="e.g. Assignment 2 — Determinants" autofocus>
+
+          <div class="field-label">Course</div>
+          <select id="asg-course-select" class="modal-input">${courseOptions}</select>
+
+          <div class="modal-row">
+            <div style="flex:1;">
+              <div class="field-label">Due Date</div>
+              <input type="date" id="asg-due-input" class="modal-input" value="${presetDate}">
+            </div>
+            <div style="flex:1;">
+              <div class="field-label">Priority</div>
+              <select id="asg-priority-select" class="modal-input">
+                <option value="high">🔴 High</option>
+                <option value="medium" selected>🟡 Medium</option>
+                <option value="low">🟢 Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field-label">Description (optional)</div>
+          <textarea id="asg-desc-input" class="modal-input modal-textarea" placeholder="Describe the deliverables or submission requirements..."></textarea>
+
+          <div class="field-label">Requirements Checklist</div>
+          <div id="asg-checklist-container" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="asg-checklist-new" class="modal-input" placeholder="Add checklist item..." style="flex:1;">
+            <button class="btn-ghost" id="asg-checklist-add-btn" style="min-height:40px;padding:0 14px;">Add</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-assignment-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="save-assignment-btn">Create Assignment</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: ASSIGNMENT DETAIL
+   ========================================================================= */
+function renderAssignmentDetailModal() {
+  if (!state.assignmentDetailId) return '';
+  const a = assignmentsManager.getById(state.assignmentDetailId);
+  if (!a) return '';
+  const course = courseById(a.courseId);
+
+  const statusOptions = ['not_started','in_progress','submitted','completed','graded'].map(s =>
+    `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s.replace(/_/g, ' ')}</option>`
+  ).join('');
+
+  return `
+    <div class="modal-overlay open" id="asg-detail-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <div>
+            <span style="font-size:0.75rem;font-weight:700;color:${course ? course.accent : 'var(--accent)'}">${course ? course.code : ''}</span>
+            <h3 class="headfont" style="margin:2px 0 0;">${a.title}</h3>
+          </div>
+          <div class="icon-btn sm" id="close-asg-detail-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="modal-row" style="margin-bottom:12px;">
+            <div style="flex:1;">
+              <div class="field-label">Due Date</div>
+              <div style="font-size:0.9rem;">${new Date(a.dueDate).toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' })}</div>
+            </div>
+            <div style="flex:1;">
+              <div class="field-label">Status</div>
+              <select id="asg-detail-status" class="modal-input" style="margin-top:4px;">${statusOptions}</select>
+            </div>
+          </div>
+
+          ${a.description ? `<div style="font-size:0.88rem;color:var(--ink);line-height:1.6;padding:10px;background:rgba(255,255,255,0.04);border-radius:var(--radius-sm);margin-bottom:12px;">${a.description}</div>` : ''}
+
+          ${a.requirementsChecklist && a.requirementsChecklist.length ? `
+            <div class="field-label">Checklist</div>
+            <ul class="assignment-checklist" style="margin-bottom:12px;">
+              ${a.requirementsChecklist.map(ch => `
+                <li class="checklist-item ${ch.done ? 'done' : ''}" data-asg-check="${a.id}" data-check-id="${ch.id}">
+                  <input type="checkbox" ${ch.done ? 'checked' : ''} style="cursor:pointer;">
+                  <span>${ch.text}</span>
+                </li>
+              `).join('')}
+            </ul>
+          ` : ''}
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn-ghost" data-asg-ai="rewrite" data-asg-id="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;">✨ AI Rewrite</button>
+            <button class="btn-ghost" id="asg-detail-delete-btn" data-asg-del="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;color:var(--accent-3);">🗑 Delete</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-asg-detail-modal-cancel">Close</button>
+          <button class="btn-primary" id="update-asg-status-btn" data-asg-id="${a.id}">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: NOTE EDITOR
+   ========================================================================= */
+function renderNoteModal() {
+  if (!state.noteModalOpen) return '';
+  const preset = state.noteModalPreset || {};
+  const courseOptions = [{ id: '', code: 'No Course', name: '' }, ...COURSES].map(c =>
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' — ' + c.name : ''}</option>`
+  ).join('');
+
+  return `
+    <div class="modal-overlay open" id="note-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 class="headfont">New Note</h3>
+          <div class="icon-btn sm" id="close-note-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="field-label">Title</div>
+          <input type="text" id="note-title-input" class="modal-input" placeholder="e.g. Week 3 Lecture — Vector Spaces" autofocus>
+
+          <div class="field-label">Course</div>
+          <select id="note-course-select" class="modal-input">${courseOptions}</select>
+
+          <div class="field-label">Content</div>
+          <textarea id="note-content-input" class="modal-input modal-textarea" style="min-height:140px;" placeholder="Write your lecture notes, ideas, or key concepts here..."></textarea>
+
+          <div class="field-label" style="margin-top:4px;">Tags (comma-separated)</div>
+          <input type="text" id="note-tags-input" class="modal-input" placeholder="e.g. eigenvalues, exam, Week 4">
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-note-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="save-note-btn">Save Note</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: FLASHCARDS HUB
+   ========================================================================= */
+function renderFlashcardsModal() {
+  if (!state.flashcardsModalOpen) return '';
+
+  // Gather cards from all courses' lectures + key concepts
+  const allCards = [];
+  COURSES.forEach(c => {
+    (c.lectures || []).forEach(lec => {
+      (lec.concepts || []).forEach(([term, def]) => {
+        allCards.push({ front: term, back: def, course: c.code, color: c.accent });
+      });
+    });
+  });
+
+  // Also include flashcard AI outputs from notes
+  notesManager.getAll().forEach(n => {
+    if (n.aiGenerated && n.aiGenerated.flashcards) {
+      try {
+        const parsed = Array.isArray(n.aiGenerated.flashcards)
+          ? n.aiGenerated.flashcards
+          : JSON.parse(n.aiGenerated.flashcards);
+        (parsed || []).forEach(fc => {
+          if (fc.front && fc.back) allCards.push({ front: fc.front, back: fc.back, course: 'Notes', color: 'var(--accent-2)' });
+        });
+      } catch(e) {}
+    }
+  });
+
+  if (allCards.length === 0) {
+    return `
+      <div class="modal-overlay open" id="flashcards-modal-overlay">
+        <div class="modal-box" style="text-align:center;padding:32px;">
+          <h3 class="headfont">Flashcards Hub</h3>
+          <p style="color:var(--muted);font-size:0.9rem;margin:16px 0;">No flashcards available yet. Upload course materials or generate AI flashcards from your notes first.</p>
+          <button class="btn-primary" id="close-flashcards-modal">Got it</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const idx = Math.max(0, Math.min(state.flashcardIndex, allCards.length - 1));
+  const card = allCards[idx];
+
+  return `
+    <div class="modal-overlay open" id="flashcards-modal-overlay">
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-head">
+          <h3 class="headfont">Flashcards Hub</h3>
+          <div class="icon-btn sm" id="close-flashcards-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body" style="text-align:center;">
+          <div style="font-size:0.72rem;font-weight:700;color:${card.color};text-transform:uppercase;margin-bottom:8px;">${card.course}</div>
+          <div style="font-size:0.8rem;color:var(--muted);margin-bottom:4px;">Card ${idx + 1} of ${allCards.length}</div>
+
+          <div class="flashcard" id="flashcard-panel">
+            <div class="flashcard-front" id="flashcard-front">
+              <div class="flashcard-label">Term</div>
+              <div class="flashcard-term">${card.front}</div>
+            </div>
+            <div class="flashcard-back" id="flashcard-back" style="display:none;">
+              <div class="flashcard-label">Definition</div>
+              <div class="flashcard-def">${card.back}</div>
+            </div>
+          </div>
+
+          <button class="btn-ghost" id="flip-card-btn" style="margin:12px 0;min-height:38px;padding:0 20px;">Flip Card</button>
+
+          <div style="display:flex;justify-content:center;gap:12px;">
+            <button class="btn-ghost" id="fc-prev-btn" style="min-height:38px;padding:0 18px;" ${idx === 0 ? 'disabled' : ''}>← Prev</button>
+            <button class="btn-ghost" id="fc-next-btn" style="min-height:38px;padding:0 18px;" ${idx >= allCards.length - 1 ? 'disabled' : ''}>Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
    PRACTICE STUDIO OVERLAY (Linear Algebra)
    ========================================================================= */
 function renderPracticeStudioOverlay() {
@@ -1310,16 +1567,18 @@ function attachEventHandlers() {
   const capNote = document.getElementById('cap-note');
   if (capNote) capNote.addEventListener('click', () => {
     state.quickCaptureOpen = false;
-    const text = prompt('Enter note content:');
-    if (text) {
-      notesManager.createNote({
-        title: text.slice(0, 30) + '...',
-        content: text,
-        courseId: state.courseId || null
-      });
-      showToast('Note captured ✓');
-      render();
-    }
+    state.noteModalOpen = true;
+    state.noteModalPreset = { courseId: state.courseId || null };
+    render();
+  });
+
+  // Capture Assignment
+  const capAssignment = document.getElementById('cap-assignment');
+  if (capAssignment) capAssignment.addEventListener('click', () => {
+    state.quickCaptureOpen = false;
+    state.assignmentModalOpen = true;
+    state.assignmentModalPreset = { courseId: state.courseId || null };
+    render();
   });
 
   const capAudio = document.getElementById('cap-audio');
@@ -1479,12 +1738,133 @@ function attachEventHandlers() {
     render();
   });
 
+  // Quick Math Studio (Today view)
+  const quickPracticeBtn = document.getElementById('quick-practice-btn');
+  if (quickPracticeBtn) quickPracticeBtn.addEventListener('click', () => {
+    state.practiceStudioOpen = true;
+    render();
+  });
+
+  // See All Assignments (Today view)
+  const seeAllAsg = document.getElementById('see-all-asg');
+  if (seeAllAsg) seeAllAsg.addEventListener('click', () => {
+    state.view = 'courses';
+    state.courseId = null;
+    render();
+  });
+
   // Calendar Day Strip Click
   document.querySelectorAll('.date-strip-cell[data-daykey]').forEach(el => {
     el.addEventListener('click', () => {
       state.selectedCalendarDay = el.getAttribute('data-daykey');
       render();
     });
+  });
+
+  // Calendar Agenda — Course Items
+  document.querySelectorAll('[data-agenda-course-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.courseId = el.getAttribute('data-agenda-course-id');
+      state.view = 'courses';
+      state.courseTab = 'overview';
+      render();
+    });
+  });
+
+  // Calendar Agenda — Assignment Items
+  document.querySelectorAll('[data-agenda-asg-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.assignmentDetailId = el.getAttribute('data-agenda-asg-id');
+      render();
+    });
+  });
+
+  // Calendar Add Deadline
+  const addDeadlineBtn = document.getElementById('add-deadline-btn');
+  if (addDeadlineBtn) addDeadlineBtn.addEventListener('click', () => {
+    state.assignmentModalOpen = true;
+    state.assignmentModalPreset = { dueDate: state.selectedCalendarDay };
+    render();
+  });
+
+  // Course Assignments — New Task button
+  const addAsgBtn = document.getElementById('add-assignment-btn');
+  if (addAsgBtn) addAsgBtn.addEventListener('click', () => {
+    state.assignmentModalOpen = true;
+    state.assignmentModalPreset = { courseId: state.courseId };
+    render();
+  });
+
+  // Course Assignments — open assignment detail on card click
+  document.querySelectorAll('[data-open-asg-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // don't open detail if clicking a checklist item
+      if (e.target.closest('[data-asg-check]')) return;
+      state.assignmentDetailId = el.getAttribute('data-open-asg-id');
+      render();
+    });
+  });
+
+  // Today view — Assignment Card clicks
+  document.querySelectorAll('.assignment-card[data-asg-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.assignmentDetailId = el.getAttribute('data-asg-id');
+      render();
+    });
+  });
+
+  // Course Notes — Add Note button
+  const addNoteBtn = document.getElementById('add-course-note-btn');
+  if (addNoteBtn) addNoteBtn.addEventListener('click', () => {
+    state.noteModalOpen = true;
+    state.noteModalPreset = { courseId: state.courseId };
+    render();
+  });
+
+  // Course Materials — Upload from empty state
+  const triggerUploadModal = document.getElementById('trigger-upload-modal');
+  const hiddenFileInput = document.getElementById('hidden-file-input');
+  if (triggerUploadModal) triggerUploadModal.addEventListener('click', () => {
+    // Create a temporary file picker
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.multiple = true;
+    picker.accept = '.pdf,.docx,.txt,.md,.csv,.png,.jpg';
+    picker.addEventListener('change', () => {
+      const files = Array.from(picker.files || []);
+      files.forEach(file => {
+        const detected = detectCourseFromContent(file.name, '', COURSES);
+        const targetCourseId = state.courseId || detected.courseId;
+        jobsManager.createJob({
+          type: 'document_upload',
+          title: `Upload: ${file.name}`,
+          sourceItem: file.name,
+          affectedEntity: { type: 'course', id: targetCourseId, title: detected.courseName },
+          execute: async (progress) => {
+            progress('uploading', 20, `Uploading to course...`);
+            const targetCourse = courseById(targetCourseId);
+            if (isSupabaseConfigured()) {
+              await uploadAndProcessFile({ file, course: targetCourse, onProgress: (p) => progress(p.status, 60, p.text), onLog: () => {} });
+              await syncDataFromSupabase();
+            } else {
+              progress('reading', 50, 'Processing locally...');
+              await new Promise(r => setTimeout(r, 1200));
+            }
+          }
+        });
+      });
+      showToast(`Added ${files.length} file${files.length > 1 ? 's' : ''} to queue ✓`);
+      render();
+    });
+    picker.click();
+  });
+
+  // Practice — Flashcards Hub
+  const flashcardsBtn = document.getElementById('practice-flashcards-btn');
+  if (flashcardsBtn) flashcardsBtn.addEventListener('click', () => {
+    state.flashcardsModalOpen = true;
+    state.flashcardIndex = 0;
+    render();
   });
 
   // Universal Search Input
@@ -1507,6 +1887,103 @@ function attachEventHandlers() {
     render();
   });
 
+  // Search Result Hits
+  document.querySelectorAll('[data-search-hit]').forEach(el => {
+    el.addEventListener('click', () => {
+      const courseId = el.getAttribute('data-course');
+      const tab = el.getAttribute('data-tab') || 'overview';
+      if (courseId) {
+        state.view = 'courses';
+        state.courseId = courseId;
+        state.courseTab = tab;
+        state.searchQuery = '';
+        render();
+      }
+    });
+  });
+
+  // Theme Swatches
+  document.querySelectorAll('[data-theme-key]').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.getAttribute('data-theme-key');
+      const theme = THEME_PRESETS[key];
+      if (theme) {
+        applyTheme(theme);
+        try { localStorage.setItem('sc_theme', key); } catch(e) {}
+        // Refresh active swatch highlight without full re-render
+        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+        el.classList.add('active');
+        showToast(`Theme: ${theme.label} ✓`);
+      }
+    });
+  });
+
+  // Lava Lamp Opacity Slider
+  const lavaSlider = document.getElementById('lava-slider');
+  if (lavaSlider) {
+    // Restore saved opacity
+    const savedOpacity = localStorage.getItem('sc_lava_opacity');
+    if (savedOpacity !== null) {
+      lavaSlider.value = savedOpacity;
+      const canvas = document.getElementById('lava-canvas');
+      if (canvas) canvas.style.opacity = savedOpacity;
+    }
+    lavaSlider.addEventListener('input', () => {
+      const val = lavaSlider.value;
+      const canvas = document.getElementById('lava-canvas');
+      if (canvas) canvas.style.opacity = val;
+      try { localStorage.setItem('sc_lava_opacity', val); } catch(e) {}
+    });
+  }
+
+  // Save Cloud Settings
+  const saveCloudBtn = document.getElementById('save-cloud-settings-btn');
+  if (saveCloudBtn) saveCloudBtn.addEventListener('click', async () => {
+    const url = document.getElementById('supabase-url-field')?.value?.trim();
+    const key = document.getElementById('supabase-key-field')?.value?.trim();
+    if (!url || !key) { showToast('Please enter both URL and key'); return; }
+    try {
+      localStorage.setItem('sc_supabase_url', url);
+      localStorage.setItem('sc_supabase_anon_key', key);
+      await saveSupabaseConfig(url, key);
+      showToast('Cloud settings saved ✓');
+    } catch (e) {
+      showToast('Saved locally — connection will be tested on next sync');
+    }
+  });
+
+  // Manual Cloud Sync
+  const manualSyncBtn = document.getElementById('manual-sync-btn');
+  if (manualSyncBtn) manualSyncBtn.addEventListener('click', async () => {
+    showToast('Syncing from cloud...');
+    try {
+      await syncDataFromSupabase();
+      showToast('Sync complete ✓');
+    } catch (e) {
+      showToast('Sync failed — check cloud settings');
+    }
+  });
+
+  // Jobs Retry
+  document.querySelectorAll('[data-retry-job]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const jobId = btn.getAttribute('data-retry-job');
+      if (jobsManager.retryJob) {
+        jobsManager.retryJob(jobId);
+      } else {
+        // Fallback: re-trigger the job
+        const job = jobsManager.jobs.find(j => j.id === jobId);
+        if (job && job.execute) {
+          job.status = 'queued';
+          job.progress = 0;
+          jobsManager.save?.();
+        }
+      }
+      showToast('Task retried ✓');
+      render();
+    });
+  });
+
   // AI Notes Study Actions
   document.querySelectorAll('[data-ai-note]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1517,12 +1994,12 @@ function attachEventHandlers() {
         showToast(`AI ${action.replace('_', ' ')} completed ✓`);
         render();
       } catch (e) {
-        alert(e.message);
+        showToast(e.message || 'AI action failed');
       }
     });
   });
 
-  // Checklists Toggle
+  // Checklists Toggle (works in both course detail and assignment detail modal)
   document.querySelectorAll('[data-asg-check]').forEach(item => {
     item.addEventListener('click', () => {
       const asgId = item.getAttribute('data-asg-check');
@@ -1535,6 +2012,192 @@ function attachEventHandlers() {
           assignmentsManager.save();
           render();
         }
+      }
+    });
+  });
+
+  // =========================================================================
+  // MODAL EVENT HANDLERS
+  // =========================================================================
+
+  // — Assignment Creation Modal —
+  const closeAsgModal = document.getElementById('close-assignment-modal');
+  const closeAsgModalCancel = document.getElementById('close-assignment-modal-cancel');
+  const closeModal = () => { state.assignmentModalOpen = false; state.assignmentModalPreset = {}; render(); };
+  if (closeAsgModal) closeAsgModal.addEventListener('click', closeModal);
+  if (closeAsgModalCancel) closeAsgModalCancel.addEventListener('click', closeModal);
+
+  // Checklist item adder within assignment modal
+  const checklistItems = []; // local mutable list
+  const checklistAddBtn = document.getElementById('asg-checklist-add-btn');
+  const checklistNewInput = document.getElementById('asg-checklist-new');
+  const checklistContainer = document.getElementById('asg-checklist-container');
+  if (checklistAddBtn && checklistNewInput && checklistContainer) {
+    const addCheckItem = () => {
+      const text = checklistNewInput.value.trim();
+      if (!text) return;
+      checklistItems.push(text);
+      checklistNewInput.value = '';
+      const li = document.createElement('div');
+      li.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:0.85rem;';
+      li.innerHTML = `<span style="color:var(--accent);">◆</span> ${text}`;
+      checklistContainer.appendChild(li);
+      checklistNewInput.focus();
+    };
+    checklistAddBtn.addEventListener('click', addCheckItem);
+    checklistNewInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCheckItem(); } });
+  }
+
+  const saveAsgBtn = document.getElementById('save-assignment-btn');
+  if (saveAsgBtn) saveAsgBtn.addEventListener('click', () => {
+    const title = document.getElementById('asg-title-input')?.value?.trim();
+    if (!title) { showToast('Please enter a title'); return; }
+    const courseId = document.getElementById('asg-course-select')?.value || state.courseId;
+    const dueDate = document.getElementById('asg-due-input')?.value || new Date().toISOString();
+    const priority = document.getElementById('asg-priority-select')?.value || 'medium';
+    const description = document.getElementById('asg-desc-input')?.value?.trim();
+    const checklist = checklistItems.map(text => ({ id: 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2), text, done: false }));
+    assignmentsManager.createAssignment({
+      title, courseId, dueDate: new Date(dueDate).toISOString(),
+      status: 'not_started', priority, description,
+      requirementsChecklist: checklist
+    });
+    showToast('Assignment created ✓');
+    state.assignmentModalOpen = false;
+    state.assignmentModalPreset = {};
+    render();
+  });
+
+  // — Assignment Detail Modal —
+  const closeAsgDetailModal = document.getElementById('close-asg-detail-modal');
+  const closeAsgDetailCancel = document.getElementById('close-asg-detail-modal-cancel');
+  const closeDetailModal = () => { state.assignmentDetailId = null; render(); };
+  if (closeAsgDetailModal) closeAsgDetailModal.addEventListener('click', closeDetailModal);
+  if (closeAsgDetailCancel) closeAsgDetailCancel.addEventListener('click', closeDetailModal);
+
+  const updateAsgStatusBtn = document.getElementById('update-asg-status-btn');
+  if (updateAsgStatusBtn) updateAsgStatusBtn.addEventListener('click', () => {
+    const asgId = updateAsgStatusBtn.getAttribute('data-asg-id');
+    const asg = assignmentsManager.getById(asgId);
+    if (asg) {
+      const newStatus = document.getElementById('asg-detail-status')?.value;
+      if (newStatus) { asg.status = newStatus; assignmentsManager.save(); }
+      showToast('Assignment updated ✓');
+    }
+    state.assignmentDetailId = null;
+    render();
+  });
+
+  document.querySelectorAll('[data-asg-ai]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const asgId = btn.getAttribute('data-asg-id');
+      showToast('AI rewrite in progress...');
+      try {
+        if (assignmentsManager.rewriteAssignment) {
+          await assignmentsManager.rewriteAssignment({ assignmentId: asgId, style: 'clear_concise' });
+          showToast('AI rewrite complete ✓');
+        } else {
+          showToast('AI rewrite queued');
+        }
+      } catch(e) {
+        showToast('AI rewrite failed — check Gemini config');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-asg-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const asgId = btn.getAttribute('data-asg-del');
+      const asg = assignmentsManager.getById(asgId);
+      if (!asg) return;
+      const title = asg.title;
+      if (assignmentsManager.deleteAssignment) assignmentsManager.deleteAssignment(asgId);
+      else { assignmentsManager.assignments = assignmentsManager.getAll().filter(a => a.id !== asgId); assignmentsManager.save(); }
+      state.assignmentDetailId = null;
+      render();
+      // Show undo toast
+      const toast = document.createElement('div');
+      toast.className = 'settings-toast';
+      toast.innerHTML = `"${title}" deleted. <span id="undo-del-asg" style="color:var(--accent);cursor:pointer;font-weight:700;margin-left:8px;">Undo</span>`;
+      document.body.appendChild(toast);
+      const undoBtn = document.getElementById('undo-del-asg');
+      let undone = false;
+      if (undoBtn) undoBtn.addEventListener('click', () => {
+        if (!undone) {
+          undone = true;
+          if (assignmentsManager.undoDelete) assignmentsManager.undoDelete(asgId);
+          else { asg.id = asgId; assignmentsManager.getAll().push(asg); assignmentsManager.save(); }
+          toast.remove();
+          render();
+          showToast('Assignment restored ✓');
+        }
+      });
+      setTimeout(() => toast.remove(), 4000);
+    });
+  });
+
+  // — Note Editor Modal —
+  const closeNoteModal = document.getElementById('close-note-modal');
+  const closeNoteModalCancel = document.getElementById('close-note-modal-cancel');
+  const closeNoteM = () => { state.noteModalOpen = false; state.noteModalPreset = {}; render(); };
+  if (closeNoteModal) closeNoteModal.addEventListener('click', closeNoteM);
+  if (closeNoteModalCancel) closeNoteModalCancel.addEventListener('click', closeNoteM);
+
+  const saveNoteBtn = document.getElementById('save-note-btn');
+  if (saveNoteBtn) saveNoteBtn.addEventListener('click', () => {
+    const title = document.getElementById('note-title-input')?.value?.trim();
+    const content = document.getElementById('note-content-input')?.value?.trim();
+    if (!title) { showToast('Please enter a title'); return; }
+    const courseId = document.getElementById('note-course-select')?.value || null;
+    const tagsRaw = document.getElementById('note-tags-input')?.value || '';
+    const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    notesManager.createNote({ title, content: content || '', courseId: courseId || null, tags });
+    showToast('Note saved ✓');
+    state.noteModalOpen = false;
+    state.noteModalPreset = {};
+    render();
+  });
+
+  // — Flashcards Modal —
+  const closeFlashcardsModal = document.getElementById('close-flashcards-modal');
+  if (closeFlashcardsModal) closeFlashcardsModal.addEventListener('click', () => {
+    state.flashcardsModalOpen = false;
+    render();
+  });
+
+  const flipBtn = document.getElementById('flip-card-btn');
+  if (flipBtn) flipBtn.addEventListener('click', () => {
+    const front = document.getElementById('flashcard-front');
+    const back = document.getElementById('flashcard-back');
+    if (front && back) {
+      const showingFront = front.style.display !== 'none';
+      front.style.display = showingFront ? 'none' : '';
+      back.style.display = showingFront ? '' : 'none';
+      flipBtn.textContent = showingFront ? 'Show Term' : 'Flip Card';
+    }
+  });
+
+  const fcPrevBtn = document.getElementById('fc-prev-btn');
+  if (fcPrevBtn) fcPrevBtn.addEventListener('click', () => {
+    if (state.flashcardIndex > 0) { state.flashcardIndex--; render(); }
+  });
+
+  const fcNextBtn = document.getElementById('fc-next-btn');
+  if (fcNextBtn) fcNextBtn.addEventListener('click', () => {
+    state.flashcardIndex++; render();
+  });
+
+  // Close modals on overlay backdrop click
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        state.assignmentModalOpen = false;
+        state.assignmentDetailId = null;
+        state.noteModalOpen = false;
+        state.flashcardsModalOpen = false;
+        state.assignmentModalPreset = {};
+        state.noteModalPreset = {};
+        render();
       }
     });
   });
