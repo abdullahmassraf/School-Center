@@ -16,7 +16,8 @@ class AssignmentsManager {
     try {
       const raw = localStorage.getItem(ASSIGNMENTS_STORAGE_KEY);
       if (raw) {
-        this.assignments = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        this.assignments = Array.isArray(parsed) ? parsed : this.getDefaultAssignments();
       } else {
         // Initialize with high-value default assignments matching Sheridan courses
         this.assignments = this.getDefaultAssignments();

@@ -17,7 +17,8 @@ class NotesManager {
     try {
       const raw = localStorage.getItem(NOTES_STORAGE_KEY);
       if (raw) {
-        this.notes = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        this.notes = Array.isArray(parsed) ? parsed : this.getDefaultNotes();
       } else {
         this.notes = this.getDefaultNotes();
         this.save();

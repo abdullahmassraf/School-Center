@@ -437,40 +437,76 @@ export async function syncDataFromSupabase() {
    ========================================================================= */
 function render() {
   const app = document.getElementById('app');
-  if (!app) return;
-
-  if (focusModeInstance && focusModeInstance.isActive) {
-    app.innerHTML = renderFocusOverlay();
-    attachFocusHandlers();
+  if (!app) {
+    console.error('Mounting target #app was not found in DOM.');
     return;
   }
 
-  let viewHtml = '';
-  if (state.view === 'today') {
-    viewHtml = renderTodayView();
-  } else if (state.view === 'calendar') {
-    viewHtml = renderCalendarView();
-  } else if (state.view === 'courses') {
-    viewHtml = state.courseId ? renderCourseDetailView(courseById(state.courseId)) : renderCoursesHubView();
-  } else if (state.view === 'practice') {
-    viewHtml = renderPracticeHubView();
-  } else if (state.view === 'more') {
-    viewHtml = renderMoreView();
+  try {
+    if (focusModeInstance && focusModeInstance.isActive) {
+      app.innerHTML = renderFocusOverlay();
+      attachFocusHandlers();
+      return;
+    }
+
+    let viewHtml = '';
+    try {
+      if (state.view === 'today') {
+        viewHtml = renderTodayView();
+      } else if (state.view === 'calendar') {
+        viewHtml = renderCalendarView();
+      } else if (state.view === 'courses') {
+        viewHtml = state.courseId ? renderCourseDetailView(courseById(state.courseId)) : renderCoursesHubView();
+      } else if (state.view === 'practice') {
+        viewHtml = renderPracticeHubView();
+      } else if (state.view === 'more') {
+        viewHtml = renderMoreView();
+      } else {
+        viewHtml = renderTodayView();
+      }
+    } catch (viewErr) {
+      console.error(`Error rendering active view "${state.view}":`, viewErr);
+      viewHtml = `
+        <div class="panel" style="padding:24px;text-align:center;">
+          <h3 style="margin-bottom:8px;">View Display Notice</h3>
+          <p style="color:var(--muted);font-size:0.88rem;">${viewErr.message || 'Error generating view content'}</p>
+          <button class="btn-primary" id="fallback-reset-view-btn" style="margin-top:12px;">Reset to Today</button>
+        </div>
+      `;
+    }
+
+    app.innerHTML = `
+      ${renderHeader()}
+      <main class="enter">${viewHtml}</main>
+      ${renderBottomNav()}
+      ${renderCaptureFAB()}
+      ${renderJobsDrawer()}
+      ${renderCaptureSheet()}
+      ${renderAudioRecorderSheet()}
+      ${renderPracticeStudioOverlay()}
+    `;
+
+    try {
+      attachEventHandlers();
+    } catch (evtErr) {
+      console.warn('Non-critical event handler warning:', evtErr);
+    }
+
+    try {
+      renderMath();
+    } catch (mathErr) {
+      console.warn('KaTeX rendering note:', mathErr);
+    }
+  } catch (fatalRenderErr) {
+    console.error('Fatal render error:', fatalRenderErr);
+    app.innerHTML = `
+      <div class="panel" style="padding:32px 20px;text-align:center;">
+        <h2 style="margin-bottom:8px;">School Center</h2>
+        <p style="color:var(--muted);font-size:0.9rem;">The interface encountered an unexpected state. Click below to reload.</p>
+        <button class="btn-primary" onclick="localStorage.clear();location.reload();" style="margin-top:14px;">Reset Storage & Reload</button>
+      </div>
+    `;
   }
-
-  app.innerHTML = `
-    ${renderHeader()}
-    <main class="enter">${viewHtml}</main>
-    ${renderBottomNav()}
-    ${renderCaptureFAB()}
-    ${renderJobsDrawer()}
-    ${renderCaptureSheet()}
-    ${renderAudioRecorderSheet()}
-    ${renderPracticeStudioOverlay()}
-  `;
-
-  attachEventHandlers();
-  renderMath();
 }
 
 function renderMath() {
@@ -1515,33 +1551,77 @@ function showToast(msg) {
 }
 
 /* =========================================================================
-   INITIALIZATION
+   INITIALIZATION & BOOTSTRAP (Fail-Safe)
    ========================================================================= */
-(async function init() {
-  const canvas = document.getElementById('lava-canvas');
-  if (canvas) lavaEngine = createLavaEngine(canvas);
-  applyTheme(THEME_PRESETS.violet);
-  if (lavaEngine) lavaEngine.start();
+function bootstrap() {
+  try {
+    // 1. Force immediate layout render so the viewport is never left blank
+    render();
 
-  // Initial render
-  render();
-
-  // Subscribe to jobs manager
-  jobsManager.subscribe(() => {
-    const pill = document.getElementById('jobs-pill-btn');
-    if (pill) {
-      const count = jobsManager.getActiveJobsCount();
-      pill.innerHTML = count > 0 
-        ? `<div class="jobs-pill-spinner"></div><span>${count} processing</span>` 
-        : `<div class="jobs-pill-dot"></div><span>All synced</span>`;
+    // 2. Safe Lava Lamp initialization
+    try {
+      const canvas = document.getElementById('lava-canvas');
+      if (canvas) {
+        lavaEngine = createLavaEngine(canvas);
+        if (lavaEngine) lavaEngine.start();
+      }
+    } catch (lavaErr) {
+      console.warn('Lava engine init skipped:', lavaErr);
     }
-  });
 
-  // Connect Realtime listener if Supabase is configured
-  setupRealtimeListener(() => {
-    syncDataFromSupabase();
-  });
+    // 3. Safe Theme initialization
+    try {
+      applyTheme(THEME_PRESETS.violet);
+    } catch (themeErr) {
+      console.warn('Theme apply skipped:', themeErr);
+    }
 
-  // Fetch cloud courses
-  await syncDataFromSupabase();
-})();
+    // 4. Safe Jobs subscription
+    try {
+      jobsManager.subscribe(() => {
+        try {
+          const pill = document.getElementById('jobs-pill-btn');
+          if (pill) {
+            const count = jobsManager.getActiveJobsCount();
+            pill.innerHTML = count > 0 
+              ? `<div class="jobs-pill-spinner"></div><span>${count} processing</span>` 
+              : `<div class="jobs-pill-dot"></div><span>All synced</span>`;
+          }
+        } catch (e) {}
+      });
+    } catch (jobErr) {
+      console.warn('Jobs subscriber skipped:', jobErr);
+    }
+
+    // 5. Asynchronous background cloud sync (non-blocking)
+    try {
+      setupRealtimeListener(() => {
+        syncDataFromSupabase().catch(() => {});
+      });
+      syncDataFromSupabase().catch((syncErr) => {
+        console.warn('Notice: Background cloud sync using local cache:', syncErr);
+      });
+    } catch (cloudErr) {
+      console.warn('Cloud listener setup skipped:', cloudErr);
+    }
+  } catch (fatalBootstrapErr) {
+    console.error('Fatal bootstrap error:', fatalBootstrapErr);
+    const app = document.getElementById('app');
+    if (app) {
+      app.innerHTML = `
+        <div style="padding:40px 20px;text-align:center;color:#fff;">
+          <h2>School Center</h2>
+          <p style="color:#A7B0D6;">Click below to load with standard settings.</p>
+          <button class="btn-primary" onclick="localStorage.clear();location.reload();">Reset & Reload</button>
+        </div>
+      `;
+    }
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
+

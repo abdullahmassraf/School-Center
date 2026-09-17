@@ -15,7 +15,10 @@ class JobsManager {
     try {
       const raw = localStorage.getItem(JOBS_STORAGE_KEY);
       if (raw) {
-        this.jobs = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        this.jobs = Array.isArray(parsed) ? parsed : [];
+      } else {
+        this.jobs = [];
       }
     } catch (e) {
       this.jobs = [];
