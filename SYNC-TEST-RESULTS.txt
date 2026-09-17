@@ -1,0 +1,14 @@
+Automatic Sync Validation
+=========================
+
+- src/data-sync.js parses successfully.
+- src/notes.js parses successfully.
+- src/assignments.js parses successfully.
+- src/app.js parses successfully.
+- 002_user_notes_assignments.sql is idempotent and now adds deleted_at.
+- Local create/update/delete events are watched automatically.
+- Deletions are persisted locally as tombstones and uploaded as deleted_at rows.
+- Supabase Realtime listeners are established for user_notes and user_assignments.
+- A 30-second background reconciliation is enabled as a recovery path for missed realtime events.
+- Browser focus/online events trigger reconciliation.
+- Initial sign-in/new-device sync pulls first, then pushes, reducing accidental overwrites.
