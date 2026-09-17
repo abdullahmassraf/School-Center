@@ -1314,6 +1314,27 @@ function renderCaptureSheet() {
 /* =========================================================================
    VOICE RECORDER SHEET (Web Audio API Visualizer & Multi-Control Studio)
    ========================================================================= */
+function getSavedVoiceMemos() {
+  try {
+    return JSON.parse(localStorage.getItem('sc_voice_memos') || '[]');
+  } catch (e) { return []; }
+}
+
+function renderSavedMemosSection() {
+  const memos = getSavedVoiceMemos();
+  if (!memos.length) return `<div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:10px 0;">No saved memos yet â€” record one above!</div>`;
+  return memos.map((m, i) => `
+    <div class="saved-memo-row" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:12px;border:1px solid var(--hairline);margin-bottom:8px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.title}</div>
+        <div style="font-size:0.72rem;color:var(--muted);">${m.duration} Â· ${new Date(m.savedAt).toLocaleString([], {dateStyle:'short',timeStyle:'short'})}</div>
+      </div>
+      <audio controls src="${m.dataUrl}" style="height:32px;width:160px;border-radius:8px;"></audio>
+      <button class="icon-btn sm delete-memo-btn" data-idx="${i}" title="Delete memo" style="color:var(--danger,#f55);flex-shrink:0;">${icon('trash')}</button>
+    </div>
+  `).join('');
+}
+
 function renderAudioRecorderSheet() {
   return `
     <div class="sheet-backdrop ${state.audioRecorderOpen ? 'open' : ''}" id="audio-sheet-backdrop">
@@ -1344,6 +1365,11 @@ function renderAudioRecorderSheet() {
           </div>
 
           <div id="audio-playback-area" style="margin-top:14px;"></div>
+
+          <div style="margin-top:18px;">
+            <div style="font-size:0.8rem;font-weight:700;letter-spacing:0.04em;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">Saved Memos</div>
+            <div id="saved-memos-list">${renderSavedMemosSection()}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1904,7 +1930,8 @@ function renderSyncDrawer() {
 /* =========================================================================
    GOOGLE GEMINI AI INTEGRATION ENGINE (Real API Key)
    ========================================================================= */
-export const DEFAULT_GEMINI_KEY = "REDACTED_KEY";
+// API key is user-supplied â€” paste yours in Settings â†’ Gemini API Key
+export const DEFAULT_GEMINI_KEY = "";
 
 export function getGeminiApiKey() {
   return localStorage.getItem('sc_gemini_api_key') || DEFAULT_GEMINI_KEY;
@@ -2393,39 +2420,86 @@ function attachEventHandlers() {
       recordBtn?.classList.remove('recording');
       if (pauseBtn) pauseBtn.style.display = 'none';
       if (stopBtn) stopBtn.style.display = 'none';
-      if (statusLabel) statusLabel.textContent = 'Recording captured successfully!';
+      if (statusLabel) statusLabel.textContent = 'Recording captured â€” preview below.';
 
       const area = document.getElementById('audio-playback-area');
       if (area && audioResult) {
+        const durStr = recorderInstance.formatTime(audioResult.duration);
         area.innerHTML = `
-          <div class="audio-player-card" style="padding:14px;background:rgba(255,255,255,0.04);border-radius:12px;border:1px solid var(--hairline);">
-            <div style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">Audio Preview (${recorderInstance.formatTime(audioResult.duration)})</div>
-            <audio controls src="${audioResult.url}" style="width:100%;margin-bottom:12px;"></audio>
+          <div class="audio-player-card" style="padding:14px;background:rgba(255,255,255,0.06);border-radius:14px;border:1px solid var(--hairline);">
+            <div style="font-size:0.82rem;font-weight:700;margin-bottom:8px;">New Recording â€” ${durStr}</div>
+            <audio controls src="${audioResult.url}" style="width:100%;margin-bottom:12px;border-radius:8px;"></audio>
             <div style="display:flex;gap:10px;">
               <button class="btn-ghost" id="discard-rec-btn" style="flex:1;">Discard</button>
-              <button class="btn-primary" id="save-rec-to-notes-btn" style="flex:1;">Save to Notes</button>
+              <button class="btn-primary" id="save-rec-to-notes-btn" style="flex:1;">Save Memo</button>
             </div>
           </div>
         `;
         document.getElementById('discard-rec-btn')?.addEventListener('click', () => {
           area.innerHTML = '';
-          if (statusLabel) statusLabel.textContent = 'Discarded recording. Ready for new capture.';
+          if (statusLabel) statusLabel.textContent = 'Discarded. Ready for new capture.';
           if (timerEl) timerEl.textContent = '00:00';
+          recorderInstance = null;
+          recordedAudioData = null;
         });
-        document.getElementById('save-rec-to-notes-btn')?.addEventListener('click', () => {
-          notesManager.createNote({
-            title: `Voice Memo (${new Date().toLocaleTimeString()})`,
-            content: `Audio capture duration: ${recorderInstance.formatTime(audioResult.duration)}. Captured from live Voice Recording Studio.`,
-            courseId: state.courseId || null,
-            attachments: [{ id: 'aud_' + Date.now(), type: 'audio', duration: audioResult.duration, url: audioResult.url }]
-          });
-          showToast('Voice memo saved to notes âœ“');
-          state.audioRecorderOpen = false;
-          render();
+        document.getElementById('save-rec-to-notes-btn')?.addEventListener('click', async () => {
+          // Convert blob to base64 dataURL for persistent storage
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result;
+            const memoTitle = `Voice Memo ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+            // Persist in localStorage for replay
+            const memos = getSavedVoiceMemos();
+            memos.unshift({
+              id: 'memo_' + Date.now(),
+              title: memoTitle,
+              duration: durStr,
+              dataUrl,
+              savedAt: Date.now(),
+              courseId: state.courseId || null
+            });
+            // Keep max 20 memos
+            if (memos.length > 20) memos.splice(20);
+            try { localStorage.setItem('sc_voice_memos', JSON.stringify(memos)); } catch(e) {}
+            // Also register in notes manager
+            notesManager.createNote({
+              title: memoTitle,
+              content: `Voice memo, duration: ${durStr}.`,
+              courseId: state.courseId || null,
+              attachments: [{ id: 'aud_' + Date.now(), type: 'audio', duration: audioResult.duration, dataUrl }]
+            });
+            showToast('Voice memo saved âœ“');
+            area.innerHTML = '';
+            if (timerEl) timerEl.textContent = '00:00';
+            recorderInstance = null;
+            recordedAudioData = null;
+            // Refresh saved memos list in place without full re-render
+            const memosList = document.getElementById('saved-memos-list');
+            if (memosList) memosList.innerHTML = renderSavedMemosSection();
+            attachDeleteMemoHandlers();
+          };
+          reader.readAsDataURL(audioResult.blob);
         });
       }
     });
   }
+
+  // Wire delete buttons for saved memos
+  function attachDeleteMemoHandlers() {
+    document.querySelectorAll('.delete-memo-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const memos = getSavedVoiceMemos();
+        memos.splice(idx, 1);
+        try { localStorage.setItem('sc_voice_memos', JSON.stringify(memos)); } catch(e) {}
+        const memosList = document.getElementById('saved-memos-list');
+        if (memosList) memosList.innerHTML = renderSavedMemosSection();
+        attachDeleteMemoHandlers();
+        showToast('Memo deleted');
+      });
+    });
+  }
+  attachDeleteMemoHandlers();
 
   // Open 30-Day Month Calendar Modal
   const openMonthCalBtn = document.getElementById('open-month-cal-btn');
