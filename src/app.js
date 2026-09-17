@@ -569,7 +569,8 @@ function collectDeadlines(){
 }
 
 function courseById(id){
-  return COURSES.find(c=>c.id===id || c.code.toLowerCase()===id.toLowerCase());
+  if (!id) return null;
+  return COURSES.find(c => c.id === id || (c.code && c.code.toLowerCase() === id.toLowerCase()));
 }
 
 /* =========================================================================
@@ -583,7 +584,7 @@ export async function syncDataFromSupabase() {
     if (!dbCourses || !dbCourses.length) return;
 
     dbCourses.forEach(dbC => {
-      const match = COURSES.find(c => c.code.toUpperCase() === dbC.code.toUpperCase());
+      const match = COURSES.find(c => c.code && dbC.code && c.code.toUpperCase() === dbC.code.toUpperCase());
       if (match) {
         match.dbId = dbC.id;
         match.name = dbC.name || match.name;
