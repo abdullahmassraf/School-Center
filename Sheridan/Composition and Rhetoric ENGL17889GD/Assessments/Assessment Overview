@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Blank Page</title>
+    <script type="module" src="/shared/D2L/Courseware_HTML_Templates/V5/latest/_assets/js/global.min.js"></script>
+    <script src="/shared/D2L/Courseware_HTML_Templates/V5/latest/_assets/js/client.js"></script>
+    <script defer="" src="https://templates.lcs.brightspace.com/lib/assets/js/scripts.min.js"></script>
+    <link rel="stylesheet" href="/shared/D2L/Courseware_HTML_Templates/V5/latest/_assets/css/global.min.css">
+    <link rel="stylesheet" href="/shared/D2L/Courseware_HTML_Templates/V5/latest/_assets/css/client.min.css">
+    <link rel="stylesheet" href="/shared/HTML-Template-Library/HTML-Templates-V5/pages/../css/custom.css">
+    <link rel="stylesheet" href="/d2l/le/contentstyler/6606/files/View">
+<link rel="stylesheet" href="https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"></head><body class="courseware-sample-page-body"><div class="courseware-container-fluid courseware-themes">
+<div class="courseware-headers-hero courseware-headers-thin mceEditable"><img src="/shared/HTML-Template-Library/HTML-Templates-V5/img/banner-min.png" alt=""></div>
+<div class="courseware-layouts-content-wrapper">
+<h1 style="text-align: center;">Assessment Overview</h1>
+<p>The table below outlines the assessments you are responsible for throughout the course. The details of each assessment listed in the table are provided further in this section.&nbsp;<br><br></p>
+<table class="courseware-table-reveal" border="1" style="border-collapse: collapse; width: 80.6621%; height: 535.281px; border-width: 1px; border-style: dotted; margin-left: auto; margin-right: auto;"><caption><em>Assessment Overview</em></caption>
+<thead>
+<tr style="height: 54.8125px;">
+<th style="text-align: center; width: 61.7449%; height: 54.8125px; border-width: 1px;"><span style="font-size: 19px;">Assessment</span></th>
+<th style="text-align: center; width: 19.1959%; height: 54.8125px; border-width: 1px;"><span style="font-size: 19px;">Weight</span></th>
+<th style="text-align: center; width: 19.0737%; border-width: 1px;"><span style="font-size: 19px;">CLO</span></th>
+</tr>
+</thead>
+<tbody>
+<tr style="height: 80.0781px;">
+<td style="width: 61.7449%; height: 80.0781px; border-width: 1px; text-align: left;"><span style="font-size: 19px;">Rhetorical Analysis 1</span></td>
+<td style="width: 19.1959%; text-align: center; border-width: 1px; height: 80.0781px;"><span style="font-size: 19px;">15%</span></td>
+<td style="width: 19.0737%; text-align: center; border-width: 1px;">
+<p><span style="font-size: 19px;">CLO 1&nbsp;<br>CLO 2<br>CLO 4<br>CLO 5<br>CLO 7</span></p>
+</td>
+</tr>
+<tr>
+<td style="width: 61.7449%; height: 80.0781px; border-width: 1px; text-align: left;"><span style="font-size: 19px;">Rhetorical Analysis 2</span></td>
+<td style="width: 19.1959%; text-align: center; border-width: 1px; height: 80.0781px;"><span style="font-size: 19px;">15%</span></td>
+<td style="width: 19.0737%; text-align: center; border-width: 1px;">
+<p><span style="font-size: 19px;">CLO 1&nbsp;<br>CLO 2<br>CLO 4<br>CLO 5<br>CLO 7</span></p>
+</td>
+</tr>
+<tr>
+<td style="width: 61.7449%; height: 80.0781px; border-width: 1px; text-align: left;"><span style="font-size: 19px;">Exam</span></td>
+<td style="width: 19.1959%; height: 80.0781px; text-align: center; border-width: 1px;"><span style="font-size: 19px;">30%</span></td>
+<td style="width: 19.0737%; text-align: center; border-width: 1px;">
+<p><span style="font-size: 19px;">CLO 1<br>CLO 2<br>CLO 4<br>CLO 5<br></span><span style="font-size: 19px;">CLO 7</span></p>
+</td>
+</tr>
+<tr style="height: 80.0781px;">
+<td style="width: 61.7449%; height: 80.0781px; border-width: 1px; text-align: left;">
+<p><span style="font-size: 19px;">Collaborative Research Project</span></p>
+<ul>
+<li><span style="font-size: 19px;">Stage 1: Group Contract (1%)&nbsp;</span></li>
+<li><span style="font-size: 19px;">Stage 2: Group Check Point #1 (2%)&nbsp;</span></li>
+<li><span style="font-size: 19px;">Stage 3: Collaborative Group Proposal (15%)</span></li>
+<li><span style="font-size: 19px;">Stage 4: Group Check Point #2 (2%)&nbsp;</span></li>
+<li><span style="font-size: 19px;">Stage 5: Collaborative Group Project (20%)</span></li>
+</ul>
+</td>
+<td style="width: 19.1959%; text-align: center; border-width: 1px; height: 80.0781px;">
+<p><span style="font-size: 19px;">40%&nbsp;</span></p>
+<p></p>
+</td>
+<td style="width: 19.0737%; text-align: center; border-width: 1px;">
+<p><span style="font-size: 19px;">CLOs 1-7&nbsp;</span></p>
+</td>
+</tr>
+<tr style="height: 80.0781px;">
+<td style="width: 61.7449%; border-width: 1px; height: 80.0781px; text-align: left;"><span style="font-size: 19px;">Total</span></td>
+<td style="width: 19.1959%; text-align: center; border-width: 1px; height: 80.0781px;"><span style="font-size: 19px;">100%</span></td>
+<td style="width: 19.0737%; text-align: center; border-width: 1px;"><span style="font-size: 19px;">&nbsp;</span></td>
+</tr>
+</tbody>
+</table>
+<p><br><br><br></p>
+</div>
+<footer class="mceNonEditable"><!-- To add static year, add data-year attribute with the year in quotes. Ex. data-year="2023" --> <!-- By default, will dynamically append current year -->
+<p class="courseware-helper-client-copyright mceEditable">© [Client]</p>
+<p><img src="/shared/HTML-Template-Library/HTML-Templates-V5/img/logo.svg" class="mceEditable" alt="logo"></p>
+</footer></div></body></html>
