@@ -1,0 +1,2788 @@
+// ============================================================================
+// src/app.js — Full Dynamic Frontend Engine for School Center (Redesigned)
+// Mobile-First Academic OS · iPhone/visionOS Glassmorphism · Real Web Audio
+// ============================================================================
+
+import { 
+  getSupabase, 
+  isSupabaseConfigured, 
+  saveSupabaseConfig, 
+  fetchCoursesWithMaterials 
+} from './supabase.js';
+
+import { 
+  uploadAndProcessFile, 
+  setupRealtimeListener 
+} from './upload.js';
+
+import { jobsManager } from './jobs.js';
+import { detectCourseFromContent } from './course-detector.js';
+import { assignmentsManager } from './assignments.js';
+import { notesManager } from './notes.js';
+import { routeCourseContent } from './course-data.js';
+import { FocusMode } from './focus.js';
+import { performUniversalSearch } from './search.js';
+import { prepareGeminiFileParts, GeminiLiveTranscriber, GEMINI_FILE_ACCEPT } from './ai-workspace.js';
+import { loadAiChatHistory, persistAiMessage, getCurrentAiUser, sendAiMagicLink, signOutAiCloud, getEphemeralLiveToken, subscribeToAiChatHistory, deleteAiMessage, updateAiMessageText, clearAiConversation } from './ai-history.js';
+import { pushLocalDataToCloud, pullCloudDataToLocal, fullTwoWaySync, startAutomaticDataSync, stopAutomaticDataSync } from './data-sync.js';
+
+/* =========================================================================
+   STORAGE SHIM
+   ========================================================================= */
+const LS_PREFIX = 'schoolcenter_fallback__';
+const hasHostStorage = typeof window.storage === 'object' && window.storage !== null
+  && typeof window.storage.get === 'function';
+
+const storage = {
+  async get(key, shared){
+    if(hasHostStorage){
+      try{ return await window.storage.get(key, shared); }
+      catch(e){ /* fallback */ }
+    }
+    try{
+      const raw = localStorage.getItem(LS_PREFIX+key);
+      return raw === null ? null : { key, value: raw, shared: !!shared };
+    }catch(e){ return null; }
+  },
+  async set(key, value, shared){
+    if(hasHostStorage){
+      try{ return await window.storage.set(key, value, shared); }
+      catch(e){ /* fallback */ }
+    }
+    try{
+      localStorage.setItem(LS_PREFIX+key, value);
+      return { key, value, shared: !!shared };
+    }catch(e){ return null; }
+  }
+};
+
+/* =========================================================================
+   ICONS
+   ========================================================================= */
+const ICONS = {
+  home: `<svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+  calendar: `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
+  book: `<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+  spark: `<svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>`,
+  more: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  close: `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  mic: `<svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  doc: `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+  camera: `<svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`,
+  clipboard: `<svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>`,
+  search: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+  play: `<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+  pause: `<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`,
+  rewind: `<svg viewBox="0 0 24 24"><polyline points="11 19 4 12 11 5"/><polyline points="20 19 13 12 20 5"/></svg>`,
+  forward: `<svg viewBox="0 0 24 24"><polyline points="13 19 20 12 13 5"/><polyline points="4 19 11 12 4 5"/></svg>`,
+  arrowLeft: `<svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
+  chevronRight: `<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+  pencil: `<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+  download: `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+  timer: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+  check: `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`,
+  settings: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9A1.65 1.65 0 0 0 10 3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 .91 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+  arrowUp: `<svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`
+};
+
+function icon(name, cls = '') {
+  return `<span class="icon-inline ${cls}">${ICONS[name] || ''}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function decodeB64Utf8(b64){
+  try {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch(e) {
+    return '';
+  }
+}
+
+/* =========================================================================
+/* =========================================================================
+   STATIC COURSE METADATA & AUTHORITATIVE FALL 2026 SCHEDULE
+   ========================================================================= */
+export const FALL_2026_SCHEDULE = [
+  // MONDAY
+  { day: 1, dayName: 'Mon', start: '11:00 AM', end: '12:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'C328', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
+  { day: 1, dayName: 'Mon', start: '1:00 PM', end: '3:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lab', room: 'J301', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
+  { day: 1, dayName: 'Mon', start: '3:00 PM', end: '4:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'J301', instructor: 'TBA', accent: '#8B7CF6' },
+  
+  // TUESDAY
+  { day: 2, dayName: 'Tue', start: '9:00 AM', end: '12:00 PM', courseId: 'engr36035d', courseCode: 'ENGR 36035D', courseName: 'Intro to Energy Systems', type: 'Lecture', room: 'C271', instructor: 'Amin Ghobeity', accent: '#34D1BF' },
+  
+  // WEDNESDAY
+  { day: 3, dayName: 'Wed', start: '10:00 AM', end: '12:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'J301', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
+  
+  // THURSDAY
+  { day: 4, dayName: 'Thu', start: '3:00 PM', end: '5:00 PM', courseId: 'engr36035d', courseCode: 'ENGR 36035D', courseName: 'Intro to Energy Systems', type: 'Lab', room: 'A305', instructor: 'Amin Ghobeity', accent: '#34D1BF' },
+  
+  // FRIDAY
+  { day: 5, dayName: 'Fri', start: '1:00 PM', end: '4:00 PM', courseId: 'engr43301d', courseCode: 'ENGR 43301D', courseName: 'Economics & Entrepreneurship', type: 'Lecture', room: 'Online (VTL)', instructor: 'Manju Sunil Varghese', accent: '#F5A623' }
+];
+
+export function getClassesForDate(dateInput) {
+  let d;
+  if (dateInput instanceof Date) {
+    d = dateInput;
+  } else if (typeof dateInput === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      const [y, m, day] = dateInput.split('-').map(Number);
+      d = new Date(y, m - 1, day, 12, 0, 0);
+    } else {
+      d = new Date(dateInput);
+    }
+  } else {
+    d = new Date();
+  }
+  const dayOfWeek = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  
+  const events = [];
+  FALL_2026_SCHEDULE.filter(s => s.day === dayOfWeek).forEach(s => {
+    const course = courseById(s.courseId) || { id: s.courseId, code: s.courseCode, name: s.courseName, accent: s.accent };
+    events.push({
+      course,
+      schedule: {
+        day: s.dayName,
+        start: s.start,
+        end: s.end,
+        type: s.type,
+        room: s.room,
+        instructor: s.instructor
+      }
+    });
+  });
+  return events;
+}
+
+const STATIC_COURSES = [
+  {
+    id:'math15325d', code:'MATH 15325D', name:'Linear Algebra', instructor:'Cyrus Hosseini, PhD PEng',
+    hasMaterial:true, accent:'#8B7CF6',
+    schedule:[
+      {day:'Mon', start:'11:00 AM', end:'12:00 PM', type:'Lecture', room:'C328', instructor:'Cyrus Hosseini'},
+      {day:'Mon', start:'1:00 PM', end:'3:00 PM', type:'Lab', room:'J301', instructor:'Cyrus Hosseini'},
+      {day:'Mon', start:'3:00 PM', end:'4:00 PM', type:'Lecture', room:'J301', instructor:'TBA'},
+      {day:'Wed', start:'10:00 AM', end:'12:00 PM', type:'Lecture', room:'J301', instructor:'Cyrus Hosseini'},
+    ],
+    evaluation:[
+      ['Assignments (3 @ 5% each)','15%'],
+      ['Quizzes (2 @ 10% each)','20%'],
+      ['Midterm Exam','30%'],
+      ['Final Exam','35%'],
+    ],
+    textbook:'Linear Algebra with Applications, 10th edition, by Steven J. Leon and Lisette de Pillis',
+    syllabus:[
+      ['1','Sep 7','Matrices and Systems of Equations — Systems of linear equations, row reduction and echelon forms, matrix operations','Diagnostic Assessment · Homework 1'],
+      ['2','Sep 14','Matrix Operations & Inverses — Matrix multiplication, algebraic rules, inverse of a matrix, elementary matrices','Quiz 1 (10%) · Homework 2'],
+      ['3','Sep 21','Determinants — The determinant of a matrix, properties of determinants, Cramer\'s rule','Assignment 1 (5%)'],
+      ['4','Sep 28','Vector Spaces — Subspaces, null spaces, column spaces, linear transformations','Homework 3'],
+      ['5','Oct 5','Linear Independence and Bases — Linearly independent sets, bases, coordinate systems, dimension of a vector space','Quiz 2 (10%) · Homework 4'],
+      ['6','Oct 12','Rank & Change of Basis — The rank-nullity theorem, change of basis, application to differential equations','Assignment 2 (5%)'],
+      ['7','Oct 19','Midterm Exam — Comprehensive through Week 6','Midterm Exam (30%)'],
+      ['—','Oct 26','Reading Week — no classes scheduled','—'],
+      ['8','Nov 2','Linear Transformations — Definition and examples, matrix representations, similarity','Homework 5'],
+      ['9','Nov 9','Eigenvalues and Eigenvectors — Characteristic equation, diagonalization, complex eigenvalues','Homework 6'],
+      ['10','Nov 16','Orthogonality — Inner products, lengths, orthogonality, orthogonal projections','Assignment 3 (5%)'],
+      ['11','Nov 23','The Gram-Schmidt Process — Orthonormal bases, Gram-Schmidt orthogonalization, QR-factorization','Homework 7'],
+      ['12','Nov 30','Least Squares & Symmetric Matrices — Least squares problems, diagonalization of symmetric matrices, quadratic forms','Homework 8'],
+      ['13','Dec 7','Singular Value Decomposition & Review — SVD overview, review for final examination','Review session'],
+      ['14','Dec 14','Final Exam Period — Scheduled centrally by Sheridan registrar','Final Exam (35%)'],
+    ],
+    lectures:[
+      {
+        title:'Week 1 — Systems of Linear Equations & Row Operations',
+        concepts:[
+          ['Linear system','A collection of one or more linear equations involving the same set of variables.'],
+          ['Augmented matrix','A compact grid $[A \\mid \\mathbf{b}]$ combining the coefficient matrix and the right-hand constants.'],
+          ['Elementary row operations (EROs)','Three reversible operations: row swap ($R_i \\leftrightarrow R_j$), scalar multiplication, and row addition.'],
+          ['Reduced row echelon form (RREF)','Leading 1s with zeros in the rest of the column. Unique for every matrix.'],
+        ]
+      }
+    ],
+    worksheets:[
+      {
+        title:'Tutorial 1 — Linear Systems & Gaussian Elimination',
+        items:[
+          'Determine the condition on $k$ such that the system has unique, infinite, or no solutions: $x + 2y = 3$, $3x + ky = 9$.',
+          'Solve the $3 \\times 3$ system using Gauss-Jordan elimination: $x - 2y + z = 0$, $2x + y - 3z = 5$, $4x - 7y - z = -1$.'
+        ]
+      }
+    ]
+  },
+  {
+    id:'engr36035d', code:'ENGR 36035D', name:'Intro to Energy Systems', instructor:'Amin Ghobeity',
+    hasMaterial:true, accent:'#34D1BF',
+    schedule:[
+      {day:'Tue', start:'9:00 AM', end:'12:00 PM', type:'Lecture', room:'C271', instructor:'Amin Ghobeity'},
+      {day:'Thu', start:'3:00 PM', end:'5:00 PM', type:'Lab', room:'A305', instructor:'Amin Ghobeity'},
+    ],
+    evaluation:[
+      ['Quizzes (4 @ 5%)','20%'],
+      ['Assignments (3 @ 5%)','15%'],
+      ['Midterm Exam','25%'],
+      ['Laboratory Reports','15%'],
+      ['Final Exam','25%'],
+    ],
+    textbook:'Energy Systems Engineering: Evaluation and Implementation, Vanek & Albright, 3rd ed.',
+    syllabus:[
+      ['1','Sep 8','Energy Fundamentals — First & Second laws of thermodynamics, energy units & conversions','Review Quiz'],
+      ['2','Sep 15','Fossil Fuels — Combustion chemistry, coal, oil, natural gas, emissions modeling','Quiz 1 (5%)'],
+      ['3','Sep 22','Rankine & Brayton Cycles — Steam and gas turbine power generation cycles','Assignment 1 (5%)']
+    ],
+    lectures:[
+      {
+        title:'Module 1 — Energy Fundamentals & Thermodynamics',
+        concepts:[
+          ['First Law of Thermodynamics','Conservation of energy: $\\Delta U = Q - W$.'],
+          ['Second Law of Thermodynamics','Entropy of an isolated system always increases. Carnot efficiency $\\eta_C = 1 - T_C / T_H$.']
+        ]
+      }
+    ],
+    worksheets:[]
+  },
+  {
+    id:'engr43301d', code:'ENGR 43301D', name:'Economics & Entrepreneurship', instructor:'Manju Sunil Varghese',
+    hasMaterial:true, accent:'#F5A623',
+    schedule:[
+      {day:'Fri', start:'1:00 PM', end:'4:00 PM', type:'Lecture', room:'Online (VTL)', instructor:'Manju Sunil Varghese'}
+    ],
+    evaluation:[
+      ['Case Studies (3 @ 10%)','30%'],
+      ['Midterm Exam','25%'],
+      ['Business Plan Pitch','20%'],
+      ['Final Exam','25%'],
+    ],
+    syllabus:[
+      ['1','Sep 9','Engineering Decision Making — Time value of money, cash flow diagrams','Intro Exercises'],
+      ['2','Sep 16','Interest Formulas — Single payments, uniform series, gradient series','Quiz 1']
+    ],
+    lectures:[],
+    worksheets:[]
+  },
+  {
+    id:'anth17028gd', code:'ANTH 17028GD', name:'Anthropology of Health', instructor:'Slate Online',
+    hasMaterial:true, accent:'#F0608A',
+    schedule:[], async:true,
+    evaluation:[
+      ['Discussion','20%'],
+      ['Quizzes (10 @ 5% each)','50%'],
+      ['Paleopathology Group Project','20%'],
+    ],
+    syllabus:[
+      ['1','Module 1','Anthropological Perspectives on Health — core definitions, medical anthropology','Discussion · Quiz 1 (5%)'],
+      ['2','Module 2','Biocultural Perspectives & Ethics in Health Research','Quiz 2 (5%)']
+    ],
+    lectures:[],
+    worksheets:[]
+  },
+  {
+    id:'engl17889gd', code:'ENGL 17889GD', name:'Composition & Rhetoric', instructor:'Slate Online',
+    hasMaterial:false, accent:'#5FD37A',
+    schedule:[], async:true, lectures:[], worksheets:[]
+  }
+];
+
+let COURSES = JSON.parse(JSON.stringify(STATIC_COURSES));
+
+export function cleanCourseCode(code) {
+  return (code || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+}
+
+function courseById(id) {
+  if (!id) return null;
+  const targetKey = cleanCourseCode(id);
+  return COURSES.find(c => 
+    c.id === id || 
+    c.id.toLowerCase() === id.toLowerCase() || 
+    cleanCourseCode(c.id) === targetKey || 
+    cleanCourseCode(c.code) === targetKey || 
+    (c.dbId && c.dbId === id)
+  );
+}
+
+/* =========================================================================
+   THEMES & PALETTES
+   ========================================================================= */
+const THEME_PRESETS = {
+  violet: {
+    label:'Deep Violet',
+    ink:'#F4F6FD', muted:'#A7B0D6', mutedDim:'#7981A8',
+    accent:'#8B7CF6', accent2:'#34D1BF', accent3:'#F0608A',
+    bg1:'#0B0F2E', bg2:'#0E1A3D', bg3:'#0A2A44',
+    lava:['#8B7CF6','#5B4FD6','#B892FF','#3A2E7A']
+  },
+  crimson: {
+    label:'Crimson Load',
+    ink:'#FFF3F1', muted:'#E7B3AC', mutedDim:'#B9807A',
+    accent:'#FF5A4E', accent2:'#FF8C7A', accent3:'#FFD166',
+    bg1:'#320705', bg2:'#4A0C08', bg3:'#5E100A',
+    lava:['#FF3B30','#D91F17','#FF7A6E','#8C0E08']
+  },
+  ultraviolet: {
+    label:'Ultraviolet',
+    ink:'#F6F0FF', muted:'#C7AEE8', mutedDim:'#8F6FB8',
+    accent:'#C042FF', accent2:'#5B7CFF', accent3:'#FF4FD8',
+    bg1:'#170426', bg2:'#230A3C', bg3:'#170A44',
+    lava:['#C042FF','#5B2E9E','#FF4FD8','#3D1E7A']
+  },
+  midnight: {
+    label:'Midnight Teal',
+    ink:'#EFFAF8', muted:'#9DC2BC', mutedDim:'#6E938D',
+    accent:'#34D1BF', accent2:'#5FD37A', accent3:'#8B7CF6',
+    bg1:'#031312', bg2:'#052321', bg3:'#0A2E2C',
+    lava:['#34D1BF','#0F8C7E','#5FD37A','#0A4B45']
+  }
+};
+
+let currentTheme = THEME_PRESETS.violet;
+
+function hexToHsl(hex){
+  const m=hex.replace('#',''); const n=parseInt(m.length===3?m.split('').map(x=>x+x).join(''):m,16);
+  let r=((n>>16)&255)/255,g=((n>>8)&255)/255,b=(n&255)/255; const max=Math.max(r,g,b),min=Math.min(r,g,b); let h=0,s=0,l=(max+min)/2;
+  if(max!==min){const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}h/=6;}
+  return [h*360,s*100,l*100];
+}
+function hslToHex(h,s,l){
+  s/=100;l/=100;const k=n=>(n+h/30)%12;const a=s*Math.min(l,1-l);const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  return '#'+[f(0),f(8),f(4)].map(x=>Math.round(255*x).toString(16).padStart(2,'0')).join('');
+}
+function hexToRgb(hex){ const m=String(hex||'').replace('#',''); const n=parseInt(m,16); return Number.isFinite(n)?`${(n>>16)&255},${(n>>8)&255},${n&255}`:'139,124,246'; }
+function applyTheme(t, persist=true){
+  if(!t) return;
+  currentTheme = t;
+  const r = document.documentElement.style;
+  r.setProperty('--ink', t.ink);
+  r.setProperty('--muted', t.muted);
+  r.setProperty('--muted-dim', t.mutedDim);
+  r.setProperty('--accent', t.accent);
+  r.setProperty('--accent-2', t.accent2);
+  r.setProperty('--accent-3', t.accent3);
+  r.setProperty('--accent-rgb', hexToRgb(t.accent));
+  r.setProperty('--bg-1', t.bg1);
+  r.setProperty('--bg-2', t.bg2);
+  r.setProperty('--bg-3', t.bg3);
+  r.setProperty('--lava-a', t.lava[0]);
+  r.setProperty('--lava-b', t.lava[1]);
+  r.setProperty('--lava-c', t.lava[2]);
+  r.setProperty('--lava-d', t.lava[3]);
+  if(lavaEngine) lavaEngine.setColors(t.lava);
+  if(persist) {
+    localStorage.setItem('sc_theme_key', Object.entries(THEME_PRESETS).find(([,v])=>v===t)?.[0] || 'custom');
+    if (t.__customAccent) localStorage.setItem('sc_custom_accent', t.accent);
+    else localStorage.removeItem('sc_custom_accent');
+  }
+}
+
+function applyCustomAccent(hex, persist=true){
+  const clean = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#8B7CF6';
+  const [h,s,l] = hexToHsl(clean);
+  const next = { ...THEME_PRESETS.violet, label: 'Custom', accent: clean, accent2: hslToHex((h+150)%360, Math.min(100,s+4), Math.min(82,l+8)), accent3: hslToHex((h+320)%360, Math.min(100,s+8), Math.min(78,l+4)), __customAccent: true };
+  next.lava = [clean, next.accent2, next.accent3, hslToHex((h+35)%360, Math.min(100,s+8), Math.max(15,l-22))];
+  applyTheme(next, false);
+  if(persist) localStorage.setItem('sc_custom_accent', clean);
+  return next;
+}
+
+/* =========================================================================
+   LAVA LAMP ENGINE
+   ========================================================================= */
+function createLavaEngine(canvas){
+  const ctx = canvas.getContext('2d', { alpha:false });
+  let W=0, H=0, DPR=Math.min(window.devicePixelRatio||1, 1.5);
+  let blobs=[];
+  let colors=['#8B7CF6','#5B4FD6','#34D1BF','#F0608A'];
+  let raf=null;
+  let isVisible = true;
+
+  function resize(){
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+
+  function initBlobs(){
+    blobs = [
+      { x: W * 0.2, y: H * 0.25, vx: 0.045, vy: 0.03, r: Math.min(W, H) * 0.6 + 160, c: colors[0], phase: 0 },
+      { x: W * 0.8, y: H * 0.35, vx: -0.038, vy: 0.025, r: Math.min(W, H) * 0.65 + 180, c: colors[1], phase: 1.8 },
+      { x: W * 0.3, y: H * 0.8, vx: 0.03, vy: -0.042, r: Math.min(W, H) * 0.7 + 200, c: colors[2], phase: 3.5 },
+      { x: W * 0.75, y: H * 0.75, vx: -0.035, vy: -0.03, r: Math.min(W, H) * 0.55 + 150, c: colors[3] || colors[0], phase: 5.2 },
+    ];
+  }
+
+  function setColors(newColors){
+    colors = newColors;
+    blobs.forEach((b,i)=>{ b.c = colors[i % colors.length]; });
+  }
+
+  function step(t){
+    if (!isVisible) return;
+    ctx.fillStyle = '#070B1E';
+    ctx.fillRect(0, 0, W, H);
+
+    // Render luminous chromatic fluid masses that refract through translucent glass
+    blobs.forEach((b)=>{
+      b.x += b.vx; b.y += b.vy;
+      const pulse = Math.sin(t * 0.0007 + b.phase) * 45;
+      const currentR = Math.max(160, b.r + pulse);
+
+      if(b.x - currentR < -120){ b.x = -120 + currentR; b.vx = Math.abs(b.vx); }
+      if(b.x + currentR > W + 120){ b.x = W + 120 - currentR; b.vx = -Math.abs(b.vx); }
+      if(b.y - currentR < -120){ b.y = -120 + currentR; b.vy = Math.abs(b.vy); }
+      if(b.y + currentR > H + 120){ b.y = H + 120 - currentR; b.vy = -Math.abs(b.vy); }
+
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, currentR);
+      g.addColorStop(0, b.c);
+      g.addColorStop(0.4, b.c);
+      g.addColorStop(1, 'rgba(7, 11, 30, 0)');
+      
+      ctx.globalAlpha = 0.65;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, currentR, 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1.0;
+    raf = requestAnimationFrame(step);
+  }
+
+  function start(){
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      resize();
+      initBlobs();
+      step(0);
+      return;
+    }
+    resize();
+    initBlobs();
+    if(raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(step);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    isVisible = !document.hidden;
+    if (isVisible && !raf) raf = requestAnimationFrame(step);
+  });
+
+  window.addEventListener('resize', ()=>resize());
+  return { start, setColors, resize };
+}
+
+let lavaEngine = null;
+
+/* =========================================================================
+   APPLICATION STATE & ACTIVE INSTANCES
+   ========================================================================= */
+let state = {
+  view: 'today', // today | calendar | courses | ai | settings
+  courseId: null, // when navigating inside a specific course
+  courseTab: 'overview', // overview | materials | assignments | notes
+  selectedCalendarDay: new Date().toDateString(),
+  searchQuery: '',
+  jobsDrawerOpen: false,
+  focusActive: false,
+  // Modal state
+  assignmentModalOpen: false,
+  assignmentModalPreset: {}, // { courseId, dueDate }
+  assignmentDetailId: null,  // id of assignment to show in detail modal
+  noteModalOpen: false,
+  noteModalPreset: {},        // { courseId }
+  flashcardsModalOpen: false,
+  flashcardIndex: 0,
+  // Phase 2 New Modals
+  monthCalendarOpen: false,
+  monthCalendarYear: new Date().getFullYear(),
+  monthCalendarMonth: new Date().getMonth(),
+  spotlightSearchOpen: false,
+  spotlightQuery: '',
+  syncDrawerOpen: false,
+  aiAssistantOpen: false,
+  aiChatMessages: [],
+  aiIsThinking: false,
+  aiAttachments: [],
+  aiTranscribing: false,
+  aiConnectionState: 'idle',
+  aiLiveTranscript: '',
+  aiHistoryLoaded: false,
+  aiCloudConnected: false,
+  aiCloudUser: null,
+  aiSearchResultsCount: 0,
+  dataSyncLastError: null,
+  dataSyncLastOkAt: null,
+  syncBannerDismissed: false
+};
+
+let aiLiveTranscriber = null;
+let aiActiveAttachments = [];
+let focusModeInstance = null;
+let aiHistoryUnsubscribe = null;
+
+/* =========================================================================
+   DATA SYNC WITH SUPABASE
+   ========================================================================= */
+export async function syncDataFromSupabase() {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const dbCourses = await fetchCoursesWithMaterials();
+    if (!dbCourses || !dbCourses.length) return;
+
+    dbCourses.forEach(dbC => {
+      const dbKey = cleanCourseCode(dbC.code || dbC.id);
+      const match = COURSES.find(c => 
+        cleanCourseCode(c.code) === dbKey || 
+        cleanCourseCode(c.id) === dbKey || 
+        (c.dbId && c.dbId === dbC.id)
+      );
+
+      if (match) {
+        match.dbId = dbC.id;
+        if (dbC.name && (!match.name || match.name === dbC.code)) match.name = dbC.name;
+        if (dbC.instructor && (!match.instructor || match.instructor === 'Instructor')) match.instructor = dbC.instructor;
+        if (dbC.color) match.accent = dbC.color;
+        match.modules = dbC.modules || match.modules || [];
+
+        const dbMaterials = [];
+        (dbC.modules || []).forEach(mod => {
+          (mod.materials || []).forEach(mat => {
+            dbMaterials.push({ ...mat, moduleTitle: mod.title });
+          });
+        });
+        match.cloudMaterials = dbMaterials;
+        if (dbMaterials.length > 0) match.hasMaterial = true;
+      } else {
+        const alreadyExists = COURSES.some(c => 
+          cleanCourseCode(c.code) === dbKey || 
+          cleanCourseCode(c.id) === dbKey
+        );
+        if (!alreadyExists) {
+          const newCourse = {
+            id: (dbC.code || dbC.id).toLowerCase().replace(/[^a-z0-9]/g, ''),
+            dbId: dbC.id,
+            code: dbC.code,
+            name: dbC.name,
+            instructor: dbC.instructor || 'Instructor',
+            hasMaterial: (dbC.modules || []).some(m => m.materials && m.materials.length > 0),
+            accent: dbC.color || '#8B7CF6',
+            schedule: [],
+            syllabus: [],
+            lectures: [],
+            worksheets: [],
+            modules: dbC.modules || [],
+            cloudMaterials: []
+          };
+          (dbC.modules || []).forEach(mod => {
+            (mod.materials || []).forEach(mat => {
+              newCourse.cloudMaterials.push({ ...mat, moduleTitle: mod.title });
+            });
+          });
+          COURSES.push(newCourse);
+        }
+      }
+    });
+
+    // Enforce strict deduplication so courses are never duplicated
+    const seen = new Set();
+    COURSES = COURSES.filter(c => {
+      const key = cleanCourseCode(c.code) || cleanCourseCode(c.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    render();
+  } catch (err) {
+    console.error('Failed to sync courses from Supabase:', err);
+  }
+}
+
+/* =========================================================================
+   UI RENDERING — MAIN SHELL
+   ========================================================================= */
+function render() {
+  const app = document.getElementById('app');
+  if (!app) {
+    console.error('Mounting target #app was not found in DOM.');
+    return;
+  }
+
+  try {
+    if (focusModeInstance && focusModeInstance.isActive) {
+      app.innerHTML = renderFocusOverlay();
+      attachFocusHandlers();
+      return;
+    }
+
+    let viewHtml = '';
+    try {
+      if (state.view === 'today') {
+        viewHtml = renderTodayView();
+      } else if (state.view === 'calendar') {
+        viewHtml = renderCalendarView();
+      } else if (state.view === 'courses') {
+        viewHtml = state.courseId ? renderCourseDetailView(courseById(state.courseId)) : renderCoursesHubView();
+      } else if (state.view === 'ai') {
+        viewHtml = renderUnifiedAiView();
+      } else if (state.view === 'settings') {
+        viewHtml = renderSettingsView();
+      } else {
+        viewHtml = renderTodayView();
+      }
+    } catch (viewErr) {
+      console.error(`Error rendering active view "${state.view}":`, viewErr);
+      viewHtml = `
+        <div class="panel" style="padding:24px;text-align:center;">
+          <h3 style="margin-bottom:8px;">View Display Notice</h3>
+          <p style="color:var(--muted);font-size:0.88rem;">${viewErr.message || 'Error generating view content'}</p>
+          <button class="btn-primary" id="fallback-reset-view-btn" style="margin-top:12px;">Reset to Today</button>
+        </div>
+      `;
+    }
+
+    app.innerHTML = `
+      ${renderHeader()}
+      <main class="enter">${viewHtml}</main>
+      ${renderBottomNav()}
+      ${renderJobsDrawer()}
+      ${renderAssignmentModal()}
+      ${renderNoteModal()}
+      ${renderAssignmentDetailModal()}
+      ${renderMonthCalendarModal()}
+      ${renderSyncDrawer()}
+    `;
+
+    try {
+      attachEventHandlers();
+    } catch (evtErr) {
+      console.warn('Non-critical event handler warning:', evtErr);
+    }
+
+    try {
+      renderMath();
+    } catch (mathErr) {
+      console.warn('KaTeX rendering note:', mathErr);
+    }
+  } catch (fatalRenderErr) {
+    console.error('Fatal render error:', fatalRenderErr);
+    app.innerHTML = `
+      <div class="panel" style="padding:32px 20px;text-align:center;">
+        <h2 style="margin-bottom:8px;">School Center</h2>
+        <p style="color:var(--muted);font-size:0.9rem;">The interface encountered an unexpected state. Click below to reload.</p>
+        <button class="btn-primary" onclick="localStorage.clear();location.reload();" style="margin-top:14px;">Reset Storage & Reload</button>
+      </div>
+    `;
+  }
+}
+
+function renderMath() {
+  if (typeof window.renderMathInElement === 'function') {
+    window.renderMathInElement(document.body, {
+      delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '$', right: '$', display: false}
+      ],
+      throwOnError: false
+    });
+  }
+}
+
+/* =========================================================================
+   HEADER & DYNAMIC ISLAND PILL
+   ========================================================================= */
+function renderHeader() {
+  const activeCount = jobsManager.getActiveJobsCount();
+  const failedCount = jobsManager.getFailedJobsCount();
+  const aiState = state.aiIsThinking || state.aiTranscribing
+    ? 'busy'
+    : failedCount > 0
+      ? 'attention'
+      : activeCount > 0
+        ? 'busy'
+        : 'ready';
+  return `
+    <header class="app-header">
+      <div class="header-meta"><h1 class="headfont">School Center</h1><div class="sub">Abdullah Massraf · Fall 2026 · Mechanical Eng</div></div>
+    </header>`;
+}
+
+/* =========================================================================
+   BOTTOM NAVIGATION BAR & FAB
+   ========================================================================= */
+function renderBottomNav() {
+  const tabs = [
+    { id: 'today', icon: 'home', label: 'Today' },
+    { id: 'calendar', icon: 'calendar', label: 'Calendar' },
+    { id: 'courses', icon: 'book', label: 'Courses' },
+    { id: 'ai', icon: 'spark', label: 'AI & Search' },
+    { id: 'settings', icon: 'settings', label: 'Settings' }
+  ];
+  return `<div class="nav-hover-zone" aria-hidden="true"></div><nav class="bottom-nav-wrap" aria-label="Primary navigation"><div class="bottom-nav">${tabs.map(t => `<button class="nav-item ${state.view===t.id?'active':''}" data-nav="${t.id}" type="button" aria-label="${t.label}" title="${t.label}">${icon(t.icon)}</button>`).join('')}</div></nav>`;
+}
+
+/* =========================================================================
+   VIEW 1: TODAY (Home Screen)
+   ========================================================================= */
+function renderSyncBanner() {
+  if (state.syncBannerDismissed) return '';
+  if (!isSupabaseConfigured()) return '';
+  if (state.aiCloudUser) return '';
+  const hasLocalData = notesManager.getAll().length > 0 || assignmentsManager.getAll().length > 0;
+  if (!hasLocalData) return '';
+  return `
+    <div class="sync-banner" id="sync-signin-banner">
+      <div class="sync-banner-icon">⚠️</div>
+      <div class="sync-banner-text"><b>Not signed in.</b> Notes and assignments are only saved on this device and won't appear on your other devices until you sign in.</div>
+      <div class="sync-banner-actions">
+        <button class="btn-primary" id="sync-banner-signin-btn" type="button">Sign in</button>
+        <button class="btn-ghost" id="sync-banner-dismiss-btn" type="button">Dismiss</button>
+      </div>
+    </div>`;
+}
+
+function renderTodayView() {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const allAssignments = assignmentsManager.getAll().filter(a => a.status !== 'completed' && a.status !== 'graded');
+  const urgentAsg = allAssignments.slice(0, 3);
+  const activeJobs = jobsManager.getActiveJobsCount();
+
+  // Find classes today from authoritative timetable
+  const todayClasses = getClassesForDate(today);
+  const nextClass = todayClasses[0] || null;
+
+  return `
+    ${renderSyncBanner()}
+    <!-- Top Situation Greeting -->
+    <div class="panel" style="padding:18px 20px;">
+      <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;">${dateStr}</div>
+      <h2 style="font-size:1.4rem;margin:4px 0 10px;">Good day, Abdullah</h2>
+      <p style="margin:0;font-size:0.9rem;color:var(--ink);">
+        ${nextClass 
+          ? `Next session: <b>${nextClass.course.code}</b> (${nextClass.schedule.type}) at ${nextClass.schedule.start} · Room ${nextClass.schedule.room || 'Online'}${nextClass.schedule.instructor ? ' · ' + nextClass.schedule.instructor : ''}`
+          : `No scheduled campus lectures today. Great day to tackle coursework and practice.`}
+      </p>
+    </div>
+
+    <!-- Urgent Deadlines -->
+    <div class="panel">
+      <h2><span>Upcoming Assignments (${allAssignments.length})</span><span style="font-size:0.8rem;color:var(--accent);cursor:pointer;" id="see-all-asg">View all</span></h2>
+      ${urgentAsg.length ? `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${urgentAsg.map(a => {
+            const course = courseById(a.courseId);
+            return `
+              <div class="assignment-card" data-asg-id="${a.id}" style="margin:0;cursor:pointer;">
+                <div class="assignment-head">
+                  <div>
+                    <span style="font-size:0.75rem;color:${course?course.accent:'var(--accent)'};font-weight:700;">${course ? course.code : a.courseId.toUpperCase()}</span>
+                    <div class="assignment-title">${a.title}</div>
+                    <div style="font-size:0.75rem;color:var(--muted);">Due ${new Date(a.dueDate).toLocaleDateString()}</div>
+                  </div>
+                  <span class="badge badge-${a.status}">${a.status.replace('_', ' ')}</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : `<div style="color:var(--muted-dim);font-size:0.88rem;padding:8px 0;">No pending assignments due this week.</div>`}
+    </div>
+  `;
+}
+
+/* =========================================================================
+   VIEW 2: CALENDAR (Mobile Date Strip & Agenda)
+   ========================================================================= */
+function renderCalendarView() {
+  const today = new Date();
+  const selectedDate = new Date(state.selectedCalendarDay);
+  const currentMonthYear = selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  
+  // Generate 14-day horizontal strip (7 past, 7 future)
+  const days = [];
+  for (let i = -3; i <= 10; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push(d);
+  }
+
+  const stripHtml = days.map(d => {
+    const key = d.toDateString();
+    const isToday = key === today.toDateString();
+    const isSelected = key === state.selectedCalendarDay;
+    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    const hasClasses = getClassesForDate(d).length > 0;
+    const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
+
+    return `
+      <div class="date-strip-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-daykey="${key}">
+        <span class="dow">${dow}</span>
+        <span class="num">${d.getDate()}</span>
+        <div class="month-cell-dots" style="position:static;margin-top:2px;">
+          ${hasClasses ? '<span class="cell-dot class-dot"></span>' : ''}
+          ${hasAsg ? '<span class="cell-dot asg-dot"></span>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Find assignments and classes for the selected day via pure timetable resolver
+  const dayClasses = getClassesForDate(selectedDate);
+
+  const dayAssignments = assignmentsManager.getAll().filter(a => {
+    return new Date(a.dueDate).toDateString() === state.selectedCalendarDay;
+  });
+
+  const calendarSelectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  return `
+    <div class="panel" style="padding:16px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 4px;">
+        <h2 style="margin:0;font-size:1.15rem;">${currentMonthYear}</h2>
+        <button class="btn-ghost" id="open-month-cal-btn" style="font-size:0.75rem;padding:4px 10px;min-height:30px;">View 30 Days →</button>
+      </div>
+      
+      <div class="date-strip">${stripHtml}</div>
+
+      <div class="dim-divider" style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
+        <span style="font-weight:600;font-size:0.88rem;">${calendarSelectedDateStr}</span>
+        <button class="btn-primary" id="add-deadline-btn" style="min-height:30px;font-size:0.75rem;padding:0 12px;">+ Add Deadline</button>
+      </div>
+
+      <div class="agenda-list">
+        ${dayClasses.map(c => `
+          <div class="agenda-item" style="--item-color:${c.course.accent};cursor:pointer;" data-agenda-course-id="${c.course.id}">
+            <div class="agenda-time">${c.schedule.start}${c.schedule.end ? '<br><span style="color:var(--muted-dim);font-size:0.7rem;">' + c.schedule.end + '</span>' : ''}</div>
+            <div class="agenda-main">
+              <div class="agenda-course">${c.course.code}</div>
+              <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
+              <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
+            </div>
+          </div>
+        `).join('')}
+
+        ${dayAssignments.map(a => {
+          const course = courseById(a.courseId);
+          return `
+            <div class="agenda-item" style="--item-color:${course?course.accent:'var(--accent-3)'};cursor:pointer;" data-agenda-asg-id="${a.id}">
+              <div class="agenda-time">Due Date</div>
+              <div class="agenda-main">
+                <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
+                <div class="agenda-title">📋 ${a.title}</div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+
+        ${!dayClasses.length && !dayAssignments.length ? `
+          <div style="color:var(--muted-dim);text-align:center;padding:24px 10px;font-size:0.88rem;">
+            No campus lectures or assignment deadlines on this date.
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   VIEW 3: COURSES HUB
+   ========================================================================= */
+function renderCoursesHubView() {
+  const cards = COURSES.map(c => {
+    const asgCount = assignmentsManager.getByCourse(c.id).length;
+    const notesCount = notesManager.getByCourse(c.id).length;
+    const matsCount = (c.cloudMaterials || []).length;
+
+    return `
+      <div class="course-card" data-course-id="${c.id}" style="--card-color:${c.accent}">
+        <div class="code">${c.code}</div>
+        <div class="name">${c.name}</div>
+        <div class="instr">${c.instructor && c.instructor !== '—' ? c.instructor : 'Slate Online / Async'}</div>
+        <div class="course-card-footer">
+          <span style="color:${c.accent};font-weight:600;">${matsCount} Docs · ${asgCount} Tasks</span>
+          <span class="icon-inline" style="color:var(--muted);">${icon('chevronRight')}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;font-size:1.3rem;">Courses & Syllabi</h2>
+      <div style="font-size:0.82rem;color:var(--muted);">${COURSES.length} Enrolled</div>
+    </div>
+    <div class="course-grid">${cards}</div>
+  `;
+}
+
+/* =========================================================================
+   VIEW 3B: COURSE DETAIL (5 Clean Tabs)
+   ========================================================================= */
+function renderCourseDetailView(c) {
+  if (!c) return renderCoursesHubView();
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'materials', label: 'Materials' },
+    { id: 'assignments', label: 'Assignments' },
+    { id: 'notes', label: 'Notes' }
+  ];
+
+  let bodyHtml = '';
+
+  if (state.courseTab === 'overview') {
+    const courseAsgs = assignmentsManager.getByCourse(c.id);
+    const mats = c.cloudMaterials || [];
+    bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="surface-content" style="padding:16px;">
+          <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Instructor & Classroom</div>
+          <div style="font-size:1.05rem;font-weight:600;margin-top:2px;">${c.instructor || 'Instructor'}</div>
+          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;">• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'C328'}</div>`).join('')}
+        </div>
+
+        ${c.evaluation ? `
+          <div class="surface-content" style="padding:16px;">
+            <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:8px;">Grading Weight</div>
+            ${c.evaluation.map(([k, v]) => `
+              <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.88rem;border-bottom:1px solid var(--hairline);">
+                <span>${k}</span><b style="color:${c.accent}">${v}</b>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  } else if (state.courseTab === 'materials') {
+    const routed = routeCourseContent(c);
+    const mats = routed.materials;
+    bodyHtml = mats.length ? `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${mats.map(m => {
+          const json = m.content_json || {};
+          const questions = json.practice_questions || [];
+          const concepts = json.key_concepts || [];
+          return `
+            <div class="lecture-block" style="background:rgba(255,255,255,0.03);padding:16px;border-radius:var(--radius-md);">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                <div>
+                  <h3 style="margin:0 0 4px;font-size:1.05rem;">${m.title}</h3>
+                  <div style="font-size:0.75rem;color:var(--muted);">${m.moduleTitle || 'Materials'} · ${m.type}</div>
+                </div>
+                ${m.file_url ? `
+                  <a href="${m.file_url}" target="_blank" rel="noopener noreferrer" class="icon-btn sm" title="Download Document" style="text-decoration:none;">
+                    ${icon('download')}
+                  </a>
+                ` : ''}
+              </div>
+
+              ${json.summary ? `
+                <div style="background:rgba(255,255,255,0.04);border-left:3px solid ${c.accent};padding:10px 12px;border-radius:4px;margin:10px 0;font-size:0.88rem;">
+                  <b>AI Summary:</b> ${json.summary}
+                </div>
+              ` : ''}
+
+              ${concepts.length ? `
+                <div style="margin-top:10px;">
+                  <div style="font-size:0.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Key Concepts</div>
+                  <ul class="concept-list">
+                    ${concepts.map(con => `<li>${con}</li>`).join('')}
+                  </ul>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : `
+      <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
+        <p>No document files uploaded for ${c.code} yet.</p>
+        <button class="btn-primary" id="trigger-upload-modal" style="margin-top:8px;">Upload Course Material</button>
+      </div>
+    `;
+  } else if (state.courseTab === 'assignments') {
+    const courseAsgs = assignmentsManager.getByCourse(c.id);
+    const routed = routeCourseContent(c);
+    const assignmentFolders = routed.assignmentFolders || [];
+    bodyHtml = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:0.9rem;font-weight:600;">Assignments & Reports</span>
+        <button class="btn-primary" id="add-assignment-btn" style="min-height:36px;font-size:0.8rem;padding:0 14px;">+ New Task</button>
+      </div>
+      ${assignmentFolders.map(folder => `
+        <div class="assignment-folder-card">
+          <div class="assignment-folder-head">
+            <div>
+              <div class="assignment-folder-kicker">Assignment Folder</div>
+              <h3>${folder.folderName}</h3>
+            </div>
+            <span class="badge">${folder.items.length} files</span>
+          </div>
+          <div class="assignment-folder-items">
+            ${folder.items.map(item => `
+              <div class="assignment-folder-item">
+                <div class="assignment-file-icon">${icon('doc')}</div>
+                <div class="assignment-file-meta">
+                  <div class="assignment-file-title">${item.title}</div>
+                  <div class="assignment-file-sub">${item.material?.type || item.type}${item.material?.moduleTitle ? ` · ${item.material.moduleTitle}` : ''}</div>
+                </div>
+                ${item.material?.file_url ? `<a class="icon-btn sm" href="${item.material.file_url}" target="_blank" rel="noopener noreferrer" aria-label="Open ${item.title}" title="Open document">${icon('download')}</a>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+      ${courseAsgs.length ? `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${courseAsgs.map(a => `
+            <div class="assignment-card" style="cursor:pointer;" data-open-asg-id="${a.id}">
+              <div class="assignment-head">
+                <div>
+                  <div class="assignment-title">${a.title}</div>
+                  <div style="font-size:0.78rem;color:var(--muted);">Due: ${new Date(a.dueDate).toLocaleDateString()}</div>
+                </div>
+                <span class="badge badge-${a.status}">${a.status.replace('_', ' ')}</span>
+              </div>
+              ${a.description ? `<div style="font-size:0.85rem;color:var(--ink);margin:8px 0;">${a.description}</div>` : ''}
+              ${a.requirementsChecklist && a.requirementsChecklist.length ? `
+                <ul class="assignment-checklist">
+                  ${a.requirementsChecklist.map(ch => `
+                    <li class="checklist-item ${ch.done ? 'done' : ''}" data-asg-check="${a.id}" data-check-id="${ch.id}">
+                      <input type="checkbox" ${ch.done ? 'checked' : ''} style="cursor:pointer;">
+                      <span>${ch.text}</span>
+                    </li>
+                  `).join('')}
+                </ul>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div style="text-align:center;padding:32px 14px;color:var(--muted-dim);border:1px dashed var(--hairline);border-radius:var(--radius-md);">
+          No assignments recorded yet for this course.
+        </div>
+      `}
+    `;
+  } else if (state.courseTab === 'notes') {
+    const courseNotes = notesManager.getByCourse(c.id);
+    bodyHtml = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:0.9rem;font-weight:600;">Course Notes & Transcripts</span>
+        <button class="btn-primary" id="add-course-note-btn" style="min-height:36px;font-size:0.8rem;padding:0 14px;">+ Note</button>
+      </div>
+      ${courseNotes.length ? `
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${courseNotes.map(n => `
+            <div class="surface-content" style="padding:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <h3 style="margin:0 0 4px;font-size:1rem;">${n.title}</h3>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:0.72rem;color:var(--muted);">${new Date(n.updatedAt).toLocaleDateString()}</span>
+                  <button class="icon-btn sm note-delete-btn" data-delete-note="${n.id}" type="button" aria-label="Delete note" title="Delete note">${icon('trash')}</button>
+                </div>
+              </div>
+              <div style="font-size:0.88rem;line-height:1.6;margin:8px 0;white-space:pre-wrap;">${n.content}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div style="text-align:center;padding:32px 14px;color:var(--muted-dim);border:1px dashed var(--hairline);border-radius:var(--radius-md);">
+          No tutor notes yet for this course.
+        </div>
+      `}
+    `;
+  }
+
+  return `
+    <div style="--course-accent:${c.accent}">
+      <div class="course-topbar">
+        <div class="backlink" id="course-back-btn">${icon('arrowLeft')} All Courses</div>
+      </div>
+      <div class="course-header">
+        <h2 class="headfont">${c.code} — ${c.name}</h2>
+        <div class="meta">${c.instructor || 'Instructor'}</div>
+      </div>
+      <div class="course-tabs">
+        ${tabs.map(t => `
+          <div class="course-tab ${state.courseTab === t.id ? 'active' : ''}" data-course-tab="${t.id}">
+            ${t.label}
+          </div>
+        `).join('')}
+      </div>
+      <div class="panel">${bodyHtml}</div>
+    </div>
+  `;
+}
+
+/* ========================================================================
+   VIEW 4: UNIFIED AI + SEARCH
+   ======================================================================== */
+function localFileKind(mime = '') {
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf') return 'pdf';
+  return 'file';
+}
+
+const aiObjectUrlCache = new WeakMap();
+function localAttachmentUrl(file) {
+  if (!file) return '';
+  if (!aiObjectUrlCache.has(file)) aiObjectUrlCache.set(file, URL.createObjectURL(file));
+  return aiObjectUrlCache.get(file);
+}
+
+function renderAiMediaAttachment(a, pending = false) {
+  const mime = a.mimeType || a.mime_type || '';
+  const kind = a.kind || localFileKind(mime);
+  const url = a.url || (pending && a instanceof File ? localAttachmentUrl(a) : '');
+  const label = escapeHtml(a.name || 'Attachment');
+  if (!url) return `<div class="ai-media-file"><span>${icon('doc')}</span><span>${label}</span></div>`;
+  if (kind === 'image') return `<figure class="ai-media ai-media-image"><img src="${escapeHtml(url)}" alt="${label}" loading="lazy"><figcaption>${label}</figcaption></figure>`;
+  if (kind === 'video') return `<figure class="ai-media ai-media-video"><video src="${escapeHtml(url)}" controls playsinline preload="metadata"></video><figcaption>${label}</figcaption></figure>`;
+  if (kind === 'audio') return `<figure class="ai-media ai-media-audio"><audio src="${escapeHtml(url)}" controls preload="metadata"></audio><figcaption>${label}</figcaption></figure>`;
+  return `<a class="ai-media-file" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"><span>${icon('doc')}</span><span>${label}</span></a>`;
+}
+
+function renderAiMessageAttachments(attachments = []) {
+  return attachments.length ? `<div class="ai-message-media-grid">${attachments.map(a => renderAiMediaAttachment(a)).join('')}</div>` : '';
+}
+
+function renderAiPendingAttachments(files = []) {
+  return files.length ? `<div class="ai-pending-media">${files.map((f,i)=>`<div class="ai-pending-media-card">${renderAiMediaAttachment(f, true)}<button type="button" data-ai-remove-file="${i}" aria-label="Remove ${escapeHtml(f.name)}">${icon('close')}</button></div>`).join('')}</div>` : '';
+}
+
+function renderAiSearchResultsView(q) {
+  const results = performUniversalSearch(q, COURSES);
+  state.aiSearchResultsCount = results.length;
+  if (!q) return `<div class="ai-discovery"><div class="ai-discovery-mark">${icon('spark')}</div><h2>Search School Center</h2><p>Courses, schedules, assignments, notes, materials, and concepts appear here as you type.</p></div>`;
+  if (!results.length) return `<div class="ai-no-results"><div class="ai-no-results-icon">${icon('spark')}</div><div><strong>Nothing in School Center matches “${escapeHtml(q)}”.</strong><p>The same composer is now ready to ask the AI about it.</p></div></div>`;
+  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
+}
+
+function renderAiConversation() {
+  const messages = (state.aiChatMessages || []).filter(Boolean);
+  if (!messages.length) return `<div class="ai-empty-state"><div class="ai-empty-symbol">${icon('spark')}</div><h2>What can I help with?</h2><p>Ask about your classes, assignments, notes, schedules, uploaded files, or anything in School Center.</p></div>`;
+  return messages.map(m => {
+    if (m.isThinking) return `<div class="ai-message assistant thinking"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div>`;
+    const sender = m.sender === 'user' ? 'user' : 'assistant';
+    const isEditing = state.aiEditingMessageId === m.id;
+    const text = m.text ? formatAiResponse(m.text) : '';
+    const controls = m.id ? `<div class="ai-message-controls">
+        ${sender === 'user' && !isEditing ? `<button type="button" class="ai-msg-action" data-ai-edit="${m.id}" aria-label="Edit message" title="Edit">${icon('pencil')}</button>` : ''}
+        <button type="button" class="ai-msg-action" data-ai-delete="${m.id}" aria-label="Delete message" title="Delete">${icon('trash')}</button>
+      </div>` : '';
+    const body = isEditing
+      ? `<div class="ai-message-edit"><textarea id="ai-edit-input-${m.id}" class="ai-composer-input">${escapeHtml(m.text || '')}</textarea><div class="ai-message-edit-actions"><button type="button" class="btn-ghost sm" data-ai-cancel-edit="${m.id}">Cancel</button><button type="button" class="btn-primary sm" data-ai-save-edit="${m.id}">Save</button></div></div>`
+      : `<div class="ai-message-body">${text}</div>`;
+    return `<article class="ai-message ${sender}">${renderAiMessageAttachments(m.attachments || [])}${body}<div class="ai-message-foot"><time>${new Date(m.createdAt || Date.now()).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}</time>${controls}</div></article>`;
+  }).join('');
+}
+
+function renderUnifiedAiView() {
+  const q = (state.searchQuery || '').trim();
+  const directResults = q ? performUniversalSearch(q, COURSES) : [];
+  const hasDirectResults = directResults.length > 0;
+  const cloudLabel = state.aiCloudConnected ? 'Cloud history' : 'Local history';
+  return `
+    <section class="ai-fullscreen-view" aria-label="AI and Search workspace">
+      <div class="ai-fullscreen-inner">
+        <div class="ai-page-head">
+          <div><div class="eyebrow">School Center</div><h2 class="headfont">AI & Search</h2></div>
+          <div class="ai-page-head-right">
+            <div class="ai-page-status"><span class="ai-connection-dot ${state.aiIsThinking || state.aiTranscribing ? 'busy' : state.aiConnectionState || 'idle'}"></span>${cloudLabel}</div>
+            ${(state.aiChatMessages || []).length ? `<button type="button" class="icon-btn sm" id="ai-clear-chat-btn" aria-label="Clear conversation" title="Clear conversation">${icon('trash')}</button>` : ''}
+          </div>
+        </div>
+        <div class="ai-page-body" id="ai-page-body">${hasDirectResults ? renderAiSearchResultsView(q) : (q ? `${renderAiSearchResultsView(q)}${renderAiConversation()}` : renderAiConversation())}</div>
+        ${renderAiPendingAttachments(state.aiAttachments || [])}
+        <div class="ai-composer-shell ai-page-composer">
+          <div class="ai-composer">
+            <button class="ai-composer-icon" id="ai-attach-btn" type="button" aria-label="Attach files" title="Attach files">${icon('plus')}</button>
+            <textarea id="ai-chat-input" class="ai-composer-input" rows="1" placeholder="Search School Center or ask AI…">${escapeHtml(state.searchQuery || '')}</textarea>
+            <button class="ai-composer-icon ${state.aiTranscribing ? 'recording' : ''}" id="ai-mic-btn" type="button" aria-label="${state.aiTranscribing ? 'Stop transcription' : 'Transcribe microphone'}" title="${state.aiTranscribing ? 'Stop transcription' : 'Transcribe microphone'}">${icon('mic')}</button>
+            <button class="ai-send-btn" id="ai-chat-send" type="button" aria-label="Send message" title="Send message">${icon('arrowUp')}</button>
+          </div>
+          <div class="ai-live-transcript" id="ai-live-transcript">${state.aiTranscribing ? 'Listening…' : ''}</div>
+          <input id="ai-file-input" type="file" multiple accept="${escapeHtml(GEMINI_FILE_ACCEPT)}" hidden>
+        </div>
+      </div>
+    </section>`;
+}
+
+/* =========================================================================
+   VIEW 4: SETTINGS (Search, Sync, Appearance & AI Connection)
+   ========================================================================= */
+function renderSettingsView() {
+  const currentSupabaseUrl = localStorage.getItem('sc_supabase_url') || document.querySelector('meta[name="supabase-url"]')?.content || '';
+  const currentSupabaseKey = localStorage.getItem('sc_supabase_anon_key') || document.querySelector('meta[name="supabase-anon-key"]')?.content || '';
+  const activeJobs = jobsManager.getActiveJobsCount();
+  const failedJobs = jobsManager.getFailedJobsCount();
+  const authEmail = state.aiCloudUser?.email || '';
+  // IMPORTANT: "Connected" must reflect real sign-in, not just that Supabase
+  // credentials exist. Notes/Assignments only sync to the cloud once a user
+  // is actually signed in — showing "Connected" before that point is what
+  // previously made it look like sync was working when it never started.
+  let syncState;
+  let syncDot;
+  if (!isSupabaseConfigured()) {
+    syncState = 'Local only — cloud not configured';
+    syncDot = 'idle';
+  } else if (state.dataSyncLastError) {
+    syncState = 'Sync error — see below';
+    syncDot = 'attention';
+  } else if (failedJobs > 0) {
+    syncState = 'Needs attention';
+    syncDot = 'attention';
+  } else if (!authEmail) {
+    syncState = 'Not signed in — notes stay on this device only';
+    syncDot = 'attention';
+  } else if (activeJobs > 0) {
+    syncState = `${activeJobs} processing`;
+    syncDot = 'busy';
+  } else {
+    syncState = `Connected as ${authEmail}`;
+    syncDot = 'ready';
+  }
+  const customAccent = localStorage.getItem('sc_custom_accent') || currentTheme.accent;
+  return `
+    <div class="settings-page">
+      <div class="settings-title-row"><div><div class="eyebrow">School Center</div><h2 class="headfont">Settings</h2><p>Cloud sync, account, appearance, and AI connection.</p></div></div>
+
+      <div class="panel settings-card">
+        <div class="section-head-row"><div><h3 class="headfont">Cloud Sync</h3><div class="section-sub">Assignments, notes, materials, and AI history can stay synchronized across devices — but only once you're signed in below.</div></div><span class="settings-sync-status"><span class="ai-connection-dot ${syncDot}"></span>${syncState}</span></div>
+        ${!authEmail ? `<div class="sync-warning-inline">⚠️ You are not signed in, so anything you create in Notes or Assignments right now is saved on <b>this device only</b>. Sign in with the same email below on every device to make it sync.</div>` : ''}
+        ${state.dataSyncLastError ? `<div class="sync-warning-inline sync-warning-error">Last sync attempt failed: ${escapeHtml(state.dataSyncLastError)}</div>` : ''}
+        <div class="settings-sync-actions"><button class="btn-primary" id="manual-sync-btn" type="button">Sync now</button><button class="btn-ghost" id="open-sync-details-btn" type="button">Background activity</button></div>
+        <details class="settings-advanced"><summary>Cloud connection</summary><div class="field-label">Supabase Project URL</div><input type="text" id="supabase-url-field" class="search-input" value="${escapeHtml(currentSupabaseUrl)}"><div class="field-label">Supabase Publishable / Anon Key</div><input type="password" id="supabase-key-field" class="search-input" value="${escapeHtml(currentSupabaseKey)}"><button class="btn-ghost" id="save-cloud-settings-btn" type="button">Save cloud config</button></details>
+      </div>
+
+      <div class="panel settings-card">
+        <h3 class="headfont">Account &amp; cross-device sync</h3>
+        <div class="section-sub">Sign in once with the same email on every device. This is what makes Notes, Assignments, and your AI conversation history follow you between phone, laptop, or any other device — without it, everything stays local to each device.</div>
+        ${authEmail ? `
+          <div class="settings-account-row"><div><b>${escapeHtml(authEmail)}</b><div class="settings-account-state"><span class="ai-connection-dot ready"></span> Signed in — Notes, Assignments, and AI history sync automatically</div></div><button class="btn-ghost" id="ai-signout-btn" type="button">Sign out</button></div>
+        ` : `
+          <div class="settings-auth-row"><input type="email" id="ai-signin-email" class="search-input" placeholder="you@example.com" autocomplete="email"><button class="btn-primary" id="ai-signin-btn" type="button">Email me a sign-in link</button></div>
+          <div class="settings-account-help">Click the link that arrives by email on <b>this</b> device to finish signing in, then repeat with the <b>same email</b> on every other device you use. Nothing syncs until you've done this on at least two devices.</div>
+        `}
+      </div>
+
+      <div class="panel settings-card">
+        <h3 class="headfont">Appearance</h3>
+        <div class="field-label">Theme</div>
+        <div class="theme-row" id="theme-row">${Object.entries(THEME_PRESETS).map(([k,t])=>`<button class="swatch ${currentTheme.label===t.label && !localStorage.getItem('sc_custom_accent')?'active':''}" data-theme-key="${k}" type="button" style="background:linear-gradient(135deg, ${t.accent}, ${t.lava[1]})" title="${t.label}" aria-label="${t.label}"></button>`).join('')}<label class="swatch custom-swatch ${localStorage.getItem('sc_custom_accent')?'active':''}" title="Custom accent" aria-label="Custom accent"><input type="color" id="accent-color-input" value="${customAccent}"></label></div>
+        <div class="theme-custom-row"><div><div class="field-label">Accent color</div><div class="section-sub">Used consistently for navigation, focus states, buttons, links, and AI accents.</div></div><input type="color" id="accent-color-input-inline" value="${customAccent}" aria-label="Choose accent color"></div>
+        <div class="field-label">Lava lamp opacity</div><input type="range" min="0" max="1" step="0.05" value="${localStorage.getItem('sc_lava_opacity') || '1'}" id="lava-slider" style="width:100%;accent-color:var(--accent);">
+      </div>
+
+      <div class="panel settings-card">
+        <h3 class="headfont">Gemini</h3><p class="section-sub">Your Gemini API key stays in this browser. Live microphone transcription uses the secure Supabase token function when cloud sync is connected.</p>
+        <div class="field-label">Gemini API key</div><input type="password" id="more-gemini-key-field" class="search-input" value="${escapeHtml(getGeminiApiKey())}" autocomplete="off" placeholder="Paste Gemini API key">
+        <div class="settings-sync-actions"><button class="btn-primary" id="save-more-ai-key-btn" type="button">Save key</button><button class="btn-ghost" id="test-gemini-btn" type="button">Test connection</button></div>
+      </div>
+    </div>`;
+}
+function renderSettingsSearchResults(){
+  const results=performUniversalSearch(state.searchQuery, COURSES);
+  return `<div class="settings-search-results">${results.length?results.map(r=>`<button class="settings-search-result" data-search-hit="${r.type}" data-course="${r.courseId||''}" data-tab="${r.targetTab||'overview'}" type="button"><span class="badge">${escapeHtml(r.badge)}</span><span class="settings-search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle)}</small></span></button>`).join(''):'<div class="empty-inline">No results.</div>'}</div>`;
+}
+
+/* =========================================================================
+   BOTTOM SHEETS: JOBS DRAWER
+   ========================================================================= */
+function renderJobsDrawer() {
+  const jobs = jobsManager.jobs;
+  return `
+    <div class="sheet-backdrop ${state.jobsDrawerOpen ? 'open' : ''}" id="jobs-drawer-backdrop">
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-head">
+          <h3 class="headfont">Background Processing Queue</h3>
+          <div class="icon-btn sm" id="close-jobs-drawer">${icon('close')}</div>
+        </div>
+        <div class="sheet-body">
+          ${jobs.length ? jobs.map(j => `
+            <div class="surface-content" style="padding:14px;margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <b style="font-size:0.92rem;">${j.title}</b>
+                <span class="badge badge-${j.status}">${j.status}</span>
+              </div>
+              <div style="font-size:0.8rem;color:var(--muted);margin:4px 0;">${j.message}</div>
+              <div style="height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;margin-top:8px;">
+                <div style="width:${j.progress}%;height:100%;background:var(--accent);transition:width .2s ease;"></div>
+              </div>
+              ${j.status === 'failed' && j.retryable ? `
+                <button class="btn-ghost" data-retry-job="${j.id}" style="min-height:30px;font-size:0.75rem;margin-top:8px;">Retry Task</button>
+              ` : ''}
+            </div>
+          `).join('') : `<div style="text-align:center;padding:24px;color:var(--muted-dim);">No active or queued background tasks.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+/* =========================================================================
+   DRAWER: DYNAMIC SYNC & CLOUD STATUS
+   ========================================================================= */
+
+/* Restored core modal renderers retained from the stable app shell. */
+function renderAssignmentModal() {
+  if (!state.assignmentModalOpen) return '';
+  const preset = state.assignmentModalPreset || {};
+  const courseOptions = COURSES.map(c =>
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId) ? 'selected' : ''}>${c.code} — ${c.name}</option>`
+  ).join('');
+  const todayISO = new Date().toISOString().split('T')[0];
+  const presetDate = preset.dueDate ? new Date(preset.dueDate).toISOString().split('T')[0] : todayISO;
+
+  return `
+    <div class="modal-overlay open" id="assignment-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 class="headfont">New Assignment</h3>
+          <div class="icon-btn sm" id="close-assignment-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="field-label">Title</div>
+          <input type="text" id="asg-title-input" class="modal-input" placeholder="e.g. Assignment 2 — Determinants" autofocus>
+
+          <div class="field-label">Course</div>
+          <select id="asg-course-select" class="modal-input">${courseOptions}</select>
+
+          <div class="modal-row">
+            <div style="flex:1;">
+              <div class="field-label">Due Date</div>
+              <input type="date" id="asg-due-input" class="modal-input" value="${presetDate}">
+            </div>
+            <div style="flex:1;">
+              <div class="field-label">Priority</div>
+              <select id="asg-priority-select" class="modal-input">
+                <option value="high">🔴 High</option>
+                <option value="medium" selected>🟡 Medium</option>
+                <option value="low">🟢 Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field-label">Description (optional)</div>
+          <textarea id="asg-desc-input" class="modal-input modal-textarea" placeholder="Describe the deliverables or submission requirements..."></textarea>
+
+          <div class="field-label">Requirements Checklist</div>
+          <div id="asg-checklist-container" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="asg-checklist-new" class="modal-input" placeholder="Add checklist item..." style="flex:1;">
+            <button class="btn-ghost" id="asg-checklist-add-btn" style="min-height:40px;padding:0 14px;">Add</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-assignment-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="save-assignment-btn">Create Assignment</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: ASSIGNMENT DETAIL
+   ========================================================================= */
+
+function renderAssignmentDetailModal() {
+  if (!state.assignmentDetailId) return '';
+  const a = assignmentsManager.getById(state.assignmentDetailId);
+  if (!a) return '';
+  const course = courseById(a.courseId);
+
+  const statusOptions = ['not_started','in_progress','submitted','completed','graded'].map(s =>
+    `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s.replace(/_/g, ' ')}</option>`
+  ).join('');
+
+  return `
+    <div class="modal-overlay open" id="asg-detail-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <div>
+            <span style="font-size:0.75rem;font-weight:700;color:${course ? course.accent : 'var(--accent)'}">${course ? course.code : ''}</span>
+            <h3 class="headfont" style="margin:2px 0 0;">${a.title}</h3>
+          </div>
+          <div class="icon-btn sm" id="close-asg-detail-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="modal-row" style="margin-bottom:12px;">
+            <div style="flex:1;">
+              <div class="field-label">Due Date</div>
+              <div style="font-size:0.9rem;">${new Date(a.dueDate).toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' })}</div>
+            </div>
+            <div style="flex:1;">
+              <div class="field-label">Status</div>
+              <select id="asg-detail-status" class="modal-input" style="margin-top:4px;">${statusOptions}</select>
+            </div>
+          </div>
+
+          ${a.description ? `<div style="font-size:0.88rem;color:var(--ink);line-height:1.6;padding:10px;background:rgba(255,255,255,0.04);border-radius:var(--radius-sm);margin-bottom:12px;">${a.description}</div>` : ''}
+
+          ${a.requirementsChecklist && a.requirementsChecklist.length ? `
+            <div class="field-label">Checklist</div>
+            <ul class="assignment-checklist" style="margin-bottom:12px;">
+              ${a.requirementsChecklist.map(ch => `
+                <li class="checklist-item ${ch.done ? 'done' : ''}" data-asg-check="${a.id}" data-check-id="${ch.id}">
+                  <input type="checkbox" ${ch.done ? 'checked' : ''} style="cursor:pointer;">
+                  <span>${ch.text}</span>
+                </li>
+              `).join('')}
+            </ul>
+          ` : ''}
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn-ghost" data-asg-ai="rewrite" data-asg-id="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;">✨ AI Rewrite</button>
+            <button class="btn-ghost" id="asg-detail-delete-btn" data-asg-del="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;color:var(--accent-3);">🗑 Delete</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-asg-detail-modal-cancel">Close</button>
+          <button class="btn-primary" id="update-asg-status-btn" data-asg-id="${a.id}">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: NOTE EDITOR
+   ========================================================================= */
+
+function renderNoteModal() {
+  if (!state.noteModalOpen) return '';
+  const preset = state.noteModalPreset || {};
+  const courseOptions = [{ id: '', code: 'No Course', name: '' }, ...COURSES].map(c =>
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' — ' + c.name : ''}</option>`
+  ).join('');
+
+  return `
+    <div class="modal-overlay open" id="note-modal-overlay">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 class="headfont">New Note</h3>
+          <div class="icon-btn sm" id="close-note-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body">
+          <div class="field-label">Title</div>
+          <input type="text" id="note-title-input" class="modal-input" placeholder="e.g. Week 3 Lecture — Vector Spaces" autofocus>
+
+          <div class="field-label">Course</div>
+          <select id="note-course-select" class="modal-input">${courseOptions}</select>
+
+          <div class="field-label">Content</div>
+          <textarea id="note-content-input" class="modal-input modal-textarea" style="min-height:140px;" placeholder="Write your lecture notes, ideas, or key concepts here..."></textarea>
+
+          <div class="field-label" style="margin-top:4px;">Tags (comma-separated)</div>
+          <input type="text" id="note-tags-input" class="modal-input" placeholder="e.g. eigenvalues, exam, Week 4">
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" id="close-note-modal-cancel">Cancel</button>
+          <button class="btn-primary" id="save-note-btn">Save Note</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: FLASHCARDS HUB
+   ========================================================================= */
+
+function renderFlashcardsModal() {
+  if (!state.flashcardsModalOpen) return '';
+
+  // Gather cards from all courses' lectures + key concepts
+  const allCards = [];
+  COURSES.forEach(c => {
+    (c.lectures || []).forEach(lec => {
+      (lec.concepts || []).forEach(([term, def]) => {
+        allCards.push({ front: term, back: def, course: c.code, color: c.accent });
+      });
+    });
+  });
+
+  // Also include flashcard AI outputs from notes
+  notesManager.getAll().forEach(n => {
+    if (n.aiGenerated && n.aiGenerated.flashcards) {
+      try {
+        const parsed = Array.isArray(n.aiGenerated.flashcards)
+          ? n.aiGenerated.flashcards
+          : JSON.parse(n.aiGenerated.flashcards);
+        (parsed || []).forEach(fc => {
+          if (fc.front && fc.back) allCards.push({ front: fc.front, back: fc.back, course: 'Notes', color: 'var(--accent-2)' });
+        });
+      } catch(e) {}
+    }
+  });
+
+  if (allCards.length === 0) {
+    return `
+      <div class="modal-overlay open" id="flashcards-modal-overlay">
+        <div class="modal-box" style="text-align:center;padding:32px;">
+          <h3 class="headfont">Flashcards Hub</h3>
+          <p style="color:var(--muted);font-size:0.9rem;margin:16px 0;">No flashcards available yet. Upload course materials or generate AI flashcards from your notes first.</p>
+          <button class="btn-primary" id="close-flashcards-modal">Got it</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const idx = Math.max(0, Math.min(state.flashcardIndex, allCards.length - 1));
+  const card = allCards[idx];
+
+  return `
+    <div class="modal-overlay open" id="flashcards-modal-overlay">
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-head">
+          <h3 class="headfont">Flashcards Hub</h3>
+          <div class="icon-btn sm" id="close-flashcards-modal">${icon('close')}</div>
+        </div>
+        <div class="modal-body" style="text-align:center;">
+          <div style="font-size:0.72rem;font-weight:700;color:${card.color};text-transform:uppercase;margin-bottom:8px;">${card.course}</div>
+          <div style="font-size:0.8rem;color:var(--muted);margin-bottom:4px;">Card ${idx + 1} of ${allCards.length}</div>
+
+          <div class="flashcard" id="flashcard-panel">
+            <div class="flashcard-front" id="flashcard-front">
+              <div class="flashcard-label">Term</div>
+              <div class="flashcard-term">${card.front}</div>
+            </div>
+            <div class="flashcard-back" id="flashcard-back" style="display:none;">
+              <div class="flashcard-label">Definition</div>
+              <div class="flashcard-def">${card.back}</div>
+            </div>
+          </div>
+
+          <button class="btn-ghost" id="flip-card-btn" style="margin:12px 0;min-height:38px;padding:0 20px;">Flip Card</button>
+
+          <div style="display:flex;justify-content:center;gap:12px;">
+            <button class="btn-ghost" id="fc-prev-btn" style="min-height:38px;padding:0 18px;" ${idx === 0 ? 'disabled' : ''}>← Prev</button>
+            <button class="btn-ghost" id="fc-next-btn" style="min-height:38px;padding:0 18px;" ${idx >= allCards.length - 1 ? 'disabled' : ''}>Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: 30-DAY MONTH CALENDAR (Full-Screen Dedicated Experience)
+   ========================================================================= */
+
+function renderMonthCalendarModal() {
+  if (!state.monthCalendarOpen) return '';
+
+  const year = state.monthCalendarYear;
+  const month = state.monthCalendarMonth; // 0..11
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const monthTitle = `${monthNames[month]} ${year}`;
+
+  const firstDayOfWeek = new Date(year, month, 1).getDay(); // 0..6
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells = [];
+
+  // Trailing days from previous month
+  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+    const dayNum = daysInPrevMonth - i;
+    const d = new Date(year, month - 1, dayNum, 12, 0, 0);
+    cells.push({ num: dayNum, date: d, isAdjacent: true });
+  }
+
+  // Current month days
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month, d, 12, 0, 0);
+    cells.push({ num: d, date: dateObj, isAdjacent: false });
+  }
+
+  // Leading days into next month to complete rows of 7
+  const remaining = 7 - (cells.length % 7);
+  if (remaining < 7) {
+    for (let d = 1; d <= remaining; d++) {
+      const dateObj = new Date(year, month + 1, d, 12, 0, 0);
+      cells.push({ num: d, date: dateObj, isAdjacent: true });
+    }
+  }
+
+  const todayStr = new Date().toDateString();
+
+  const cellsHtml = cells.map(c => {
+    const key = c.date.toDateString();
+    const isToday = key === todayStr;
+    const isSelected = key === state.selectedCalendarDay;
+    const classes = getClassesForDate(c.date);
+    const hasClasses = classes.length > 0;
+    const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
+
+    return `
+      <div class="month-cell ${c.isAdjacent ? 'adjacent' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-cal-day="${key}">
+        <span>${c.num}</span>
+        <div class="month-cell-dots">
+          ${hasClasses ? '<span class="cell-dot class-dot"></span>' : ''}
+          ${hasAsg ? '<span class="cell-dot asg-dot"></span>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Selected Day's Agenda
+  const selectedDate = new Date(state.selectedCalendarDay);
+  const selectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const selectedClasses = getClassesForDate(selectedDate);
+  const selectedAssignments = assignmentsManager.getAll().filter(a => new Date(a.dueDate).toDateString() === state.selectedCalendarDay);
+
+  return `
+    <div class="modal-overlay open" id="month-cal-modal-overlay">
+      <div class="modal-box month-cal-container">
+        <div class="month-cal-header">
+          <div class="month-nav-group">
+            <button class="month-nav-btn" id="month-cal-prev">&larr;</button>
+            <button class="month-nav-btn" id="month-cal-today">Today</button>
+            <button class="month-nav-btn" id="month-cal-next">&rarr;</button>
+          </div>
+          <h3 class="month-cal-title">${monthTitle}</h3>
+          <div class="icon-btn sm" id="close-month-cal-modal">${icon('close')}</div>
+        </div>
+
+        <div class="month-grid-weekdays">
+          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+        </div>
+        <div class="month-grid-cells">${cellsHtml}</div>
+
+        <div class="month-cal-agenda">
+          <div style="font-size:0.82rem;font-weight:700;color:var(--ink);margin-bottom:8px;">${selectedDateStr}</div>
+          <div class="agenda-list">
+            ${selectedClasses.map(c => `
+              <div class="agenda-item" style="--item-color:${c.course.accent};">
+                <div class="agenda-time">${c.schedule.start}${c.schedule.end ? '<br><span style="color:var(--muted-dim);font-size:0.7rem;">' + c.schedule.end + '</span>' : ''}</div>
+                <div class="agenda-main">
+                  <div class="agenda-course">${c.course.code}</div>
+                  <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
+                  <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
+                </div>
+              </div>
+            `).join('')}
+
+            ${selectedAssignments.map(a => {
+              const course = courseById(a.courseId);
+              return `
+                <div class="agenda-item" style="--item-color:${course?course.accent:'var(--accent-3)'};">
+                  <div class="agenda-time">Due Date</div>
+                  <div class="agenda-main">
+                    <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
+                    <div class="agenda-title">📋 ${a.title}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+
+            ${!selectedClasses.length && !selectedAssignments.length ? `
+              <div style="color:var(--muted-dim);text-align:center;padding:12px;font-size:0.84rem;">
+                No scheduled sessions or deadlines on this date.
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   MODAL: SPOTLIGHT COMMAND PALETTE SEARCH
+   ========================================================================= */
+
+function renderSpotlightModal() {
+  if (!state.spotlightSearchOpen) return '';
+
+  const q = (state.spotlightQuery || '').trim().toLowerCase();
+  
+  let courseResults = [];
+  let asgResults = [];
+  let noteResults = [];
+  let topicResults = [];
+
+  if (q.length > 0) {
+    courseResults = COURSES.filter(c => 
+      c.code.toLowerCase().includes(q) || 
+      c.name.toLowerCase().includes(q) || 
+      (c.instructor && c.instructor.toLowerCase().includes(q))
+    );
+
+    asgResults = assignmentsManager.getAll().filter(a => 
+      a.title.toLowerCase().includes(q) || 
+      (a.description && a.description.toLowerCase().includes(q))
+    );
+
+    noteResults = notesManager.getAll().filter(n =>
+      n.title.toLowerCase().includes(q) ||
+      (n.content && n.content.toLowerCase().includes(q)) ||
+      (n.tags && n.tags.some(t => t.toLowerCase().includes(q)))
+    );
+
+    COURSES.forEach(c => {
+      (c.syllabus || []).forEach(s => {
+        if (s[2] && s[2].toLowerCase().includes(q)) {
+          topicResults.push({ title: s[2], course: c.code, courseId: c.id });
+        }
+      });
+      (c.lectures || []).forEach(l => {
+        (l.concepts || []).forEach(([term, def]) => {
+          if (term.toLowerCase().includes(q) || def.toLowerCase().includes(q)) {
+            topicResults.push({ title: term, sub: def, course: c.code, courseId: c.id });
+          }
+        });
+      });
+    });
+  }
+
+  const hasAny = courseResults.length || asgResults.length || noteResults.length || topicResults.length;
+
+  return `
+    <div class="modal-overlay open" id="spotlight-modal-overlay">
+      <div class="modal-box spotlight-box">
+        <div class="spotlight-input-wrap">
+          ${icon('search')}
+          <input type="text" id="spotlight-search-input" class="spotlight-input" placeholder="Search courses, assignments, lectures, notes..." value="${state.spotlightQuery || ''}">
+          <div class="icon-btn sm" id="close-spotlight-modal">${icon('close')}</div>
+        </div>
+
+        <div class="spotlight-results">
+          ${!q ? `
+            <div style="color:var(--muted-dim);text-align:center;padding:32px 16px;font-size:0.88rem;">
+              Type to instantly search across courses, deadlines, syllabi, notes, and topics.
+            </div>
+          ` : (hasAny ? `
+            ${courseResults.length ? `
+              <div class="spotlight-section-title">Courses</div>
+              ${courseResults.map(c => `
+                <div class="spotlight-item" data-spotlight-nav="course" data-spotlight-id="${c.id}">
+                  <div class="spotlight-item-main">
+                    <div class="spotlight-item-title">${c.code} — ${c.name}</div>
+                    <div class="spotlight-item-sub">${c.instructor || 'Online'}</div>
+                  </div>
+                  <span class="spotlight-tag" style="color:${c.accent}">Course</span>
+                </div>
+              `).join('')}
+            ` : ''}
+
+            ${asgResults.length ? `
+              <div class="spotlight-section-title">Assignments</div>
+              ${asgResults.map(a => `
+                <div class="spotlight-item" data-spotlight-nav="asg" data-spotlight-id="${a.id}">
+                  <div class="spotlight-item-main">
+                    <div class="spotlight-item-title">📋 ${a.title}</div>
+                    <div class="spotlight-item-sub">Due ${new Date(a.dueDate).toLocaleDateString()} · ${a.status}</div>
+                  </div>
+                  <span class="spotlight-tag">Task</span>
+                </div>
+              `).join('')}
+            ` : ''}
+
+            ${noteResults.length ? `
+              <div class="spotlight-section-title">Notes</div>
+              ${noteResults.map(n => `
+                <div class="spotlight-item" data-spotlight-nav="note" data-spotlight-id="${n.id}">
+                  <div class="spotlight-item-main">
+                    <div class="spotlight-item-title">✍️ ${n.title}</div>
+                    <div class="spotlight-item-sub">${(n.content || '').slice(0, 50)}...</div>
+                  </div>
+                  <span class="spotlight-tag">Note</span>
+                </div>
+              `).join('')}
+            ` : ''}
+
+            ${topicResults.length ? `
+              <div class="spotlight-section-title">Topics & Concepts</div>
+              ${topicResults.slice(0, 5).map(t => `
+                <div class="spotlight-item" data-spotlight-nav="course" data-spotlight-id="${t.courseId}">
+                  <div class="spotlight-item-main">
+                    <div class="spotlight-item-title">💡 ${t.title}</div>
+                    <div class="spotlight-item-sub">${t.course}${t.sub ? ' · ' + t.sub.slice(0, 45) + '...' : ''}</div>
+                  </div>
+                  <span class="spotlight-tag">Concept</span>
+                </div>
+              `).join('')}
+            ` : ''}
+          ` : `
+            <div style="color:var(--muted-dim);text-align:center;padding:32px 16px;font-size:0.88rem;">
+              No matching results found for "${q}".
+            </div>
+          `)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   DRAWER: DYNAMIC SYNC & CLOUD STATUS
+   ========================================================================= */
+
+function renderSyncDrawer() {
+  if (!state.syncDrawerOpen) return '';
+  const isOnline = isSupabaseConfigured();
+  const allJobs = jobsManager.jobs;
+
+  return `
+    <div class="sheet-backdrop open" id="sync-drawer-backdrop">
+      <div class="bottom-sheet" style="max-width:520px;">
+        <div class="sheet-handle"></div>
+        <div class="sheet-head">
+          <h3 class="headfont">Sync & Cloud Health</h3>
+          <div class="icon-btn sm" id="close-sync-drawer">${icon('close')}</div>
+        </div>
+        <div class="sheet-body">
+          <div class="sync-stat-row">
+            <div>
+              <div style="font-weight:700;font-size:0.9rem;">Supabase Cloud Database</div>
+              <div style="font-size:0.75rem;color:var(--muted);">${isOnline ? 'Connected & Active (Realtime)' : 'Offline Local Storage Mode'}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-weight:600;color:${isOnline ? 'var(--accent-2)' : 'var(--accent-amber)'};">
+              <span style="width:8px;height:8px;border-radius:50%;background:currentColor;"></span>
+              ${isOnline ? 'Synced' : 'Local'}
+            </div>
+          </div>
+
+          <div style="font-size:0.8rem;font-weight:700;margin:14px 0 6px;">Background Processing Queue (${allJobs.length})</div>
+          
+          <div class="sync-jobs-list">
+            ${allJobs.length ? allJobs.map(j => `
+              <div class="sync-job-card">
+                <div class="sync-job-head">
+                  <span>${j.title}</span>
+                  <span style="font-size:0.72rem;color:${j.status==='completed'?'var(--accent-2)':(j.status==='failed'?'var(--accent-3)':'var(--accent)')};text-transform:capitalize;">${j.status}</span>
+                </div>
+                ${j.status === 'processing' ? `
+                  <div class="sync-progress-track">
+                    <div class="sync-progress-fill" style="width:${j.progress || 35}%;"></div>
+                  </div>
+                  <div style="font-size:0.72rem;color:var(--muted);">${j.progressText || 'Working...'}</div>
+                ` : ''}
+              </div>
+            `).join('') : `
+              <div style="color:var(--muted-dim);text-align:center;padding:16px;font-size:0.84rem;">
+                No background tasks in queue. All systems operating normally.
+              </div>
+            `}
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:14px;">
+            <button class="btn-ghost" id="sync-pull-btn" style="flex:1;">Sync from Cloud</button>
+            <button class="btn-primary" id="sync-push-btn" style="flex:1;">Push to Cloud</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   GOOGLE GEMINI AI INTEGRATION ENGINE (Real API Key)
+   ========================================================================= */
+// API key is user-supplied — paste yours in Settings → Gemini API Key
+export const DEFAULT_GEMINI_KEY = "";
+
+export function getGeminiApiKey() {
+  return localStorage.getItem('sc_gemini_api_key') || DEFAULT_GEMINI_KEY;
+}
+
+export function setGeminiApiKey(key) {
+  if (key && key.trim()) {
+    localStorage.setItem('sc_gemini_api_key', key.trim());
+  } else {
+    localStorage.removeItem('sc_gemini_api_key');
+  }
+}
+
+export function formatAiResponse(raw) {
+  if (!raw) return '';
+  // Sanitize angle brackets except intentional tags
+  let html = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Fenced Code blocks
+  html = html.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, '<pre class="ai-code-block"><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="ai-inline-code">$1</code>');
+  // Bold **text**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Italic *text*
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  // Bullet points
+  html = html.replace(/(?:^|\n)[*•-]\s+([^\n]+)/g, '<div class="ai-bullet">• $1</div>');
+  // Double newlines to paragraph break
+  html = html.replace(/\n\n/g, '<div style="height:8px;"></div>');
+  // Single newlines to <br>
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+/* =========================================================================
+   INTEGRATED AI WORKSPACE
+   ========================================================================= */
+const APP_FUNCTION_DECLARATIONS = [
+  {
+    name: 'create_note',
+    description: 'Create a new School Center note and store it locally.',
+    parameters: { type: 'object', properties: {
+      title: { type: 'string', description: 'Note title' },
+      content: { type: 'string', description: 'Note content' },
+      courseId: { type: 'string', description: 'Optional School Center course id' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags' }
+    }, required: ['title', 'content'] }
+  },
+  {
+    name: 'update_note',
+    description: 'Update an existing School Center note.',
+    parameters: { type: 'object', properties: {
+      id: { type: 'string' },
+      title: { type: 'string' },
+      content: { type: 'string' },
+      courseId: { type: 'string' },
+      tags: { type: 'array', items: { type: 'string' } },
+      _changeLog: { type: 'string' }
+    }, required: ['id'] }
+  },
+  {
+    name: 'delete_note',
+    description: 'Delete an existing School Center note by id.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }
+  },
+  {
+    name: 'create_assignment',
+    description: 'Create a new School Center assignment/task.',
+    parameters: { type: 'object', properties: {
+      title: { type: 'string' },
+      courseId: { type: 'string' },
+      description: { type: 'string' },
+      dueDate: { type: 'string', description: 'ISO date/time' },
+      priority: { type: 'string' },
+      status: { type: 'string' },
+      assignmentType: { type: 'string' }
+    }, required: ['title', 'courseId'] }
+  },
+  {
+    name: 'update_assignment',
+    description: 'Update an existing School Center assignment/task.',
+    parameters: { type: 'object', properties: {
+      id: { type: 'string' }, title: { type: 'string' }, courseId: { type: 'string' },
+      description: { type: 'string' }, dueDate: { type: 'string' }, priority: { type: 'string' },
+      status: { type: 'string' }, notes: { type: 'string' }, _changeLog: { type: 'string' }
+    }, required: ['id'] }
+  },
+  {
+    name: 'delete_assignment',
+    description: 'Delete an existing School Center assignment/task by id.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }
+  },
+  {
+    name: 'store_attached_file',
+    description: 'Store one file currently attached to this AI conversation in a School Center course using the existing upload pipeline.',
+    parameters: { type: 'object', properties: {
+      fileName: { type: 'string' },
+      courseId: { type: 'string' }
+    }, required: ['fileName', 'courseId'] }
+  },
+  {
+    name: 'sync_school_center',
+    description: 'Pull the latest connected cloud data into School Center.',
+    parameters: { type: 'object', properties: {} }
+  }
+];
+
+async function executeGeminiTool(name, args = {}) {
+  switch (name) {
+    case 'create_note':
+      return { ok: true, note: notesManager.createNote(args) };
+    case 'update_note': {
+      const { id, ...updates } = args;
+      const updated = notesManager.updateNote(id, updates);
+      if (!updated) throw new Error(`Note ${id} was not found.`);
+      return { ok: true, note: updated };
+    }
+    case 'delete_note':
+      return { ok: notesManager.deleteNote(args.id), id: args.id };
+    case 'create_assignment':
+      return { ok: true, assignment: assignmentsManager.createAssignment(args) };
+    case 'update_assignment': {
+      const { id, ...updates } = args;
+      const updated = assignmentsManager.updateAssignment(id, updates);
+      if (!updated) throw new Error(`Assignment ${id} was not found.`);
+      return { ok: true, assignment: updated };
+    }
+    case 'delete_assignment':
+      return { ok: assignmentsManager.deleteAssignment(args.id), id: args.id };
+    case 'store_attached_file': {
+      const file = aiActiveAttachments.find(f => f.name === args.fileName);
+      if (!file) throw new Error(`No attached file named ${args.fileName} is available.`);
+      if (!isSupabaseConfigured()) throw new Error('Cloud storage is not configured. Connect Supabase in Settings first.');
+      const course = courseById(args.courseId);
+      if (!course) throw new Error(`Course ${args.courseId} was not found.`);
+      await uploadAndProcessFile({ file, course, onProgress: () => {}, onLog: () => {} });
+      await syncDataFromSupabase();
+      return { ok: true, stored: file.name, courseId: args.courseId };
+    }
+    case 'sync_school_center':
+      await syncDataFromSupabase();
+      return { ok: true, syncedAt: new Date().toISOString() };
+    default:
+      throw new Error(`Unknown app action: ${name}`);
+  }
+}
+
+function buildAiAppContext() {
+  const courseSummary = COURSES.map(c => `${c.code}: ${c.name} (id: ${c.id})`).join('\n');
+  const scheduleSummary = FALL_2026_SCHEDULE.map(s => `${s.dayName} ${s.start}–${s.end}: ${s.courseCode} ${s.type}, ${s.room}, ${s.instructor}`).join('\n');
+  const assignments = assignmentsManager.getAll().slice(0, 30).map(a => `${a.id}: ${a.title} | ${a.courseId} | due ${a.dueDate} | ${a.status} | ${a.priority || 'normal'}`).join('\n');
+  const notes = notesManager.getAll().slice(0, 30).map(n => `${n.id}: ${n.title} | ${n.courseId} | ${n.content.slice(0, 700)}`).join('\n');
+  const materials = COURSES.flatMap(c => (c.cloudMaterials || []).slice(0, 50).map(m => `${c.id}: ${m.title} | ${m.type || 'file'} | ${m.moduleTitle || 'Materials'}`)).join('\n');
+  return `\nCOURSES:\n${courseSummary || 'None'}\n\nWEEKLY SCHEDULE:\n${scheduleSummary || 'None'}\n\nASSIGNMENTS:\n${assignments || 'None'}\n\nNOTES:\n${notes || 'None'}\n\nAPP MATERIALS METADATA:\n${materials || 'None'}\n`;
+}
+
+export function buildGeminiSystemPrompt() {
+  const now = new Date();
+  const nowLabel = now.toLocaleString(undefined, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short'
+  });
+  return `You are the integrated AI workspace inside School Center. Do not mention internal modes, developer/student roles, or model names unless the user explicitly asks about the underlying service. Keep UI-facing responses natural, concise, and useful.
+
+CURRENT DATE & TIME: ${nowLabel}. Use this as the real, authoritative current moment for anything involving "today", "tomorrow", days until a deadline, or how much time is left — do not say you lack the ability to know the date or time.
+
+You do not have live internet access. If a question requires current external information you were not given in this context (news, prices, something outside School Center's own data), say so plainly instead of guessing.
+
+You cannot generate images, video, or audio. If asked to create one, say that image/media generation isn't available yet rather than inventing a fake result.
+
+You have access to School Center's current courses, schedule, assignments, notes, and material metadata. You may use the available app actions when the user's request requires changing School Center data. When an action changes data, complete it and then tell the user what changed. Never claim to have edited GitHub source code or deployed the site; this browser app does not have repository deployment access.
+
+You can create, update, and remove notes and assignments, sync cloud data, and store an attached file into a selected course using the app's connected upload pipeline. Prefer precise IDs from the provided context when changing existing records.
+
+${buildAiAppContext()}`;
+}
+
+function extractAiMediaAttachments(text = '') {
+  const found = [];
+  const seen = new Set();
+  const pattern = /(?:!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(?:https?:\/\/[^\s<]+\.(?:png|jpe?g|webp|gif|avif|heic|heif|mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(?:\?[^\s<]*)?))/gi;
+  for (const match of text.matchAll(pattern)) {
+    const url = match[1] || match[0];
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const clean = url.split('?')[0].split('#')[0];
+    const ext = clean.split('.').pop()?.toLowerCase() || '';
+    const kind = /^(png|jpe?g|webp|gif|avif|heic|heif)$/.test(ext) ? 'image' : /^(mp4|webm|mov|m4v)$/.test(ext) ? 'video' : 'audio';
+    const mimeType = kind === 'image' ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : kind === 'video' ? `video/${ext === 'mov' ? 'quicktime' : ext}` : `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+    found.push({ name: `AI ${kind}`, mimeType, kind, url, external: true });
+  }
+  return found.slice(0, 8);
+}
+
+export async function queryGemini(userText, attachments = []) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error('Connect Gemini in Settings before using the AI workspace.');
+
+  const recentHistory = (state.aiChatMessages || [])
+    .filter(m => !m.isThinking && m.text)
+    .slice(-10)
+    .map(m => ({
+      role: m.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text.replace(/<[^>]+>/g, '') }]
+    }));
+
+  const attachmentParts = await prepareGeminiFileParts(attachments, apiKey);
+  const currentParts = [{ text: userText }, ...attachmentParts];
+  const contents = recentHistory.length ? [...recentHistory, { role: 'user', parts: currentParts }] : [{ role: 'user', parts: currentParts }];
+  const payload = {
+    systemInstruction: { parts: [{ text: buildGeminiSystemPrompt() }] },
+    contents,
+    tools: [{ function_declarations: APP_FUNCTION_DECLARATIONS }]
+  };
+
+  const primaryModel = 'gemini-3.6-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  for (let round = 0; round < 4; round++) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error?.message || `API error ${res.status}: ${res.statusText}`);
+
+    const candidate = data.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
+    const calls = parts.filter(p => p.functionCall?.name);
+    if (!calls.length) {
+      const responseText = parts.map(p => p.text || '').join('').trim();
+      if (!responseText) throw new Error('AI returned an empty response.');
+      return responseText;
+    }
+
+    payload.contents.push(candidate.content);
+    const functionResponses = [];
+    for (const call of calls) {
+      const name = call.functionCall.name;
+      const args = call.functionCall.args || {};
+      try {
+        const result = await executeGeminiTool(name, args);
+        functionResponses.push({ functionResponse: { name, response: result } });
+      } catch (error) {
+        functionResponses.push({ functionResponse: { name, response: { ok: false, error: error.message } } });
+      }
+    }
+    payload.contents.push({ role: 'user', parts: functionResponses });
+  }
+
+  throw new Error('The AI action sequence reached its safety limit.');
+}
+
+function renderAiAssistantModal() {
+  if (!state.aiAssistantOpen) return '';
+  const attachments = state.aiAttachments || [];
+  const hasMessages = (state.aiChatMessages || []).some(m => !m.isThinking);
+  return `
+    <div class="modal-overlay open ai-workspace-overlay" id="ai-assistant-modal-overlay">
+      <section class="ai-workspace" role="dialog" aria-modal="true" aria-label="School Center AI workspace">
+        <header class="ai-workspace-head">
+          <div class="ai-workspace-title"><span class="ai-workspace-spark">${icon('spark')}</span><span>AI</span><span class="ai-launch-dot ${state.aiConnectionState}" aria-hidden="true"></span></div>
+          <button class="icon-btn sm" id="close-ai-assistant-modal" type="button" aria-label="Close AI workspace">${icon('close')}</button>
+        </header>
+        <div class="ai-chat-stream" id="ai-chat-stream" role="log" aria-live="polite">
+          ${!hasMessages && !state.aiIsThinking ? `<div class="ai-empty-state"><div class="ai-empty-symbol">${icon('spark')}</div><h2>How can I help?</h2><p>Ask about your courses, files, notes, assignments, schedule, or anything you need to organize.</p></div>` : ''}
+          ${(state.aiChatMessages || []).map(m => {
+            if (m.isThinking) return `<div class="ai-bubble assistant thinking"><div class="ai-typing-dots"><span></span><span></span><span></span></div><span class="ai-thinking-label">Working…</span></div>`;
+            const files = (m.attachments || []).map(name => `<span class="ai-message-file">${icon('doc')}<span>${escapeHtml(name)}</span></span>`).join('');
+            return `<div class="ai-message ${m.sender === 'user' ? 'user' : 'assistant'}">${files ? `<div class="ai-message-files">${files}</div>` : ''}<div class="ai-message-body">${m.text || ''}</div></div>`;
+          }).join('')}
+        </div>
+        <div class="ai-composer-shell">
+          ${attachments.length ? `<div class="ai-attachment-row">${attachments.map((f,i)=>`<span class="ai-attachment-chip">${icon('doc')}<span>${escapeHtml(f.name)}</span><button type="button" data-ai-remove-file="${i}" aria-label="Remove ${escapeHtml(f.name)}">${icon('close')}</button></span>`).join('')}</div>` : ''}
+          <div class="ai-composer">
+            <button class="ai-composer-icon" id="ai-attach-btn" type="button" aria-label="Attach a file" title="Attach files">${icon('plus')}</button>
+            <textarea id="ai-chat-input" class="ai-composer-input" rows="1" placeholder="Message School Center AI…" ${state.aiIsThinking ? 'disabled' : ''}></textarea>
+            <button class="ai-composer-icon ai-mic-button ${state.aiTranscribing ? 'active' : ''}" id="ai-mic-btn" type="button" aria-label="Use microphone" title="Transcribe speech" ${state.aiIsThinking ? 'disabled' : ''}>${icon('mic')}</button>
+            <button class="ai-send-button" id="ai-chat-send" type="button" aria-label="Send message" title="Send" ${state.aiIsThinking ? 'disabled' : ''}>${icon('arrowUp')}</button>
+          </div>
+          <input id="ai-file-input" type="file" hidden multiple accept="*/*" />
+          <div class="ai-composer-status"><span id="ai-live-transcript">${state.aiTranscribing ? 'Listening…' : ''}</span><span>${attachments.length ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}` : 'Files and microphone are available here'}</span></div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   EVENT HANDLERS ATTACHMENT
+   ========================================================================= */
+function attachEventHandlers() {
+  document.querySelectorAll('[data-nav]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.view = el.getAttribute('data-nav');
+      state.courseId = null;
+      render();
+    });
+  });
+
+  const closeSync = document.getElementById('close-sync-drawer');
+  if (closeSync) closeSync.addEventListener('click', () => { state.syncDrawerOpen = false; render(); });
+  const syncBackdrop = document.getElementById('sync-drawer-backdrop');
+  if (syncBackdrop) syncBackdrop.addEventListener('click', e => { if (e.target === syncBackdrop) { state.syncDrawerOpen = false; render(); } });
+  const syncPull = document.getElementById('sync-pull-btn');
+  if (syncPull) syncPull.addEventListener('click', async () => {
+    showToast('Syncing School Center…');
+    try {
+      await syncDataFromSupabase();
+      await pullCloudDataToLocal();
+      showToast('Cloud sync complete ✓');
+    } catch (err) {
+      showToast(err?.message?.includes('Sign in') ? err.message : 'Sync unavailable — continuing locally');
+    }
+    render();
+  });
+  const syncPush = document.getElementById('sync-push-btn');
+  if (syncPush) syncPush.addEventListener('click', async () => {
+    showToast('Pushing notes & assignments to the cloud…');
+    try {
+      await pushLocalDataToCloud();
+      showToast('Pushed to cloud ✓');
+    } catch (err) {
+      showToast(err?.message?.includes('Sign in') ? err.message : 'Push failed — check your connection and try again.');
+    }
+    render();
+  });
+  const openSyncDetails = document.getElementById('open-sync-details-btn');
+  if (openSyncDetails) openSyncDetails.addEventListener('click', () => { state.syncDrawerOpen = true; render(); });
+
+  const manualSync = document.getElementById('manual-sync-btn');
+  if (manualSync) manualSync.addEventListener('click', async () => {
+    showToast('Syncing School Center…');
+    try {
+      await syncDataFromSupabase();
+      await fullTwoWaySync();
+      state.dataSyncLastError = null;
+      showToast('Cloud sync complete ✓');
+    } catch (err) {
+      // Show the real reason instead of a generic message — a table missing
+      // because a migration wasn't run, or an expired session, look very
+      // different from a genuine network drop and need different fixes.
+      const msg = err?.message || 'Unknown error';
+      state.dataSyncLastError = msg;
+      showToast(`Sync failed: ${msg}`);
+    }
+    render();
+  });
+
+  const saveCloud = document.getElementById('save-cloud-settings-btn');
+  if (saveCloud) saveCloud.addEventListener('click', () => {
+    const url = document.getElementById('supabase-url-field')?.value.trim() || '';
+    const key = document.getElementById('supabase-key-field')?.value.trim() || '';
+    if (!url || !key) { showToast('Enter both Supabase fields first.'); return; }
+    saveSupabaseConfig(url, key);
+    showToast('Cloud configuration saved.');
+    render();
+  });
+
+  const saveMoreAiKeyBtn = document.getElementById('save-more-ai-key-btn');
+  if (saveMoreAiKeyBtn) saveMoreAiKeyBtn.addEventListener('click', () => {
+    const input = document.getElementById('more-gemini-key-field');
+    if (input?.value.trim()) { setGeminiApiKey(input.value.trim()); showToast('AI connection saved.'); render(); }
+  });
+  const testGeminiBtn = document.getElementById('test-gemini-btn');
+  if (testGeminiBtn) testGeminiBtn.addEventListener('click', async () => {
+    showToast('Testing AI connection…');
+    try { await queryGemini('Reply with exactly: Connection verified.', []); showToast('AI connection verified ✓'); }
+    catch (err) { showToast(`AI connection error: ${err.message}`); }
+    finally { render(); }
+  });
+
+  const unifiedNav = document.querySelector('[data-nav="ai"]');
+  if (unifiedNav) unifiedNav.addEventListener('click', () => { state.view = 'ai'; state.searchQuery = ''; render(); setTimeout(() => document.getElementById('ai-chat-input')?.focus(), 40); });
+
+  const aiAttachBtn = document.getElementById('ai-attach-btn');
+  const aiFileInput = document.getElementById('ai-file-input');
+  if (aiAttachBtn && aiFileInput) {
+    aiAttachBtn.addEventListener('click', () => aiFileInput.click());
+    aiFileInput.addEventListener('change', () => {
+      const files = Array.from(aiFileInput.files || []);
+      if (!files.length) return;
+      state.aiAttachments = [...(state.aiAttachments || []), ...files].slice(0, 12);
+      aiFileInput.value = '';
+      state.aiConnectionState = 'ready';
+      render();
+      setTimeout(() => document.getElementById('ai-chat-input')?.focus(), 30);
+    });
+  }
+  document.querySelectorAll('[data-ai-remove-file]').forEach(btn => btn.addEventListener('click', () => {
+    const index = Number(btn.getAttribute('data-ai-remove-file'));
+    state.aiAttachments.splice(index, 1);
+    render();
+  }));
+
+  document.querySelectorAll('[data-unified-search-type]').forEach(item => item.addEventListener('click', () => {
+    const type = item.getAttribute('data-unified-search-type');
+    const courseId = item.getAttribute('data-course');
+    const tab = item.getAttribute('data-tab') || 'overview';
+    const assignmentId = item.getAttribute('data-assignment');
+    if (courseId) {
+      state.courseId = courseId;
+      state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : 'overview';
+      state.view = 'courses';
+    } else if (assignmentId) {
+      state.assignmentDetailId = assignmentId;
+    }
+    render();
+  }));
+
+  const aiChatBody = document.getElementById('ai-page-body');
+  if (aiChatBody) {
+    aiChatBody.addEventListener('click', async e => {
+      const editBtn = e.target.closest('[data-ai-edit]');
+      const deleteBtn = e.target.closest('[data-ai-delete]');
+      const cancelBtn = e.target.closest('[data-ai-cancel-edit]');
+      const saveBtn = e.target.closest('[data-ai-save-edit]');
+      if (editBtn) { state.aiEditingMessageId = editBtn.getAttribute('data-ai-edit'); render(); return; }
+      if (cancelBtn) { state.aiEditingMessageId = null; render(); return; }
+      if (saveBtn) {
+        const id = saveBtn.getAttribute('data-ai-save-edit');
+        const input = document.getElementById(`ai-edit-input-${id}`);
+        const newText = input ? input.value : '';
+        const msg = state.aiChatMessages.find(m => m.id === id);
+        if (msg) msg.text = newText;
+        state.aiEditingMessageId = null;
+        render();
+        try { await updateAiMessageText(id, newText); } catch (_) {}
+        return;
+      }
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-ai-delete');
+        state.aiChatMessages = state.aiChatMessages.filter(m => m.id !== id);
+        render();
+        try { await deleteAiMessage(id); } catch (_) {}
+        return;
+      }
+    });
+  }
+  const clearChatBtn = document.getElementById('ai-clear-chat-btn');
+  if (clearChatBtn) clearChatBtn.addEventListener('click', async () => {
+    if (!confirm('Clear this entire conversation? This cannot be undone.')) return;
+    state.aiChatMessages = [];
+    render();
+    try { await clearAiConversation(); showToast('Conversation cleared.'); }
+    catch (_) { showToast('Cleared locally — cloud clear failed.'); }
+  });
+
+  const aiInput = document.getElementById('ai-chat-input');
+  const aiSend = document.getElementById('ai-chat-send');
+  if (aiInput) {
+    const syncAiInput = () => {
+      state.searchQuery = aiInput.value;
+      const body = document.getElementById('ai-page-body');
+      if (!body) return;
+      const q = state.searchQuery.trim();
+      const direct = q ? performUniversalSearch(q, COURSES) : [];
+      state.aiSearchResultsCount = direct.length;
+      body.innerHTML = q && direct.length ? renderAiSearchResultsView(q) : renderAiConversation();
+      // Only auto-scroll while browsing the conversation (no active search query).
+      // Scrolling on every keystroke while typing a search was the source of the
+      // jumpy/glitchy feel reported in the AI & Search page.
+      if (!q) {
+        body.scrollTo({ top: body.scrollHeight, behavior: 'auto' });
+      }
+    };
+    aiInput.addEventListener('input', () => {
+      aiInput.style.height = 'auto';
+      aiInput.style.height = `${Math.min(aiInput.scrollHeight, 180)}px`;
+      syncAiInput();
+    });
+  }
+  if (aiInput && aiSend) {
+    const submit = async () => {
+      if (state.aiIsThinking) return;
+      const text = aiInput.value.trim();
+      const files = [...(state.aiAttachments || [])];
+      if (!text && !files.length) return;
+      aiActiveAttachments = files;
+      state.aiAttachments = [];
+      state.searchQuery = '';
+      const userLocalIndex = state.aiChatMessages.length;
+      state.aiChatMessages.push({ sender: 'user', text: text || 'Please review these attached files.', attachments: [], createdAt: new Date().toISOString() });
+      state.aiChatMessages.push({ sender: 'assistant', text: '', isThinking: true, createdAt: new Date().toISOString() });
+      state.aiIsThinking = true;
+      state.aiConnectionState = 'busy';
+      aiInput.value = '';
+      render();
+      try {
+        const savedUser = await persistAiMessage({ sender: 'user', text: text || 'Please review these attached files.', files });
+        state.aiChatMessages[userLocalIndex] = savedUser;
+        const raw = await queryGemini(text || 'Please review the attached files and help me with them.', files);
+        const last = state.aiChatMessages.length - 1;
+        const generatedMedia = extractAiMediaAttachments(raw);
+        const savedAssistant = await persistAiMessage({ sender: 'assistant', text: raw, attachments: generatedMedia });
+        state.aiChatMessages[last] = savedAssistant;
+        state.aiConnectionState = 'ready';
+      } catch (err) {
+        console.error(err);
+        const last = state.aiChatMessages.length - 1;
+        const safe = String(err.message || 'Unable to connect to the AI service.');
+        state.aiChatMessages[last] = { sender: 'assistant', text: safe, isThinking: false, createdAt: new Date().toISOString() };
+        state.aiConnectionState = 'attention';
+      } finally {
+        aiActiveAttachments = [];
+        state.aiIsThinking = false;
+        render();
+        setTimeout(() => { const body = document.getElementById('ai-page-body'); if (body) body.scrollTop = body.scrollHeight; }, 30);
+      }
+    };
+    aiSend.addEventListener('click', submit);
+    aiInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } });
+  }
+
+  const aiMicBtn = document.getElementById('ai-mic-btn');
+  if (aiMicBtn) aiMicBtn.addEventListener('click', toggleAiLiveTranscription);
+
+  const openMonthCalBtn = document.getElementById('open-month-cal-btn');
+  if (openMonthCalBtn) openMonthCalBtn.addEventListener('click', () => {
+    const sel = new Date(state.selectedCalendarDay);
+    state.monthCalendarYear = sel.getFullYear(); state.monthCalendarMonth = sel.getMonth(); state.monthCalendarOpen = true; render();
+  });
+  const closeMonthCalBtn = document.getElementById('close-month-cal-modal');
+  if (closeMonthCalBtn) closeMonthCalBtn.addEventListener('click', () => { state.monthCalendarOpen = false; render(); });
+  const monthCalOverlay = document.getElementById('month-cal-modal-overlay');
+  if (monthCalOverlay) monthCalOverlay.addEventListener('click', e => { if (e.target === monthCalOverlay) { state.monthCalendarOpen = false; render(); } });
+  const monthPrev = document.getElementById('month-cal-prev');
+  if (monthPrev) monthPrev.addEventListener('click', () => { if (state.monthCalendarMonth === 0) { state.monthCalendarMonth = 11; state.monthCalendarYear--; } else state.monthCalendarMonth--; render(); });
+  const monthNext = document.getElementById('month-cal-next');
+  if (monthNext) monthNext.addEventListener('click', () => { if (state.monthCalendarMonth === 11) { state.monthCalendarMonth = 0; state.monthCalendarYear++; } else state.monthCalendarMonth++; render(); });
+  const monthToday = document.getElementById('month-cal-today');
+  if (monthToday) monthToday.addEventListener('click', () => { const now = new Date(); state.monthCalendarYear = now.getFullYear(); state.monthCalendarMonth = now.getMonth(); state.selectedCalendarDay = now.toDateString(); render(); });
+  document.querySelectorAll('[data-cal-day]').forEach(cell => cell.addEventListener('click', () => { state.selectedCalendarDay = cell.getAttribute('data-cal-day'); render(); }));
+
+  const quickSearchBtn = document.getElementById('quick-search-btn');
+  if (quickSearchBtn) quickSearchBtn.addEventListener('click', () => { state.spotlightSearchOpen = true; state.spotlightQuery = ''; render(); setTimeout(() => document.getElementById('spotlight-search-input')?.focus(), 50); });
+  const closeSpotlight = document.getElementById('close-spotlight-modal');
+  if (closeSpotlight) closeSpotlight.addEventListener('click', () => { state.spotlightSearchOpen = false; render(); });
+  const spotlightOverlay = document.getElementById('spotlight-modal-overlay');
+  if (spotlightOverlay) spotlightOverlay.addEventListener('click', e => { if (e.target === spotlightOverlay) { state.spotlightSearchOpen = false; render(); } });
+  const spotlightInput = document.getElementById('spotlight-search-input');
+  if (spotlightInput) spotlightInput.addEventListener('input', e => { state.spotlightQuery = e.target.value; render(); setTimeout(() => { const inp = document.getElementById('spotlight-search-input'); if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } }, 0); });
+  document.querySelectorAll('[data-spotlight-nav]').forEach(item => item.addEventListener('click', () => {
+    const navType = item.getAttribute('data-spotlight-nav'); const targetId = item.getAttribute('data-spotlight-id'); state.spotlightSearchOpen = false;
+    if (navType === 'course') { state.courseId = targetId; state.view = 'courses'; state.courseTab = 'overview'; }
+    else if (navType === 'asg') state.assignmentDetailId = targetId;
+    else if (navType === 'note') state.view = 'settings';
+    render();
+  }));
+
+  document.querySelectorAll('[data-course-id]').forEach(el => el.addEventListener('click', () => { state.courseId = el.getAttribute('data-course-id'); state.view = 'courses'; state.courseTab = 'overview'; render(); }));
+  const courseBack = document.getElementById('course-back-btn');
+  if (courseBack) courseBack.addEventListener('click', () => { state.courseId = null; render(); });
+  document.querySelectorAll('[data-course-tab]').forEach(el => el.addEventListener('click', () => { state.courseTab = el.getAttribute('data-course-tab'); render(); }));
+
+  const focusBtn = document.getElementById('quick-focus-btn');
+  if (focusBtn) focusBtn.addEventListener('click', () => {
+    if (!focusModeInstance) focusModeInstance = new FocusMode({ onExit: () => render(), onNoteSaved: () => showToast('Focus notes saved ✓') });
+    focusModeInstance.start(state.courseId || 'math15325d', 25); render();
+  });
+  const seeAllAsg = document.getElementById('see-all-asg');
+  if (seeAllAsg) seeAllAsg.addEventListener('click', () => { state.view = 'courses'; state.courseId = null; render(); });
+  document.querySelectorAll('.date-strip-cell[data-daykey]').forEach(el => el.addEventListener('click', () => { state.selectedCalendarDay = el.getAttribute('data-daykey'); render(); }));
+  document.querySelectorAll('[data-agenda-course-id]').forEach(el => el.addEventListener('click', () => { state.courseId = el.getAttribute('data-agenda-course-id'); state.view = 'courses'; state.courseTab = 'overview'; render(); }));
+  document.querySelectorAll('[data-agenda-asg-id]').forEach(el => el.addEventListener('click', () => { state.assignmentDetailId = el.getAttribute('data-agenda-asg-id'); render(); }));
+  const addDeadlineBtn = document.getElementById('add-deadline-btn');
+  if (addDeadlineBtn) addDeadlineBtn.addEventListener('click', () => { state.assignmentModalOpen = true; state.assignmentModalPreset = { dueDate: state.selectedCalendarDay }; render(); });
+  const addAsgBtn = document.getElementById('add-assignment-btn');
+  if (addAsgBtn) addAsgBtn.addEventListener('click', () => { state.assignmentModalOpen = true; state.assignmentModalPreset = { courseId: state.courseId }; render(); });
+  document.querySelectorAll('[data-open-asg-id]').forEach(el => el.addEventListener('click', e => { if (e.target.matches('input') || e.target.closest('input')) return; state.assignmentDetailId = el.getAttribute('data-open-asg-id'); render(); }));
+  document.querySelectorAll('[data-asg-check]').forEach(el => el.addEventListener('change', () => {
+    const assignment = assignmentsManager.getById(el.getAttribute('data-asg-check')); const check = assignment?.requirementsChecklist?.find(c => c.id === el.getAttribute('data-check-id')); if (assignment && check) { check.done = !check.done; assignmentsManager.updateAssignment(assignment.id, assignment); }
+  }));
+  const addCourseNoteBtn = document.getElementById('add-course-note-btn');
+  if (addCourseNoteBtn) addCourseNoteBtn.addEventListener('click', () => { state.noteModalOpen = true; state.noteModalPreset = { courseId: state.courseId }; render(); });
+  document.querySelectorAll('[data-ai-note]').forEach(btn => btn.addEventListener('click', async () => { try { await notesManager.runAIStudyAction(btn.getAttribute('data-note-id'), btn.getAttribute('data-ai-note')); showToast('Note updated ✓'); render(); } catch (e) { showToast(`Note action failed: ${e.message}`); } }));
+  const triggerUpload = document.getElementById('trigger-upload-modal');
+  if (triggerUpload) triggerUpload.addEventListener('click', () => {
+    state.aiAssistantOpen = true;
+    render();
+    setTimeout(() => document.getElementById('ai-file-input')?.click(), 50);
+  });
+
+  const syncBannerSignin = document.getElementById('sync-banner-signin-btn');
+  if (syncBannerSignin) syncBannerSignin.addEventListener('click', () => { state.view = 'settings'; render(); });
+  const syncBannerDismiss = document.getElementById('sync-banner-dismiss-btn');
+  if (syncBannerDismiss) syncBannerDismiss.addEventListener('click', () => { state.syncBannerDismissed = true; render(); });
+
+  const closeAssignment = document.getElementById('close-assignment-modal');
+  if (closeAssignment) closeAssignment.addEventListener('click', () => { state.assignmentModalOpen = false; render(); });
+  const assignmentBackdrop = document.getElementById('assignment-modal-overlay');
+  if (assignmentBackdrop) assignmentBackdrop.addEventListener('click', e => { if (e.target === assignmentBackdrop) { state.assignmentModalOpen = false; render(); } });
+  const saveAssignmentBtn = document.getElementById('save-assignment-btn');
+  if (saveAssignmentBtn) saveAssignmentBtn.addEventListener('click', () => {
+    const title = document.getElementById('asg-title-input')?.value.trim() || '';
+    const courseId = document.getElementById('asg-course-select')?.value || state.courseId || null;
+    const dueDate = document.getElementById('asg-due-input')?.value || new Date().toISOString();
+    const priority = document.getElementById('asg-priority-select')?.value || 'medium';
+    const description = document.getElementById('asg-desc-input')?.value.trim() || '';
+    const checks = Array.from(document.querySelectorAll('#asg-checklist-container .checklist-item span')).map(el => ({ id: 'c_' + Math.random().toString(36).slice(2,8), text: el.textContent.trim(), done: false }));
+    if (!title) { showToast('Enter an assignment title.'); return; }
+    assignmentsManager.createAssignment({ title, courseId, dueDate, priority, description, requirementsChecklist: checks });
+    state.assignmentModalOpen = false; state.assignmentModalPreset = {};
+    showToast('Assignment saved ✓'); render();
+  });
+  const assignmentCancel = document.getElementById('close-assignment-modal-cancel');
+  if (assignmentCancel) assignmentCancel.addEventListener('click', () => { state.assignmentModalOpen = false; render(); });
+  const closeNote = document.getElementById('close-note-modal');
+  if (closeNote) closeNote.addEventListener('click', () => { state.noteModalOpen = false; render(); });
+  const noteBackdrop = document.getElementById('note-modal-overlay');
+  if (noteBackdrop) noteBackdrop.addEventListener('click', e => { if (e.target === noteBackdrop) { state.noteModalOpen = false; render(); } });
+  const saveNoteBtn = document.getElementById('save-note-btn');
+  if (saveNoteBtn) saveNoteBtn.addEventListener('click', () => {
+    const title = document.getElementById('note-title-input')?.value.trim() || '';
+    const content = document.getElementById('note-content-input')?.value.trim() || '';
+    const courseId = document.getElementById('note-course-select')?.value || null;
+    const tags = (document.getElementById('note-tags-input')?.value || '').split(',').map(x => x.trim()).filter(Boolean);
+    if (!title && !content) { showToast('Add a note title or content.'); return; }
+    notesManager.createNote({ title: title || 'Untitled Note', content, courseId, tags });
+    state.noteModalOpen = false; state.noteModalPreset = {};
+    showToast('Note saved ✓'); render();
+  });
+  const noteCancel = document.getElementById('close-note-modal-cancel');
+  if (noteCancel) noteCancel.addEventListener('click', () => { state.noteModalOpen = false; render(); });
+  document.querySelectorAll('[data-delete-note]').forEach(btn => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-delete-note');
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    if (notesManager.deleteNote(id)) { showToast('Note deleted.'); render(); }
+  }));
+
+  const themeButtons = document.querySelectorAll('[data-theme-key]');
+  themeButtons.forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.getAttribute('data-theme-key');
+    const t = THEME_PRESETS[key];
+    if (!t) return;
+    applyTheme(t, true);
+    showToast(`${t.label} theme applied.`);
+    render();
+  }));
+  const accentInputs = [document.getElementById('accent-color-input'), document.getElementById('accent-color-input-inline')].filter(Boolean);
+  accentInputs.forEach(input => input.addEventListener('input', e => applyCustomAccent(e.target.value, true)));
+  accentInputs.forEach(input => input.addEventListener('change', () => render()));
+  const lavaSlider = document.getElementById('lava-slider');
+  if (lavaSlider) lavaSlider.addEventListener('input', e => {
+    const value = Number(e.target.value); document.documentElement.style.setProperty('--lava-opacity', String(value)); localStorage.setItem('sc_lava_opacity', String(value));
+  });
+
+  const aiSignin = document.getElementById('ai-signin-btn');
+  if (aiSignin) aiSignin.addEventListener('click', async () => {
+    const email = document.getElementById('ai-signin-email')?.value.trim();
+    if (!email) { showToast('Enter your email first.'); return; }
+    try { await sendAiMagicLink(email); showToast('Check your email for the sign-in link.'); } catch (e) { showToast(`Sign-in failed: ${e.message}`); }
+  });
+  const aiSignout = document.getElementById('ai-signout-btn');
+  if (aiSignout) aiSignout.addEventListener('click', async () => { try { await signOutAiCloud(); stopAutomaticDataSync(); if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; } state.aiCloudUser=null; state.aiCloudConnected=false; render(); showToast('Signed out.'); } catch (e) { showToast(e.message); } });
+  const closeAssignmentDetail = document.getElementById('close-asg-detail-modal');
+  if (closeAssignmentDetail) closeAssignmentDetail.addEventListener('click', () => { state.assignmentDetailId = null; render(); });
+  const assignmentDetailOverlay = document.getElementById('asg-detail-modal-overlay');
+  if (assignmentDetailOverlay) assignmentDetailOverlay.addEventListener('click', e => { if (e.target === assignmentDetailOverlay) { state.assignmentDetailId = null; render(); } });
+  const closeFlash = document.getElementById('close-flashcards-modal');
+  if (closeFlash) closeFlash.addEventListener('click', () => { state.flashcardsModalOpen = false; render(); });
+  document.querySelectorAll('[data-flashcard-next]').forEach(b => b.addEventListener('click', () => { state.flashcardIndex++; render(); }));
+
+  if (!window._sc_keydown_attached) {
+    window._sc_keydown_attached = true;
+    window.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); state.spotlightSearchOpen = true; state.spotlightQuery = ''; render(); setTimeout(() => document.getElementById('spotlight-search-input')?.focus(), 50); return; }
+      if (e.key === 'Escape') {
+        if (state.aiAssistantOpen) { stopAiLiveTranscription(); state.aiAssistantOpen = false; }
+        state.spotlightSearchOpen = false; state.monthCalendarOpen = false; state.syncDrawerOpen = false; state.assignmentModalOpen = false; state.noteModalOpen = false; state.flashcardsModalOpen = false; state.assignmentDetailId = null;
+        render();
+      }
+    });
+  }
+}
+
+
+async function stopAiLiveTranscription() {
+  if (!aiLiveTranscriber) return;
+  try { await aiLiveTranscriber.stop(); } catch (_) {}
+  aiLiveTranscriber = null;
+  state.aiTranscribing = false;
+  state.aiLiveTranscript = '';
+}
+
+async function toggleAiLiveTranscription() {
+  if (state.aiTranscribing) {
+    await stopAiLiveTranscription();
+    render();
+    return;
+  }
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) { showToast('Add your Gemini API key in Settings first.'); return; }
+  state.aiConnectionState = 'busy';
+  aiLiveTranscriber = new GeminiLiveTranscriber({
+    apiKey,
+    fetchEphemeralToken: async () => {
+      try { return await getEphemeralLiveToken(); } catch (error) { console.warn('Secure live token unavailable:', error); return null; }
+    },
+    customVocabulary: ['School Center','Linear Algebra','MATH 15325D','ENGR 36035D','ENGR 43301D','Energy Systems','Economics & Entrepreneurship','Gemini','Supabase'],
+    onStatus: status => {
+      if (status === 'connecting' || status === 'listening') state.aiTranscribing = true;
+      if (status === 'stopped' || status === 'closed') state.aiTranscribing = false;
+      render();
+      setTimeout(() => {
+        const live = document.getElementById('ai-live-transcript');
+        if (live) live.textContent = state.aiTranscribing ? 'Listening…' : '';
+      }, 0);
+    },
+    onInterim: text => {
+      state.aiLiveTranscript = text || '';
+      const live = document.getElementById('ai-live-transcript');
+      if (live) live.textContent = text ? `Listening… ${text}` : 'Listening…';
+    },
+    onFinal: text => {
+      const input = document.getElementById('ai-chat-input');
+      if (input && text) {
+        const spacer = input.value && !/\s$/.test(input.value) ? ' ' : '';
+        input.value += `${spacer}${text}`;
+        input.focus();
+      }
+      state.aiLiveTranscript = '';
+      const live = document.getElementById('ai-live-transcript');
+      if (live) live.textContent = 'Listening…';
+    },
+    onError: message => {
+      console.error('Live transcription:', message);
+      state.aiTranscribing = false;
+      state.aiConnectionState = 'attention';
+      showToast(message);
+      render();
+    }
+  });
+  try {
+    await aiLiveTranscriber.start();
+    state.aiConnectionState = 'ready';
+  } catch (error) {
+    await stopAiLiveTranscription();
+    state.aiConnectionState = 'attention';
+    showToast(error.message || 'Microphone transcription could not start.');
+  }
+  render();
+}
+
+
+function showToast(msg) {
+  const existing = document.querySelector('.settings-toast');
+  if (existing) existing.remove();
+  const t = document.createElement('div');
+  t.className = 'settings-toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+/* =========================================================================
+   INITIALIZATION & BOOTSTRAP (Fail-Safe)
+   ========================================================================= */
+function bootstrap() {
+  try {
+    // 1. Force immediate layout render so the viewport is never left blank
+    render();
+
+    // 2. Safe Lava Lamp initialization
+    try {
+      const canvas = document.getElementById('lava-canvas');
+      if (canvas) {
+        lavaEngine = createLavaEngine(canvas);
+        if (lavaEngine) lavaEngine.start();
+      }
+    } catch (lavaErr) {
+      console.warn('Lava engine init skipped:', lavaErr);
+    }
+
+    // 3. Safe Theme initialization
+    try {
+      const savedAccent = localStorage.getItem('sc_custom_accent');
+      const savedThemeKey = localStorage.getItem('sc_theme_key');
+      if (savedAccent) applyCustomAccent(savedAccent, false);
+      else applyTheme(THEME_PRESETS[savedThemeKey] || THEME_PRESETS.violet, false);
+      const savedOpacity = localStorage.getItem('sc_lava_opacity');
+      if (savedOpacity !== null) document.documentElement.style.setProperty('--lava-opacity', savedOpacity);
+    } catch (themeErr) {
+      console.warn('Theme apply skipped:', themeErr);
+    }
+
+    // 4. Safe Jobs subscription
+    try {
+      jobsManager.subscribe(() => {
+        try {
+          if (state.view === 'settings') render();
+        } catch (e) {}
+      });
+    } catch (jobErr) {
+      console.warn('Jobs subscriber skipped:', jobErr);
+    }
+
+    // 4b. Redraw immediately when another device changes a Note/Assignment.
+    // Local edits already render through their normal UI handlers; this listener
+    // handles remote Realtime changes without requiring a tab switch or button.
+    try {
+      window.addEventListener('schoolcenter:data-sync-changed', (e) => {
+        const detail = e?.detail || {};
+        if (detail.type === 'error') {
+          state.dataSyncLastError = detail.message || 'Unknown sync error';
+        } else if (detail.type === 'ok') {
+          state.dataSyncLastError = null;
+          state.dataSyncLastOkAt = Date.now();
+        }
+        if (state.view === 'courses' || state.view === 'today' || state.view === 'calendar' || state.view === 'settings') render();
+      });
+    } catch (e) {}
+
+    // Start one automatic bidirectional sync engine. It watches local
+    // edits/deletions, listens for Supabase Realtime changes, and retries in
+    // the background so the user never has to press Push/Pull.
+    try { startAutomaticDataSync().catch(e => console.warn('Automatic data sync start skipped:', e)); } catch (e) { console.warn('Automatic data sync start skipped:', e); }
+
+    // 5. Restore cross-device AI history when a Supabase session exists.
+    try {
+      const sb = getSupabase();
+      sb?.auth?.onAuthStateChange(async (_event, session) => {
+        state.aiCloudUser = session?.user || null;
+        const result = await loadAiChatHistory().catch(() => ({ user: state.aiCloudUser, messages: [], cloud: false }));
+        if (result.user) state.aiCloudUser = result.user;
+        state.aiCloudConnected = !!result.cloud;
+        if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
+        state.aiHistoryLoaded = true;
+        if (state.aiCloudUser?.id) {
+          startAutomaticDataSync().then(() => { if (state.view === 'courses' || state.view === 'today') render(); }).catch(() => {});
+        } else {
+          stopAutomaticDataSync();
+        }
+        if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; }
+        if (state.aiCloudConnected && state.aiCloudUser?.id) {
+          aiHistoryUnsubscribe = await subscribeToAiChatHistory(state.aiCloudUser.id, message => {
+            const exists = state.aiChatMessages.some(m => m.id === message.id);
+            if (!exists) { state.aiChatMessages.push(message); render(); }
+          });
+        }
+        if (state.view === 'ai' || state.view === 'settings') render();
+      });
+      loadAiChatHistory().then(async result => {
+        state.aiCloudUser = result.user || null;
+        state.aiCloudConnected = !!result.cloud;
+        if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
+        state.aiHistoryLoaded = true;
+        if (state.aiCloudUser?.id) {
+          startAutomaticDataSync().then(() => { if (state.view === 'courses' || state.view === 'today') render(); }).catch(() => {});
+        }
+        if (!aiHistoryUnsubscribe && state.aiCloudConnected && state.aiCloudUser?.id) {
+          aiHistoryUnsubscribe = await subscribeToAiChatHistory(state.aiCloudUser.id, message => {
+            if (!state.aiChatMessages.some(m => m.id === message.id)) { state.aiChatMessages.push(message); render(); }
+          });
+        }
+        if (state.view === 'ai') render();
+      }).catch(() => { state.aiHistoryLoaded = true; });
+    } catch (authErr) { console.warn('AI history auth initialization skipped:', authErr); }
+
+    // 5. Asynchronous background cloud sync (non-blocking)
+    try {
+      setupRealtimeListener(() => {
+        syncDataFromSupabase().catch(() => {});
+      });
+      syncDataFromSupabase().catch((syncErr) => {
+        console.warn('Notice: Background course sync using local cache:', syncErr);
+      });
+    } catch (cloudErr) {
+      console.warn('Cloud listener setup skipped:', cloudErr);
+    }
+  } catch (fatalBootstrapErr) {
+    console.error('Fatal bootstrap error:', fatalBootstrapErr);
+    const app = document.getElementById('app');
+    if (app) {
+      app.innerHTML = `
+        <div style="padding:40px 20px;text-align:center;color:#fff;">
+          <h2>School Center</h2>
+          <p style="color:#A7B0D6;">Click below to load with standard settings.</p>
+          <button class="btn-primary" onclick="localStorage.clear();location.reload();">Reset & Reload</button>
+        </div>
+      `;
+    }
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
+
