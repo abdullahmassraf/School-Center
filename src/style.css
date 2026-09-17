@@ -22,35 +22,46 @@
   --lava-d: #F0608A;
   --lava-opacity: 1;
 
-  /* Simple Glass Tokens (used by inline template styles) */
-  --glass: rgba(255, 255, 255, 0.03);
-  --glass-hi: rgba(255, 255, 255, 0.08);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-spec: rgba(255, 255, 255, 0.15);
+  /* Centralized True iOS / visionOS Glass Design Tokens */
+  --glass-background: rgba(255, 255, 255, 0.04);
+  --glass-background-strong: rgba(255, 255, 255, 0.075);
+  --glass-background-subtle: rgba(255, 255, 255, 0.025);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-strong: rgba(255, 255, 255, 0.10);
+  --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.42), 0 4px 12px -2px rgba(0, 0, 0, 0.22);
+  --glass-shadow-lg: 0 24px 48px -12px rgba(0, 0, 0, 0.55), 0 8px 24px -4px rgba(0, 0, 0, 0.35);
+  --glass-blur: 24px;
+  --glass-saturation: 160%;
 
-  /* Three-Tier Glass Hierarchy */
+  /* Legacy & Three-Tier Compatibility Tokens (Calibrated to Soft Glare-Free iOS Glass) */
+  --glass: var(--glass-background);
+  --glass-hi: var(--glass-background-strong);
+  --glass-border-legacy: var(--glass-border);
+  --glass-spec: rgba(255, 255, 255, 0.07);
+
   /* Tier 1: Primary Glass (Nav, Modals, Floating Dock, Dynamic Island Pill) */
-  --glass-primary-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-  --glass-primary-border: rgba(255, 255, 255, 0.24);
+  --glass-primary-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  --glass-primary-border: rgba(255, 255, 255, 0.08);
   --glass-primary-blur: 28px;
-  --glass-primary-spec: rgba(255, 255, 255, 0.65);
+  --glass-primary-spec: rgba(255, 255, 255, 0.10);
 
   /* Tier 2: Secondary Glass (Cards, Lists, Segmented Controls) */
-  --glass-secondary-bg: linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
-  --glass-secondary-border: rgba(255, 255, 255, 0.14);
+  --glass-secondary-bg: linear-gradient(165deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  --glass-secondary-border: rgba(255, 255, 255, 0.06);
   --glass-secondary-blur: 20px;
-  --glass-secondary-spec: rgba(255, 255, 255, 0.35);
+  --glass-secondary-spec: rgba(255, 255, 255, 0.06);
 
   /* Tier 3: Content Surface (Text reading, document viewer, note editor) */
-  --content-surface-bg: rgba(11, 15, 46, 0.65);
-  --content-surface-border: rgba(255, 255, 255, 0.08);
+  --content-surface-bg: rgba(11, 15, 46, 0.72);
+  --content-surface-border: rgba(255, 255, 255, 0.06);
 
   /* Border Radius & Hairlines */
   --radius-xl: 28px;
   --radius-lg: 22px;
   --radius-md: 15px;
   --radius-sm: 10px;
-  --hairline: rgba(255, 255, 255, 0.09);
+  --hairline: rgba(255, 255, 255, 0.06);
 
   /* Safe Area Offsets */
   --sat: env(safe-area-inset-top, 0px);
@@ -317,30 +328,18 @@ body {
   color: var(--accent-3);
 }
 
-/* Panels */
+/* Panels — True iOS Translucent Glass Surfaces */
 .panel {
   background: var(--glass-secondary-bg);
-  border: 1px solid var(--glass-secondary-border);
-  -webkit-backdrop-filter: blur(var(--glass-secondary-blur)) saturate(160%);
-  backdrop-filter: blur(var(--glass-secondary-blur)) saturate(160%);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   border-radius: var(--radius-lg);
   padding: 20px;
   margin-bottom: 18px;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 1px 0 0 var(--glass-secondary-spec) inset, 0 14px 32px -10px rgba(2, 4, 16, 0.5);
-}
-
-.panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 8%;
-  right: 8%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--glass-secondary-spec), transparent);
-  opacity: 0.6;
-  pointer-events: none;
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
 }
 
 .panel h2 {
@@ -1774,3 +1773,463 @@ select.modal-input { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
 }
+
+/* ============================================================================
+   MONTH CALENDAR MODAL (Full 30-Day / Month Experience)
+   ============================================================================ */
+.month-cal-container {
+  max-width: 580px !important;
+}
+
+.month-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.month-cal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+}
+
+.month-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.month-nav-btn {
+  background: var(--glass-background);
+  border: 1px solid var(--glass-border);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.month-nav-btn:hover {
+  background: var(--glass-background-strong);
+  border-color: var(--glass-border-strong);
+}
+
+.month-grid-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted-dim);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.month-grid-cells {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.month-cell {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--glass-background-subtle);
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  user-select: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.month-cell:hover {
+  background: var(--glass-background-strong);
+  border-color: var(--glass-border);
+}
+
+.month-cell.adjacent {
+  opacity: 0.3;
+}
+
+.month-cell.today {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.month-cell.selected {
+  background: var(--accent) !important;
+  color: #0B0F2E !important;
+  border-color: var(--accent) !important;
+  font-weight: 800 !important;
+  box-shadow: 0 4px 14px rgba(139, 124, 246, 0.4);
+}
+
+.month-cell-dots {
+  display: flex;
+  gap: 3px;
+  position: absolute;
+  bottom: 4px;
+}
+
+.cell-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.cell-dot.class-dot {
+  background: var(--accent);
+}
+
+.cell-dot.asg-dot {
+  background: var(--accent-amber);
+}
+
+.month-cell.selected .cell-dot {
+  background: #0B0F2E !important;
+}
+
+.month-cal-agenda {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ============================================================================
+   SPOTLIGHT SEARCH MODAL
+   ============================================================================ */
+.spotlight-box {
+  max-width: 560px !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.spotlight-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.spotlight-input-wrap svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.spotlight-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 1.05rem;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.spotlight-results {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+}
+
+.spotlight-section-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted-dim);
+  letter-spacing: 0.08em;
+  padding: 8px 8px 4px;
+}
+
+.spotlight-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  color: var(--ink);
+}
+
+.spotlight-item:hover {
+  background: var(--glass-background-strong);
+}
+
+.spotlight-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spotlight-item-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.spotlight-item-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.spotlight-tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--glass-background);
+  border: 1px solid var(--glass-border);
+  color: var(--muted);
+}
+
+/* ============================================================================
+   DYNAMIC SYNC & CLOUD STATUS DRAWER
+   ============================================================================ */
+.sync-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--glass-background-subtle);
+  border: 1px solid var(--glass-border);
+  margin-bottom: 12px;
+}
+
+.sync-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sync-job-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-job-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.sync-progress-track {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sync-progress-fill {
+  height: 100%;
+  background: var(--accent-2);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* ============================================================================
+   VOICE RECORDING STUDIO ENHANCEMENTS
+   ============================================================================ */
+.voice-studio-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px;
+  gap: 16px;
+  background: var(--glass-background-subtle);
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
+}
+
+.voice-timer-large {
+  font-size: 2.4rem;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.voice-waveform-canvas {
+  width: 100%;
+  height: 80px;
+  border-radius: 10px;
+  background: rgba(11, 15, 46, 0.5);
+  border: 1px solid var(--hairline);
+}
+
+.voice-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.voice-ctrl-btn {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+  user-select: none;
+}
+
+.voice-ctrl-btn.record-main {
+  width: 64px;
+  height: 64px;
+  background: #FF453A;
+  color: white;
+  box-shadow: 0 4px 20px rgba(255, 69, 58, 0.45);
+}
+
+.voice-ctrl-btn.record-main.recording {
+  animation: pulseGlow 1.2s infinite;
+  background: #FF3B30;
+}
+
+.voice-ctrl-btn.pause-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+  border: 1px solid var(--glass-border);
+}
+
+.voice-ctrl-btn:active {
+  transform: scale(0.92);
+}
+
+/* ============================================================================
+   DUAL-MODE AI ASSISTANT (Student & Developer Modes)
+   ============================================================================ */
+.ai-modal-box {
+  max-width: 600px !important;
+  height: 650px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.ai-head-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0 16px;
+}
+
+.ai-tab-btn {
+  padding: 14px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.ai-chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-bubble {
+  max-width: 85%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.ai-bubble.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #0B0F2E;
+  font-weight: 500;
+  border-bottom-right-radius: 4px;
+}
+
+.ai-bubble.assistant {
+  align-self: flex-start;
+  background: var(--glass-background-strong);
+  border: 1px solid var(--glass-border);
+  color: var(--ink);
+  border-bottom-left-radius: 4px;
+}
+
+.ai-dev-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: monospace;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(52, 209, 191, 0.12);
+  border: 1px solid rgba(52, 209, 191, 0.3);
+  color: var(--accent-2);
+  margin: 4px 0;
+}
+
+.ai-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--hairline);
+  background: rgba(11, 15, 46, 0.6);
+}
+
+.ai-text-input {
+  flex: 1;
+  background: var(--glass-background);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 0.88rem;
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+}
+
+.ai-text-input:focus {
+  border-color: var(--accent);
+}
+
