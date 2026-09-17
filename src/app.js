@@ -1,6 +1,6 @@
 // ============================================================================
-// src/app.js — Full Dynamic Frontend Engine for School Center (Redesigned)
-// Mobile-First Academic OS · iPhone/visionOS Glassmorphism · Real Web Audio
+// src/app.js â€” Full Dynamic Frontend Engine for School Center (Redesigned)
+// Mobile-First Academic OS Â· iPhone/visionOS Glassmorphism Â· Real Web Audio
 // ============================================================================
 
 import { 
@@ -171,25 +171,25 @@ const STATIC_COURSES = [
     ],
     textbook:'Linear Algebra with Applications, 10th edition, by Steven J. Leon and Lisette de Pillis',
     syllabus:[
-      ['1','Sep 7','Matrices and Systems of Equations — Systems of linear equations, row reduction and echelon forms, matrix operations','Diagnostic Assessment · Homework 1'],
-      ['2','Sep 14','Matrix Operations & Inverses — Matrix multiplication, algebraic rules, inverse of a matrix, elementary matrices','Quiz 1 (10%) · Homework 2'],
-      ['3','Sep 21','Determinants — The determinant of a matrix, properties of determinants, Cramer\'s rule','Assignment 1 (5%)'],
-      ['4','Sep 28','Vector Spaces — Subspaces, null spaces, column spaces, linear transformations','Homework 3'],
-      ['5','Oct 5','Linear Independence and Bases — Linearly independent sets, bases, coordinate systems, dimension of a vector space','Quiz 2 (10%) · Homework 4'],
-      ['6','Oct 12','Rank & Change of Basis — The rank-nullity theorem, change of basis, application to differential equations','Assignment 2 (5%)'],
-      ['7','Oct 19','Midterm Exam — Comprehensive through Week 6','Midterm Exam (30%)'],
-      ['—','Oct 26','Reading Week — no classes scheduled','—'],
-      ['8','Nov 2','Linear Transformations — Definition and examples, matrix representations, similarity','Homework 5'],
-      ['9','Nov 9','Eigenvalues and Eigenvectors — Characteristic equation, diagonalization, complex eigenvalues','Homework 6'],
-      ['10','Nov 16','Orthogonality — Inner products, lengths, orthogonality, orthogonal projections','Assignment 3 (5%)'],
-      ['11','Nov 23','The Gram-Schmidt Process — Orthonormal bases, Gram-Schmidt orthogonalization, QR-factorization','Homework 7'],
-      ['12','Nov 30','Least Squares & Symmetric Matrices — Least squares problems, diagonalization of symmetric matrices, quadratic forms','Homework 8'],
-      ['13','Dec 7','Singular Value Decomposition & Review — SVD overview, review for final examination','Review session'],
-      ['14','Dec 14','Final Exam Period — Scheduled centrally by Sheridan registrar','Final Exam (35%)'],
+      ['1','Sep 7','Matrices and Systems of Equations â€” Systems of linear equations, row reduction and echelon forms, matrix operations','Diagnostic Assessment Â· Homework 1'],
+      ['2','Sep 14','Matrix Operations & Inverses â€” Matrix multiplication, algebraic rules, inverse of a matrix, elementary matrices','Quiz 1 (10%) Â· Homework 2'],
+      ['3','Sep 21','Determinants â€” The determinant of a matrix, properties of determinants, Cramer\'s rule','Assignment 1 (5%)'],
+      ['4','Sep 28','Vector Spaces â€” Subspaces, null spaces, column spaces, linear transformations','Homework 3'],
+      ['5','Oct 5','Linear Independence and Bases â€” Linearly independent sets, bases, coordinate systems, dimension of a vector space','Quiz 2 (10%) Â· Homework 4'],
+      ['6','Oct 12','Rank & Change of Basis â€” The rank-nullity theorem, change of basis, application to differential equations','Assignment 2 (5%)'],
+      ['7','Oct 19','Midterm Exam â€” Comprehensive through Week 6','Midterm Exam (30%)'],
+      ['â€”','Oct 26','Reading Week â€” no classes scheduled','â€”'],
+      ['8','Nov 2','Linear Transformations â€” Definition and examples, matrix representations, similarity','Homework 5'],
+      ['9','Nov 9','Eigenvalues and Eigenvectors â€” Characteristic equation, diagonalization, complex eigenvalues','Homework 6'],
+      ['10','Nov 16','Orthogonality â€” Inner products, lengths, orthogonality, orthogonal projections','Assignment 3 (5%)'],
+      ['11','Nov 23','The Gram-Schmidt Process â€” Orthonormal bases, Gram-Schmidt orthogonalization, QR-factorization','Homework 7'],
+      ['12','Nov 30','Least Squares & Symmetric Matrices â€” Least squares problems, diagonalization of symmetric matrices, quadratic forms','Homework 8'],
+      ['13','Dec 7','Singular Value Decomposition & Review â€” SVD overview, review for final examination','Review session'],
+      ['14','Dec 14','Final Exam Period â€” Scheduled centrally by Sheridan registrar','Final Exam (35%)'],
     ],
     lectures:[
       {
-        title:'Week 1 — Systems of Linear Equations & Row Operations',
+        title:'Week 1 â€” Systems of Linear Equations & Row Operations',
         concepts:[
           ['Linear system','A collection of one or more linear equations involving the same set of variables.'],
           ['Augmented matrix','A compact grid $[A \\mid \\mathbf{b}]$ combining the coefficient matrix and the right-hand constants.'],
@@ -200,7 +200,7 @@ const STATIC_COURSES = [
     ],
     worksheets:[
       {
-        title:'Tutorial 1 — Linear Systems & Gaussian Elimination',
+        title:'Tutorial 1 â€” Linear Systems & Gaussian Elimination',
         items:[
           'Determine the condition on $k$ such that the system has unique, infinite, or no solutions: $x + 2y = 3$, $3x + ky = 9$.',
           'Solve the $3 \\times 3$ system using Gauss-Jordan elimination: $x - 2y + z = 0$, $2x + y - 3z = 5$, $4x - 7y - z = -1$.'
@@ -224,13 +224,13 @@ const STATIC_COURSES = [
     ],
     textbook:'Energy Systems Engineering: Evaluation and Implementation, Vanek & Albright, 3rd ed.',
     syllabus:[
-      ['1','Sep 8','Energy Fundamentals — First & Second laws of thermodynamics, energy units & conversions','Review Quiz'],
-      ['2','Sep 15','Fossil Fuels — Combustion chemistry, coal, oil, natural gas, emissions modeling','Quiz 1 (5%)'],
-      ['3','Sep 22','Rankine & Brayton Cycles — Steam and gas turbine power generation cycles','Assignment 1 (5%)']
+      ['1','Sep 8','Energy Fundamentals â€” First & Second laws of thermodynamics, energy units & conversions','Review Quiz'],
+      ['2','Sep 15','Fossil Fuels â€” Combustion chemistry, coal, oil, natural gas, emissions modeling','Quiz 1 (5%)'],
+      ['3','Sep 22','Rankine & Brayton Cycles â€” Steam and gas turbine power generation cycles','Assignment 1 (5%)']
     ],
     lectures:[
       {
-        title:'Module 1 — Energy Fundamentals & Thermodynamics',
+        title:'Module 1 â€” Energy Fundamentals & Thermodynamics',
         concepts:[
           ['First Law of Thermodynamics','Conservation of energy: $\\Delta U = Q - W$.'],
           ['Second Law of Thermodynamics','Entropy of an isolated system always increases. Carnot efficiency $\\eta_C = 1 - T_C / T_H$.']
@@ -252,8 +252,8 @@ const STATIC_COURSES = [
       ['Final Exam','25%'],
     ],
     syllabus:[
-      ['1','Sep 9','Engineering Decision Making — Time value of money, cash flow diagrams','Intro Exercises'],
-      ['2','Sep 16','Interest Formulas — Single payments, uniform series, gradient series','Quiz 1']
+      ['1','Sep 9','Engineering Decision Making â€” Time value of money, cash flow diagrams','Intro Exercises'],
+      ['2','Sep 16','Interest Formulas â€” Single payments, uniform series, gradient series','Quiz 1']
     ],
     lectures:[],
     worksheets:[]
@@ -268,7 +268,7 @@ const STATIC_COURSES = [
       ['Paleopathology Group Project','20%'],
     ],
     syllabus:[
-      ['1','Module 1','Anthropological Perspectives on Health — core definitions, medical anthropology','Discussion · Quiz 1 (5%)'],
+      ['1','Module 1','Anthropological Perspectives on Health â€” core definitions, medical anthropology','Discussion Â· Quiz 1 (5%)'],
       ['2','Module 2','Biocultural Perspectives & Ethics in Health Research','Quiz 2 (5%)']
     ],
     lectures:[],
@@ -283,10 +283,20 @@ const STATIC_COURSES = [
 
 let COURSES = JSON.parse(JSON.stringify(STATIC_COURSES));
 
-function courseById(id){
+export function cleanCourseCode(code) {
+  return (code || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+}
+
+function courseById(id) {
   if (!id) return null;
-  const clean = id.replace(/\s+/g, '').toLowerCase();
-  return COURSES.find(c => c.id === id || (c.code && c.code.replace(/\s+/g, '').toLowerCase() === clean));
+  const targetKey = cleanCourseCode(id);
+  return COURSES.find(c => 
+    c.id === id || 
+    c.id.toLowerCase() === id.toLowerCase() || 
+    cleanCourseCode(c.id) === targetKey || 
+    cleanCourseCode(c.code) === targetKey || 
+    (c.dbId && c.dbId === id)
+  );
 }
 
 /* =========================================================================
@@ -364,9 +374,10 @@ function createLavaEngine(canvas){
 
   function initBlobs(){
     blobs = [
-      { x: W * 0.25, y: H * 0.3, vx: 0.04, vy: 0.03, r: Math.min(W, H) * 0.65 + 180, c: colors[0], phase: 0 },
-      { x: W * 0.75, y: H * 0.7, vx: -0.035, vy: -0.025, r: Math.min(W, H) * 0.7 + 200, c: colors[1], phase: 2.1 },
-      { x: W * 0.5, y: H * 0.85, vx: 0.025, vy: -0.04, r: Math.min(W, H) * 0.6 + 150, c: colors[2], phase: 4.2 },
+      { x: W * 0.2, y: H * 0.25, vx: 0.045, vy: 0.03, r: Math.min(W, H) * 0.6 + 160, c: colors[0], phase: 0 },
+      { x: W * 0.8, y: H * 0.35, vx: -0.038, vy: 0.025, r: Math.min(W, H) * 0.65 + 180, c: colors[1], phase: 1.8 },
+      { x: W * 0.3, y: H * 0.8, vx: 0.03, vy: -0.042, r: Math.min(W, H) * 0.7 + 200, c: colors[2], phase: 3.5 },
+      { x: W * 0.75, y: H * 0.75, vx: -0.035, vy: -0.03, r: Math.min(W, H) * 0.55 + 150, c: colors[3] || colors[0], phase: 5.2 },
     ];
   }
 
@@ -377,26 +388,26 @@ function createLavaEngine(canvas){
 
   function step(t){
     if (!isVisible) return;
-    ctx.fillStyle = '#0B0F2E';
-    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#070B1E';
+    ctx.fillRect(0, 0, W, H);
 
-    // Render soft ambient fluid masses
+    // Render luminous chromatic fluid masses that refract through translucent glass
     blobs.forEach((b)=>{
       b.x += b.vx; b.y += b.vy;
-      const pulse = Math.sin(t * 0.0006 + b.phase) * 35;
-      const currentR = Math.max(150, b.r + pulse);
+      const pulse = Math.sin(t * 0.0007 + b.phase) * 45;
+      const currentR = Math.max(160, b.r + pulse);
 
-      if(b.x - currentR < -100){ b.x = -100 + currentR; b.vx = Math.abs(b.vx); }
-      if(b.x + currentR > W + 100){ b.x = W + 100 - currentR; b.vx = -Math.abs(b.vx); }
-      if(b.y - currentR < -100){ b.y = -100 + currentR; b.vy = Math.abs(b.vy); }
-      if(b.y + currentR > H + 100){ b.y = H + 100 - currentR; b.vy = -Math.abs(b.vy); }
+      if(b.x - currentR < -120){ b.x = -120 + currentR; b.vx = Math.abs(b.vx); }
+      if(b.x + currentR > W + 120){ b.x = W + 120 - currentR; b.vx = -Math.abs(b.vx); }
+      if(b.y - currentR < -120){ b.y = -120 + currentR; b.vy = Math.abs(b.vy); }
+      if(b.y + currentR > H + 120){ b.y = H + 120 - currentR; b.vy = -Math.abs(b.vy); }
 
       const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, currentR);
       g.addColorStop(0, b.c);
-      g.addColorStop(0.35, b.c);
-      g.addColorStop(1, 'rgba(11, 15, 46, 0)');
+      g.addColorStop(0.4, b.c);
+      g.addColorStop(1, 'rgba(7, 11, 30, 0)');
       
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.65;
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(b.x, b.y, currentR, 0, Math.PI*2);
@@ -462,6 +473,8 @@ let state = {
   aiAssistantOpen: false,
   aiAssistantMode: 'student', // 'student' | 'developer'
   aiChatMessages: [],
+  aiIsThinking: false,
+  aiKeySettingsOpen: false,
   devConfirmationPending: null
 };
 
@@ -479,13 +492,19 @@ export async function syncDataFromSupabase() {
     if (!dbCourses || !dbCourses.length) return;
 
     dbCourses.forEach(dbC => {
-      const match = COURSES.find(c => c.code && dbC.code && c.code.toUpperCase() === dbC.code.toUpperCase());
+      const dbKey = cleanCourseCode(dbC.code || dbC.id);
+      const match = COURSES.find(c => 
+        cleanCourseCode(c.code) === dbKey || 
+        cleanCourseCode(c.id) === dbKey || 
+        (c.dbId && c.dbId === dbC.id)
+      );
+
       if (match) {
         match.dbId = dbC.id;
-        match.name = dbC.name || match.name;
-        match.instructor = dbC.instructor || match.instructor;
-        match.accent = dbC.color || match.accent;
-        match.modules = dbC.modules || [];
+        if (dbC.name && (!match.name || match.name === dbC.code)) match.name = dbC.name;
+        if (dbC.instructor && (!match.instructor || match.instructor === 'Instructor')) match.instructor = dbC.instructor;
+        if (dbC.color) match.accent = dbC.color;
+        match.modules = dbC.modules || match.modules || [];
 
         const dbMaterials = [];
         (dbC.modules || []).forEach(mod => {
@@ -496,28 +515,43 @@ export async function syncDataFromSupabase() {
         match.cloudMaterials = dbMaterials;
         if (dbMaterials.length > 0) match.hasMaterial = true;
       } else {
-        const newCourse = {
-          id: dbC.code.toLowerCase(),
-          dbId: dbC.id,
-          code: dbC.code,
-          name: dbC.name,
-          instructor: dbC.instructor || 'Instructor',
-          hasMaterial: (dbC.modules || []).some(m => m.materials && m.materials.length > 0),
-          accent: dbC.color || '#8B7CF6',
-          schedule: [],
-          syllabus: [],
-          lectures: [],
-          worksheets: [],
-          modules: dbC.modules || [],
-          cloudMaterials: []
-        };
-        (dbC.modules || []).forEach(mod => {
-          (mod.materials || []).forEach(mat => {
-            newCourse.cloudMaterials.push({ ...mat, moduleTitle: mod.title });
+        const alreadyExists = COURSES.some(c => 
+          cleanCourseCode(c.code) === dbKey || 
+          cleanCourseCode(c.id) === dbKey
+        );
+        if (!alreadyExists) {
+          const newCourse = {
+            id: (dbC.code || dbC.id).toLowerCase().replace(/[^a-z0-9]/g, ''),
+            dbId: dbC.id,
+            code: dbC.code,
+            name: dbC.name,
+            instructor: dbC.instructor || 'Instructor',
+            hasMaterial: (dbC.modules || []).some(m => m.materials && m.materials.length > 0),
+            accent: dbC.color || '#8B7CF6',
+            schedule: [],
+            syllabus: [],
+            lectures: [],
+            worksheets: [],
+            modules: dbC.modules || [],
+            cloudMaterials: []
+          };
+          (dbC.modules || []).forEach(mod => {
+            (mod.materials || []).forEach(mat => {
+              newCourse.cloudMaterials.push({ ...mat, moduleTitle: mod.title });
+            });
           });
-        });
-        COURSES.push(newCourse);
+          COURSES.push(newCourse);
+        }
       }
+    });
+
+    // Enforce strict deduplication so courses are never duplicated
+    const seen = new Set();
+    COURSES = COURSES.filter(c => {
+      const key = cleanCourseCode(c.code) || cleanCourseCode(c.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
     render();
@@ -527,7 +561,7 @@ export async function syncDataFromSupabase() {
 }
 
 /* =========================================================================
-   UI RENDERING — MAIN SHELL
+   UI RENDERING â€” MAIN SHELL
    ========================================================================= */
 function render() {
   const app = document.getElementById('app');
@@ -632,18 +666,18 @@ function renderHeader() {
 
   let statusHtml = '';
   if (activeCount > 0) {
-    statusHtml = `<div class="jobs-pill-spinner"></div><span>◌ ${activeCount} processing</span>`;
+    statusHtml = `<div class="jobs-pill-spinner"></div><span>â—Œ ${activeCount} processing</span>`;
   } else if (failedCount > 0) {
     statusHtml = `<div class="jobs-pill-dot err"></div><span>! ${failedCount} needs attention</span>`;
   } else {
-    statusHtml = `<div class="jobs-pill-dot"></div><span>● Synced</span>`;
+    statusHtml = `<div class="jobs-pill-dot"></div><span>â— Synced</span>`;
   }
 
   return `
     <header class="app-header">
       <div class="header-meta">
         <h1 class="headfont">School Center</h1>
-        <div class="sub">Abdullah Massraf · Fall 2026 · Mechanical Eng</div>
+        <div class="sub">Abdullah Massraf Â· Fall 2026 Â· Mechanical Eng</div>
       </div>
       <div class="header-actions">
         <!-- Dynamic Island Jobs Pill -->
@@ -716,7 +750,7 @@ function renderTodayView() {
       <h2 style="font-size:1.4rem;margin:4px 0 10px;">Good day, Abdullah</h2>
       <p style="margin:0;font-size:0.9rem;color:var(--ink);">
         ${nextClass 
-          ? `Next session: <b>${nextClass.course.code}</b> (${nextClass.schedule.type}) at ${nextClass.schedule.start} · Room ${nextClass.schedule.room || 'Online'}${nextClass.schedule.instructor ? ' · ' + nextClass.schedule.instructor : ''}`
+          ? `Next session: <b>${nextClass.course.code}</b> (${nextClass.schedule.type}) at ${nextClass.schedule.start} Â· Room ${nextClass.schedule.room || 'Online'}${nextClass.schedule.instructor ? ' Â· ' + nextClass.schedule.instructor : ''}`
           : `No scheduled campus lectures today. Great day to tackle coursework and practice.`}
       </p>
     </div>
@@ -810,7 +844,7 @@ function renderCalendarView() {
     <div class="panel" style="padding:16px 14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 4px;">
         <h2 style="margin:0;font-size:1.15rem;">${currentMonthYear}</h2>
-        <button class="btn-ghost" id="open-month-cal-btn" style="font-size:0.75rem;padding:4px 10px;min-height:30px;">View 30 Days →</button>
+        <button class="btn-ghost" id="open-month-cal-btn" style="font-size:0.75rem;padding:4px 10px;min-height:30px;">View 30 Days â†’</button>
       </div>
       
       <div class="date-strip">${stripHtml}</div>
@@ -826,8 +860,8 @@ function renderCalendarView() {
             <div class="agenda-time">${c.schedule.start}${c.schedule.end ? '<br><span style="color:var(--muted-dim);font-size:0.7rem;">' + c.schedule.end + '</span>' : ''}</div>
             <div class="agenda-main">
               <div class="agenda-course">${c.course.code}</div>
-              <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
-              <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
+              <div class="agenda-title">${c.course.name} Â· ${c.schedule.type}</div>
+              <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' Â· ' + c.schedule.instructor : ''}</div>
             </div>
           </div>
         `).join('')}
@@ -839,7 +873,7 @@ function renderCalendarView() {
               <div class="agenda-time">Due Date</div>
               <div class="agenda-main">
                 <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
-                <div class="agenda-title">📋 ${a.title}</div>
+                <div class="agenda-title">ðŸ“‹ ${a.title}</div>
               </div>
             </div>
           `;
@@ -868,9 +902,9 @@ function renderCoursesHubView() {
       <div class="course-card" data-course-id="${c.id}" style="--card-color:${c.accent}">
         <div class="code">${c.code}</div>
         <div class="name">${c.name}</div>
-        <div class="instr">${c.instructor && c.instructor !== '—' ? c.instructor : 'Slate Online / Async'}</div>
+        <div class="instr">${c.instructor && c.instructor !== 'â€”' ? c.instructor : 'Slate Online / Async'}</div>
         <div class="course-card-footer">
-          <span style="color:${c.accent};font-weight:600;">${matsCount} Docs · ${asgCount} Tasks</span>
+          <span style="color:${c.accent};font-weight:600;">${matsCount} Docs Â· ${asgCount} Tasks</span>
           <span class="icon-inline" style="color:var(--muted);">${icon('chevronRight')}</span>
         </div>
       </div>
@@ -910,7 +944,7 @@ function renderCourseDetailView(c) {
         <div class="surface-content" style="padding:16px;">
           <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Instructor & Classroom</div>
           <div style="font-size:1.05rem;font-weight:600;margin-top:2px;">${c.instructor || 'Instructor'}</div>
-          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;">• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'C328'}</div>`).join('')}
+          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;">â€¢ ${s.day} ${s.start}â€“${s.end} (${s.type}) Â· Room ${s.room || 'C328'}</div>`).join('')}
         </div>
 
         ${c.evaluation ? `
@@ -938,7 +972,7 @@ function renderCourseDetailView(c) {
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
                 <div>
                   <h3 style="margin:0 0 4px;font-size:1.05rem;">${m.title}</h3>
-                  <div style="font-size:0.75rem;color:var(--muted);">${m.moduleTitle || 'Materials'} · ${m.type}</div>
+                  <div style="font-size:0.75rem;color:var(--muted);">${m.moduleTitle || 'Materials'} Â· ${m.type}</div>
                 </div>
                 ${m.file_url ? `
                   <a href="${m.file_url}" target="_blank" rel="noopener noreferrer" class="icon-btn sm" title="Download Document" style="text-decoration:none;">
@@ -1049,9 +1083,9 @@ function renderCourseDetailView(c) {
               </div>
               <div style="font-size:0.88rem;line-height:1.6;margin:8px 0;white-space:pre-wrap;">${n.content}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
-                <button class="btn-ghost" data-ai-note="summarize" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">⚡ Summarize</button>
-                <button class="btn-ghost" data-ai-note="study_guide" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">📖 Study Guide</button>
-                <button class="btn-ghost" data-ai-note="flashcards" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">🗂️ Flashcards</button>
+                <button class="btn-ghost" data-ai-note="summarize" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">âš¡ Summarize</button>
+                <button class="btn-ghost" data-ai-note="study_guide" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">ðŸ“– Study Guide</button>
+                <button class="btn-ghost" data-ai-note="flashcards" data-note-id="${n.id}" style="min-height:30px;font-size:0.75rem;padding:0 10px;">ðŸ—‚ï¸ Flashcards</button>
               </div>
             </div>
           `).join('')}
@@ -1070,7 +1104,7 @@ function renderCourseDetailView(c) {
         <div class="backlink" id="course-back-btn">${icon('arrowLeft')} All Courses</div>
       </div>
       <div class="course-header">
-        <h2 class="headfont">${c.code} — ${c.name}</h2>
+        <h2 class="headfont">${c.code} â€” ${c.name}</h2>
         <div class="meta">${c.instructor || 'Instructor'}</div>
       </div>
       <div class="course-tabs">
@@ -1177,6 +1211,22 @@ function renderMoreView() {
       <div style="display:flex;gap:10px;">
         <button class="btn-primary" id="save-cloud-settings-btn">Save Cloud Config</button>
         <button class="btn-ghost" id="manual-sync-btn">Sync from Cloud</button>
+      </div>
+    </div>
+
+    <!-- Google Gemini AI Engine -->
+    <div class="panel">
+      <h2 class="headfont" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Google Gemini AI Engine</span>
+        <span class="badge" style="background:rgba(139,124,246,0.2);color:var(--accent);">gemini-3.6-flash</span>
+      </h2>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">Connects real-time multimodal intelligence to your Fall 2026 courses, assignments, and timetable.</div>
+      <div class="field-label">Gemini API Key</div>
+      <input type="password" id="more-gemini-key-field" class="search-input" style="border-radius:var(--radius-sm);margin-bottom:14px;" value="${getGeminiApiKey()}">
+
+      <div style="display:flex;gap:10px;">
+        <button class="btn-primary" id="save-more-ai-key-btn">Save Gemini Key</button>
+        <button class="btn-ghost" id="test-gemini-btn">Test Connection</button>
       </div>
     </div>
   `;
@@ -1307,7 +1357,7 @@ function renderAssignmentModal() {
   if (!state.assignmentModalOpen) return '';
   const preset = state.assignmentModalPreset || {};
   const courseOptions = COURSES.map(c =>
-    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId) ? 'selected' : ''}>${c.code} — ${c.name}</option>`
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId) ? 'selected' : ''}>${c.code} â€” ${c.name}</option>`
   ).join('');
   const todayISO = new Date().toISOString().split('T')[0];
   const presetDate = preset.dueDate ? new Date(preset.dueDate).toISOString().split('T')[0] : todayISO;
@@ -1321,7 +1371,7 @@ function renderAssignmentModal() {
         </div>
         <div class="modal-body">
           <div class="field-label">Title</div>
-          <input type="text" id="asg-title-input" class="modal-input" placeholder="e.g. Assignment 2 — Determinants" autofocus>
+          <input type="text" id="asg-title-input" class="modal-input" placeholder="e.g. Assignment 2 â€” Determinants" autofocus>
 
           <div class="field-label">Course</div>
           <select id="asg-course-select" class="modal-input">${courseOptions}</select>
@@ -1334,9 +1384,9 @@ function renderAssignmentModal() {
             <div style="flex:1;">
               <div class="field-label">Priority</div>
               <select id="asg-priority-select" class="modal-input">
-                <option value="high">🔴 High</option>
-                <option value="medium" selected>🟡 Medium</option>
-                <option value="low">🟢 Low</option>
+                <option value="high">ðŸ”´ High</option>
+                <option value="medium" selected>ðŸŸ¡ Medium</option>
+                <option value="low">ðŸŸ¢ Low</option>
               </select>
             </div>
           </div>
@@ -1410,8 +1460,8 @@ function renderAssignmentDetailModal() {
           ` : ''}
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-            <button class="btn-ghost" data-asg-ai="rewrite" data-asg-id="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;">✨ AI Rewrite</button>
-            <button class="btn-ghost" id="asg-detail-delete-btn" data-asg-del="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;color:var(--accent-3);">🗑 Delete</button>
+            <button class="btn-ghost" data-asg-ai="rewrite" data-asg-id="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;">âœ¨ AI Rewrite</button>
+            <button class="btn-ghost" id="asg-detail-delete-btn" data-asg-del="${a.id}" style="font-size:0.78rem;min-height:32px;padding:0 12px;color:var(--accent-3);">ðŸ—‘ Delete</button>
           </div>
         </div>
         <div class="modal-footer">
@@ -1430,7 +1480,7 @@ function renderNoteModal() {
   if (!state.noteModalOpen) return '';
   const preset = state.noteModalPreset || {};
   const courseOptions = [{ id: '', code: 'No Course', name: '' }, ...COURSES].map(c =>
-    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' — ' + c.name : ''}</option>`
+    `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' â€” ' + c.name : ''}</option>`
   ).join('');
 
   return `
@@ -1442,7 +1492,7 @@ function renderNoteModal() {
         </div>
         <div class="modal-body">
           <div class="field-label">Title</div>
-          <input type="text" id="note-title-input" class="modal-input" placeholder="e.g. Week 3 Lecture — Vector Spaces" autofocus>
+          <input type="text" id="note-title-input" class="modal-input" placeholder="e.g. Week 3 Lecture â€” Vector Spaces" autofocus>
 
           <div class="field-label">Course</div>
           <select id="note-course-select" class="modal-input">${courseOptions}</select>
@@ -1532,8 +1582,8 @@ function renderFlashcardsModal() {
           <button class="btn-ghost" id="flip-card-btn" style="margin:12px 0;min-height:38px;padding:0 20px;">Flip Card</button>
 
           <div style="display:flex;justify-content:center;gap:12px;">
-            <button class="btn-ghost" id="fc-prev-btn" style="min-height:38px;padding:0 18px;" ${idx === 0 ? 'disabled' : ''}>← Prev</button>
-            <button class="btn-ghost" id="fc-next-btn" style="min-height:38px;padding:0 18px;" ${idx >= allCards.length - 1 ? 'disabled' : ''}>Next →</button>
+            <button class="btn-ghost" id="fc-prev-btn" style="min-height:38px;padding:0 18px;" ${idx === 0 ? 'disabled' : ''}>â† Prev</button>
+            <button class="btn-ghost" id="fc-next-btn" style="min-height:38px;padding:0 18px;" ${idx >= allCards.length - 1 ? 'disabled' : ''}>Next â†’</button>
           </div>
         </div>
       </div>
@@ -1633,8 +1683,8 @@ function renderMonthCalendarModal() {
                 <div class="agenda-time">${c.schedule.start}${c.schedule.end ? '<br><span style="color:var(--muted-dim);font-size:0.7rem;">' + c.schedule.end + '</span>' : ''}</div>
                 <div class="agenda-main">
                   <div class="agenda-course">${c.course.code}</div>
-                  <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
-                  <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
+                  <div class="agenda-title">${c.course.name} Â· ${c.schedule.type}</div>
+                  <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' Â· ' + c.schedule.instructor : ''}</div>
                 </div>
               </div>
             `).join('')}
@@ -1646,7 +1696,7 @@ function renderMonthCalendarModal() {
                   <div class="agenda-time">Due Date</div>
                   <div class="agenda-main">
                     <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
-                    <div class="agenda-title">📋 ${a.title}</div>
+                    <div class="agenda-title">ðŸ“‹ ${a.title}</div>
                   </div>
                 </div>
               `;
@@ -1733,7 +1783,7 @@ function renderSpotlightModal() {
               ${courseResults.map(c => `
                 <div class="spotlight-item" data-spotlight-nav="course" data-spotlight-id="${c.id}">
                   <div class="spotlight-item-main">
-                    <div class="spotlight-item-title">${c.code} — ${c.name}</div>
+                    <div class="spotlight-item-title">${c.code} â€” ${c.name}</div>
                     <div class="spotlight-item-sub">${c.instructor || 'Online'}</div>
                   </div>
                   <span class="spotlight-tag" style="color:${c.accent}">Course</span>
@@ -1746,8 +1796,8 @@ function renderSpotlightModal() {
               ${asgResults.map(a => `
                 <div class="spotlight-item" data-spotlight-nav="asg" data-spotlight-id="${a.id}">
                   <div class="spotlight-item-main">
-                    <div class="spotlight-item-title">📋 ${a.title}</div>
-                    <div class="spotlight-item-sub">Due ${new Date(a.dueDate).toLocaleDateString()} · ${a.status}</div>
+                    <div class="spotlight-item-title">ðŸ“‹ ${a.title}</div>
+                    <div class="spotlight-item-sub">Due ${new Date(a.dueDate).toLocaleDateString()} Â· ${a.status}</div>
                   </div>
                   <span class="spotlight-tag">Task</span>
                 </div>
@@ -1759,7 +1809,7 @@ function renderSpotlightModal() {
               ${noteResults.map(n => `
                 <div class="spotlight-item" data-spotlight-nav="note" data-spotlight-id="${n.id}">
                   <div class="spotlight-item-main">
-                    <div class="spotlight-item-title">✍️ ${n.title}</div>
+                    <div class="spotlight-item-title">âœï¸ ${n.title}</div>
                     <div class="spotlight-item-sub">${(n.content || '').slice(0, 50)}...</div>
                   </div>
                   <span class="spotlight-tag">Note</span>
@@ -1772,8 +1822,8 @@ function renderSpotlightModal() {
               ${topicResults.slice(0, 5).map(t => `
                 <div class="spotlight-item" data-spotlight-nav="course" data-spotlight-id="${t.courseId}">
                   <div class="spotlight-item-main">
-                    <div class="spotlight-item-title">💡 ${t.title}</div>
-                    <div class="spotlight-item-sub">${t.course}${t.sub ? ' · ' + t.sub.slice(0, 45) + '...' : ''}</div>
+                    <div class="spotlight-item-title">ðŸ’¡ ${t.title}</div>
+                    <div class="spotlight-item-sub">${t.course}${t.sub ? ' Â· ' + t.sub.slice(0, 45) + '...' : ''}</div>
                   </div>
                   <span class="spotlight-tag">Concept</span>
                 </div>
@@ -1852,59 +1902,230 @@ function renderSyncDrawer() {
 }
 
 /* =========================================================================
+   GOOGLE GEMINI AI INTEGRATION ENGINE (Real API Key)
+   ========================================================================= */
+export const DEFAULT_GEMINI_KEY = "REDACTED_KEY";
+
+export function getGeminiApiKey() {
+  return localStorage.getItem('sc_gemini_api_key') || DEFAULT_GEMINI_KEY;
+}
+
+export function setGeminiApiKey(key) {
+  if (key && key.trim()) {
+    localStorage.setItem('sc_gemini_api_key', key.trim());
+  } else {
+    localStorage.removeItem('sc_gemini_api_key');
+  }
+}
+
+export function formatAiResponse(raw) {
+  if (!raw) return '';
+  // Sanitize angle brackets except intentional tags
+  let html = raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Fenced Code blocks
+  html = html.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, '<pre class="ai-code-block"><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="ai-inline-code">$1</code>');
+  // Bold **text**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Italic *text*
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  // Bullet points
+  html = html.replace(/(?:^|\n)[*â€¢-]\s+([^\n]+)/g, '<div class="ai-bullet">â€¢ $1</div>');
+  // Double newlines to paragraph break
+  html = html.replace(/\n\n/g, '<div style="height:8px;"></div>');
+  // Single newlines to <br>
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+export function buildGeminiSystemPrompt(mode) {
+  const scheduleSummary = FALL_2026_SCHEDULE.map(s => 
+    `â€¢ ${s.dayName}: ${s.courseCode} (${s.type}) ${s.start}â€“${s.end} in Room ${s.room} (Instructor: ${s.instructor})`
+  ).join('\n');
+
+  const courseSummary = COURSES.map(c => 
+    `â€¢ ${c.code}: ${c.name} (Instructor: ${c.instructor || 'TBA'}, ID: ${c.id})`
+  ).join('\n');
+
+  const pendingAssignments = (typeof assignmentsManager !== 'undefined' ? assignmentsManager.getAll() : [])
+    .filter(a => a.status !== 'completed')
+    .map(a => `â€¢ ${a.title} (Course: ${a.courseId}, Due: ${a.dueDate}, Priority: ${a.priority || 'Normal'})`)
+    .join('\n');
+
+  if (mode === 'developer') {
+    return `You are School Center Developer & Maintenance AI copilot. You diagnose and explain the School Center web application.
+The app is a mobile-first, iOS translucent glassmorphic academic operating system for Abdullah Massraf at Sheridan College.
+Current enrolled courses (${COURSES.length} total, deduplicated):
+${courseSummary}
+
+Weekly timetable:
+${scheduleSummary}
+
+Pending assignments:
+${pendingAssignments || 'None'}
+
+Provide concise, highly competent architectural insight, timetable validation, CSS glass token verification, and maintenance troubleshooting.`;
+  }
+
+  return `You are School Center Academic AI, an elite personal tutor and academic assistant for Abdullah Massraf, an engineering student at Sheridan College (Fall 2026 term).
+
+Abdullah's enrolled courses:
+${courseSummary}
+
+Weekly lecture & lab timetable:
+${scheduleSummary}
+(COMP 15401D and COMM 15401D are asynchronous online courses).
+
+Current assignments & deadlines:
+${pendingAssignments || 'All current assignments completed!'}
+
+Your responsibilities:
+1. Provide accurate, clear, step-by-step academic explanations (Linear Algebra systems/matrices/vector spaces, Energy Systems thermodynamics/cycles, Engineering Economics time-value-of-money, Anthropology of Health, and Composition & Rhetoric).
+2. Help Abdullah plan his week, prioritize deliverables, and answer questions about his timetable or class locations.
+3. Be concise, organized, and encouraging. Use clear formatting with bold text, bullet points, and code/math notation where helpful.`;
+}
+
+export async function queryGemini(userText, mode = 'student') {
+  const apiKey = getGeminiApiKey();
+  const systemPrompt = buildGeminiSystemPrompt(mode);
+
+  // Take recent conversation context
+  const recentHistory = (state.aiChatMessages || [])
+    .filter(m => !m.isThinking && m.text)
+    .slice(-8)
+    .map(m => ({
+      role: m.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text.replace(/<[^>]+>/g, '') }]
+    }));
+
+  const payload = {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }]
+    },
+    contents: recentHistory.length > 0 ? recentHistory : [
+      { role: 'user', parts: [{ text: userText }] }
+    ]
+  };
+
+  const primaryModel = 'gemini-3.6-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    const errorMsg = data.error?.message || `API error ${res.status}: ${res.statusText}`;
+    throw new Error(errorMsg);
+  }
+
+  const candidate = data.candidates?.[0];
+  const responseText = candidate?.content?.parts?.[0]?.text;
+  if (!responseText) {
+    throw new Error('Gemini returned an empty response.');
+  }
+
+  return responseText;
+}
+
+/* =========================================================================
    MODAL: DUAL-MODE AI ASSISTANT (Student & Developer Modes)
    ========================================================================= */
 function renderAiAssistantModal() {
   if (!state.aiAssistantOpen) return '';
   const isDev = state.aiAssistantMode === 'developer';
+  const apiKey = getGeminiApiKey();
+  const isCustomKey = Boolean(localStorage.getItem('sc_gemini_api_key'));
 
   return `
     <div class="modal-overlay open" id="ai-assistant-modal-overlay">
       <div class="modal-box ai-modal-box">
         <div class="ai-head-tabs">
-          <button class="ai-tab-btn ${!isDev ? 'active' : ''}" id="ai-tab-student">🎓 Student Assistant</button>
-          <button class="ai-tab-btn ${isDev ? 'active' : ''}" id="ai-tab-developer">🛠 Developer & Maintenance</button>
+          <button class="ai-tab-btn ${!isDev ? 'active' : ''}" id="ai-tab-student">ðŸŽ“ Student Assistant</button>
+          <button class="ai-tab-btn ${isDev ? 'active' : ''}" id="ai-tab-developer">ðŸ›  Developer Mode</button>
           <div style="flex:1;"></div>
-          <div class="icon-btn sm" id="close-ai-assistant-modal" style="align-self:center;">${icon('close')}</div>
+          <div class="ai-api-pill" id="ai-toggle-key-settings" title="Click to view/change Gemini API Key">
+            <span class="ai-status-dot"></span>
+            <span>Gemini 3.6 Flash</span>
+            <span style="font-size:0.75rem;opacity:0.8;">âš™</span>
+          </div>
+          <div class="icon-btn sm" id="close-ai-assistant-modal" style="align-self:center;margin-left:4px;">${icon('close')}</div>
         </div>
+
+        ${state.aiKeySettingsOpen ? `
+          <div class="ai-key-settings-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <span style="font-size:0.8rem;font-weight:600;">Gemini API Key (Google AI Studio)</span>
+              <span style="font-size:0.72rem;color:var(--muted);">${isCustomKey ? 'Custom Key Saved' : 'Default Project Key Active'}</span>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <input type="password" id="gemini-key-input" class="search-input" style="height:34px;font-size:0.82rem;flex:1;" placeholder="Paste Gemini API key..." value="${apiKey}">
+              <button class="btn-primary" id="save-gemini-key-btn" style="min-height:34px;padding:0 14px;font-size:0.8rem;">Save</button>
+              <button class="btn-ghost" id="reset-gemini-key-btn" style="min-height:34px;padding:0 10px;font-size:0.8rem;" title="Reset to default key">Reset</button>
+            </div>
+          </div>
+        ` : ''}
 
         <div class="ai-chat-stream" id="ai-chat-stream">
           ${!isDev ? `
             <div class="ai-bubble assistant">
-              <b>Hello Abdullah!</b> I'm your academic assistant. How can I help you today?
+              <b>Hello Abdullah!</b> I'm your School Center AI tutor powered by <b>Gemini 3.6 Flash</b>. How can I help you excel in your Fall 2026 courses?
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
-                <button class="btn-ghost ai-prompt-chip" data-prompt="What classes do I have today?" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">📅 Today's Classes</button>
-                <button class="btn-ghost ai-prompt-chip" data-prompt="Summarize Linear Algebra Week 1 row operations" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">📐 Linear Algebra Summary</button>
-                <button class="btn-ghost ai-prompt-chip" data-prompt="Show my upcoming assignments" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">📋 Priority Tasks</button>
+                <button class="btn-ghost ai-prompt-chip" data-prompt="What classes do I have today and where are they located?" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸ“… Today's Classes</button>
+                <button class="btn-ghost ai-prompt-chip" data-prompt="Explain Elementary Row Operations and Reduced Row Echelon Form for Linear Algebra" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸ“ Linear Algebra (RREF)</button>
+                <button class="btn-ghost ai-prompt-chip" data-prompt="What are my upcoming assignment deadlines and priorities?" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸ“‹ Priority Tasks</button>
+                <button class="btn-ghost ai-prompt-chip" data-prompt="Explain the First and Second Laws of Thermodynamics for Energy Systems" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">âš¡ Thermodynamics Laws</button>
               </div>
             </div>
           ` : `
             <div class="ai-bubble assistant">
-              <b>School Center Self-Maintenance Agent Active.</b>
-              <div style="font-size:0.8rem;color:var(--muted);margin-top:4px;">Sandboxed execution environment with authenticated scoped tools.</div>
+              <b>School Center Self-Maintenance Copilot Active (Gemini 3.6 Flash).</b>
+              <div style="font-size:0.8rem;color:var(--muted);margin-top:4px;">Live AI model grounded in authoritative timetable, Supabase sync state, and iOS glass architecture.</div>
               <div style="margin-top:10px;">
-                <span class="ai-dev-tool-chip">Git branch: main</span>
-                <span class="ai-dev-tool-chip">Calendar: Authoritative Timetable</span>
-                <span class="ai-dev-tool-chip">Glass: iOS Low-Glare Spec</span>
+                <span class="ai-dev-tool-chip">Model: gemini-3.6-flash</span>
+                <span class="ai-dev-tool-chip">Enrolled: 5 Courses (Deduplicated)</span>
+                <span class="ai-dev-tool-chip">Glass: iOS 18 Translucent</span>
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
-                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="audit_calendar" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">🧪 Run Calendar Audit</button>
-                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="inspect_schedule" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">📋 Inspect Schedule Data</button>
-                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="audit_glass" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">🎨 Verify Glass Tokens</button>
+                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="Run a full audit of my Fall 2026 schedule and confirm room locations" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸ§ª Schedule Audit</button>
+                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="Verify my 5 enrolled courses and check for any duplicates" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸ“‹ Verify 5 Courses</button>
+                <button class="btn-ghost ai-dev-action-chip" data-dev-cmd="Inspect the translucent glass tokens and optical blur parameters" style="font-size:0.75rem;padding:4px 10px;min-height:28px;">ðŸŽ¨ Glass Inspection</button>
               </div>
             </div>
           `}
 
-          ${(state.aiChatMessages || []).map(m => `
-            <div class="ai-bubble ${m.sender === 'user' ? 'user' : 'assistant'}">
-              ${m.text}
-            </div>
-          `).join('')}
+          ${(state.aiChatMessages || []).map(m => {
+            if (m.isThinking) {
+              return `
+                <div class="ai-bubble assistant thinking">
+                  <div class="ai-typing-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <span style="font-size:0.82rem;color:var(--muted);margin-left:6px;">Gemini 3.6 Flash is thinking...</span>
+                </div>
+              `;
+            }
+            return `
+              <div class="ai-bubble ${m.sender === 'user' ? 'user' : 'assistant'}">
+                ${m.text}
+              </div>
+            `;
+          }).join('')}
         </div>
 
         <div class="ai-input-bar">
-          <input type="text" id="ai-chat-input" class="ai-text-input" placeholder="${isDev ? 'Run maintenance command or ask about codebase...' : 'Ask about lectures, formulas, deadlines...'}">
-          <button class="btn-primary" id="ai-chat-send" style="min-height:38px;padding:0 16px;">Send</button>
+          <input type="text" id="ai-chat-input" class="ai-text-input" placeholder="${isDev ? 'Ask maintenance copilot or diagnostic query...' : 'Ask about lectures, formulas, deadlines...'}" ${state.aiIsThinking ? 'disabled' : ''}>
+          <button class="btn-primary" id="ai-chat-send" style="min-height:38px;padding:0 16px;" ${state.aiIsThinking ? 'disabled' : ''}>
+            ${state.aiIsThinking ? 'Thinking...' : 'Send'}
+          </button>
         </div>
       </div>
     </div>
@@ -2044,7 +2265,7 @@ function attachEventHandlers() {
     showToast('Syncing courses & data from Supabase...');
     try {
       await syncDataFromSupabase();
-      showToast('Cloud sync complete ✓');
+      showToast('Cloud sync complete âœ“');
     } catch (e) {
       showToast('Cloud sync notice: running local mode');
     }
@@ -2053,7 +2274,7 @@ function attachEventHandlers() {
 
   const syncPush = document.getElementById('sync-push-btn');
   if (syncPush) syncPush.addEventListener('click', () => {
-    showToast('Local state backed up to cloud storage ✓');
+    showToast('Local state backed up to cloud storage âœ“');
   });
 
   // FAB Quick Action Sheet
@@ -2198,7 +2419,7 @@ function attachEventHandlers() {
             courseId: state.courseId || null,
             attachments: [{ id: 'aud_' + Date.now(), type: 'audio', duration: audioResult.duration, url: audioResult.url }]
           });
-          showToast('Voice memo saved to notes ✓');
+          showToast('Voice memo saved to notes âœ“');
           state.audioRecorderOpen = false;
           render();
         });
@@ -2359,73 +2580,105 @@ function attachEventHandlers() {
     render();
   });
 
-  function handleAiQuery(text) {
-    if (!text || !text.trim()) return;
-    state.aiChatMessages.push({ sender: 'user', text });
-
-    if (state.aiAssistantMode === 'developer') {
-      const lower = text.toLowerCase();
-      let response = '';
-      if (lower.includes('audit') || lower.includes('test') || lower.includes('calendar')) {
-        response = `<b>Calendar & Schedule Audit Result:</b><br>
-          • Fall 2026 Authoritative Timetable: <b>VERIFIED (100% Match)</b><br>
-          • Monday Sep 14: 3 Linear Algebra events (11am C328, 1pm J301, 3pm J301) ✓<br>
-          • Tuesday Sep 15: 1 Energy Systems lecture (9am C271) ✓<br>
-          • Wednesday Sep 16: 1 Linear Algebra lecture (10am J301) ✓<br>
-          • Thursday Sep 17: 1 Energy Systems lab (3pm A305) ✓<br>
-          • Friday Sep 18: 1 Economics lecture (1pm Online VTL) ✓<br>
-          • Timezone handling: Pure local Gregorian calculations active.`;
-      } else if (lower.includes('schedule')) {
-        response = `<b>Authoritative Timetable In-Memory:</b><br>
-          • <b>MATH 15325D</b>: Mon 11am–12pm (C328), Mon 1pm–3pm (J301), Mon 3pm–4pm (J301), Wed 10am–12pm (J301)<br>
-          • <b>ENGR 36035D</b>: Tue 9am–12pm (C271), Thu 3pm–5pm (A305)<br>
-          • <b>ENGR 43301D</b>: Fri 1pm–4pm (Online VTL)<br>
-          • <b>ANTH 17028GD</b>: Async Online Slate<br>
-          • <b>ENGL 17889GD</b>: Async Online Slate`;
-      } else if (lower.includes('glass')) {
-        response = `<b>CSS Design Tokens Audit:</b><br>
-          • --glass-background: rgba(255, 255, 255, 0.04)<br>
-          • --glass-border: rgba(255, 255, 255, 0.06) (Low-contrast hairline)<br>
-          • Specular glare lines: REMOVED from .panel, .date-strip-cell, .bottom-nav<br>
-          • Lava lighting: 3 large slow ambient fluid fields active.`;
-      } else {
-        response = `<b>Command executed:</b> Scoped tool evaluated query "${text}". System running with all 5 courses, assignments manager, and notes manager synchronized.`;
-      }
-      state.aiChatMessages.push({ sender: 'assistant', text: response });
-    } else {
-      const lower = text.toLowerCase();
-      let response = '';
-      if (lower.includes('today') || lower.includes('class')) {
-        const todayClasses = getClassesForDate(new Date());
-        if (todayClasses.length) {
-          response = `Today you have <b>${todayClasses.length} session${todayClasses.length > 1 ? 's' : ''}</b>:<br>` +
-            todayClasses.map(c => `• <b>${c.course.code}</b> (${c.schedule.type}) at ${c.schedule.start} in ${c.schedule.room || 'Campus'}`).join('<br>');
-        } else {
-          response = `You have no scheduled campus lectures today! A great opportunity to review notes or advance assignments.`;
-        }
-      } else if (lower.includes('linear') || lower.includes('row')) {
-        response = `<b>Linear Algebra (MATH 15325D) Key Concepts:</b><br>
-          • <b>Elementary Row Operations:</b> (1) Row swap $R_i \\leftrightarrow R_j$, (2) Scalar multiplication $k R_i$, (3) Row addition $R_i + k R_j$.<br>
-          • <b>RREF:</b> Leading 1s with zeros above and below in each pivot column.<br>
-          • <b>Instructor:</b> Cyrus Hosseini, PhD PEng (Lecture Room C328 & J301).`;
-      } else if (lower.includes('assignment') || lower.includes('priority')) {
-        const pending = assignmentsManager.getAll().filter(a => a.status !== 'completed');
-        if (pending.length) {
-          response = `You have <b>${pending.length} pending assignment${pending.length > 1 ? 's' : ''}</b>:<br>` +
-            pending.slice(0, 4).map(a => `• <b>${a.title}</b> (Due ${new Date(a.dueDate).toLocaleDateString()}, priority: ${a.priority || 'normal'})`).join('<br>');
-        } else {
-          response = `All caught up! No pending assignments in your queue.`;
-        }
-      } else {
-        response = `I've analyzed your coursework for <b>Fall 2026</b>. Let me know if you need summaries of Linear Algebra, Energy Systems thermodynamic cycles, Economics interest formulas, or assistance prioritizing your upcoming deliverables!`;
-      }
-      state.aiChatMessages.push({ sender: 'assistant', text: response });
-    }
+  // AI Key Settings toggle & actions
+  const aiKeyToggle = document.getElementById('ai-toggle-key-settings');
+  if (aiKeyToggle) aiKeyToggle.addEventListener('click', () => {
+    state.aiKeySettingsOpen = !state.aiKeySettingsOpen;
     render();
+  });
+
+  const saveGeminiKeyBtn = document.getElementById('save-gemini-key-btn');
+  if (saveGeminiKeyBtn) saveGeminiKeyBtn.addEventListener('click', () => {
+    const input = document.getElementById('gemini-key-input');
+    if (input && input.value.trim()) {
+      setGeminiApiKey(input.value.trim());
+      showToast('Gemini API key saved');
+      state.aiKeySettingsOpen = false;
+      render();
+    }
+  });
+
+  const resetGeminiKeyBtn = document.getElementById('reset-gemini-key-btn');
+  if (resetGeminiKeyBtn) resetGeminiKeyBtn.addEventListener('click', () => {
+    localStorage.removeItem('sc_gemini_api_key');
+    showToast('Reset to default project Gemini key');
+    state.aiKeySettingsOpen = false;
+    render();
+  });
+
+  // More View Gemini Settings Actions
+  const saveMoreAiKeyBtn = document.getElementById('save-more-ai-key-btn');
+  if (saveMoreAiKeyBtn) saveMoreAiKeyBtn.addEventListener('click', () => {
+    const input = document.getElementById('more-gemini-key-field');
+    if (input && input.value.trim()) {
+      setGeminiApiKey(input.value.trim());
+      showToast('Gemini API key updated');
+      render();
+    }
+  });
+
+  const testGeminiBtn = document.getElementById('test-gemini-btn');
+  if (testGeminiBtn) testGeminiBtn.addEventListener('click', async () => {
+    showToast('Testing connection to Gemini 3.6 Flash...');
+    const t0 = performance.now();
+    try {
+      const reply = await queryGemini('Reply with: Connection verified', 'student');
+      const ms = Math.round(performance.now() - t0);
+      showToast(`Connected to Gemini in ${ms}ms: ${reply.slice(0, 35)}...`);
+    } catch (err) {
+      showToast(`Gemini error: ${err.message}`, 4000);
+    }
+  });
+
+  async function handleAiQuery(text) {
+    if (!text || !text.trim() || state.aiIsThinking) return;
+    const cleanText = text.trim();
+
+    // 1. Append user message
+    state.aiChatMessages.push({ sender: 'user', text: cleanText });
+    // 2. Append thinking bubble
+    state.aiChatMessages.push({ sender: 'assistant', text: '', isThinking: true });
+    state.aiIsThinking = true;
+    render();
+
     setTimeout(() => {
       const stream = document.getElementById('ai-chat-stream');
       if (stream) stream.scrollTop = stream.scrollHeight;
-    }, 40);
+    }, 20);
+
+    try {
+      // 3. Query real Gemini API
+      const rawResponse = await queryGemini(cleanText, state.aiAssistantMode);
+      const formatted = formatAiResponse(rawResponse);
+
+      // 4. Update thinking bubble with real response
+      const lastIdx = state.aiChatMessages.length - 1;
+      if (lastIdx >= 0 && state.aiChatMessages[lastIdx].isThinking) {
+        state.aiChatMessages[lastIdx] = { sender: 'assistant', text: formatted, isThinking: false };
+      } else {
+        state.aiChatMessages.push({ sender: 'assistant', text: formatted, isThinking: false });
+      }
+    } catch (err) {
+      console.error('Gemini query error:', err);
+      const errMsg = err.message || 'Unable to connect to Google Gemini API.';
+      const lastIdx = state.aiChatMessages.length - 1;
+      const errorHtml = `
+        <div style="color:var(--accent-3);margin-bottom:6px;"><b>Gemini API Notice:</b> ${errMsg}</div>
+        <div style="font-size:0.8rem;color:var(--muted);">Check your API key in settings or verify your network connection.</div>
+      `;
+      if (lastIdx >= 0 && state.aiChatMessages[lastIdx].isThinking) {
+        state.aiChatMessages[lastIdx] = { sender: 'assistant', text: errorHtml, isThinking: false };
+      } else {
+        state.aiChatMessages.push({ sender: 'assistant', text: errorHtml, isThinking: false });
+      }
+    } finally {
+      state.aiIsThinking = false;
+      render();
+      setTimeout(() => {
+        const stream = document.getElementById('ai-chat-stream');
+        if (stream) stream.scrollTop = stream.scrollHeight;
+      }, 40);
+    }
   }
 
   const aiSend = document.getElementById('ai-chat-send');
@@ -2525,7 +2778,7 @@ function attachEventHandlers() {
         });
       });
 
-      showToast(`Added ${files.length} document${files.length>1?'s':''} to background queue ✓`);
+      showToast(`Added ${files.length} document${files.length>1?'s':''} to background queue âœ“`);
       render();
     });
   }
@@ -2568,7 +2821,7 @@ function attachEventHandlers() {
     if (!focusModeInstance) {
       focusModeInstance = new FocusMode({
         onExit: () => render(),
-        onNoteSaved: () => showToast('Focus notes saved ✓')
+        onNoteSaved: () => showToast('Focus notes saved âœ“')
       });
     }
     focusModeInstance.start(state.courseId || 'math15325d', 25);
@@ -2598,7 +2851,7 @@ function attachEventHandlers() {
     });
   });
 
-  // Calendar Agenda — Course Items
+  // Calendar Agenda â€” Course Items
   document.querySelectorAll('[data-agenda-course-id]').forEach(el => {
     el.addEventListener('click', () => {
       state.courseId = el.getAttribute('data-agenda-course-id');
@@ -2608,7 +2861,7 @@ function attachEventHandlers() {
     });
   });
 
-  // Calendar Agenda — Assignment Items
+  // Calendar Agenda â€” Assignment Items
   document.querySelectorAll('[data-agenda-asg-id]').forEach(el => {
     el.addEventListener('click', () => {
       state.assignmentDetailId = el.getAttribute('data-agenda-asg-id');
@@ -2624,7 +2877,7 @@ function attachEventHandlers() {
     render();
   });
 
-  // Course Assignments — New Task button
+  // Course Assignments â€” New Task button
   const addAsgBtn = document.getElementById('add-assignment-btn');
   if (addAsgBtn) addAsgBtn.addEventListener('click', () => {
     state.assignmentModalOpen = true;
@@ -2632,7 +2885,7 @@ function attachEventHandlers() {
     render();
   });
 
-  // Course Assignments — open assignment detail on card click
+  // Course Assignments â€” open assignment detail on card click
   document.querySelectorAll('[data-open-asg-id]').forEach(el => {
     el.addEventListener('click', (e) => {
       // don't open detail if clicking a checklist item
@@ -2642,7 +2895,7 @@ function attachEventHandlers() {
     });
   });
 
-  // Today view — Assignment Card clicks
+  // Today view â€” Assignment Card clicks
   document.querySelectorAll('.assignment-card[data-asg-id]').forEach(el => {
     el.addEventListener('click', () => {
       state.assignmentDetailId = el.getAttribute('data-asg-id');
@@ -2650,7 +2903,7 @@ function attachEventHandlers() {
     });
   });
 
-  // Course Notes — Add Note button
+  // Course Notes â€” Add Note button
   const addNoteBtn = document.getElementById('add-course-note-btn');
   if (addNoteBtn) addNoteBtn.addEventListener('click', () => {
     state.noteModalOpen = true;
@@ -2658,7 +2911,7 @@ function attachEventHandlers() {
     render();
   });
 
-  // Course Materials — Upload from empty state
+  // Course Materials â€” Upload from empty state
   const triggerUploadModal = document.getElementById('trigger-upload-modal');
   const hiddenFileInput = document.getElementById('hidden-file-input');
   if (triggerUploadModal) triggerUploadModal.addEventListener('click', () => {
@@ -2690,13 +2943,13 @@ function attachEventHandlers() {
           }
         });
       });
-      showToast(`Added ${files.length} file${files.length > 1 ? 's' : ''} to queue ✓`);
+      showToast(`Added ${files.length} file${files.length > 1 ? 's' : ''} to queue âœ“`);
       render();
     });
     picker.click();
   });
 
-  // Practice — Flashcards Hub
+  // Practice â€” Flashcards Hub
   const flashcardsBtn = document.getElementById('practice-flashcards-btn');
   if (flashcardsBtn) flashcardsBtn.addEventListener('click', () => {
     state.flashcardsModalOpen = true;
@@ -2744,7 +2997,7 @@ function attachEventHandlers() {
         // Refresh active swatch highlight without full re-render
         document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
         el.classList.add('active');
-        showToast(`Theme: ${theme.label} ✓`);
+        showToast(`Theme: ${theme.label} âœ“`);
       }
     });
   });
@@ -2777,9 +3030,9 @@ function attachEventHandlers() {
       localStorage.setItem('sc_supabase_url', url);
       localStorage.setItem('sc_supabase_anon_key', key);
       await saveSupabaseConfig(url, key);
-      showToast('Cloud settings saved ✓');
+      showToast('Cloud settings saved âœ“');
     } catch (e) {
-      showToast('Saved locally — connection will be tested on next sync');
+      showToast('Saved locally â€” connection will be tested on next sync');
     }
   });
 
@@ -2789,9 +3042,9 @@ function attachEventHandlers() {
     showToast('Syncing from cloud...');
     try {
       await syncDataFromSupabase();
-      showToast('Sync complete ✓');
+      showToast('Sync complete âœ“');
     } catch (e) {
-      showToast('Sync failed — check cloud settings');
+      showToast('Sync failed â€” check cloud settings');
     }
   });
 
@@ -2810,7 +3063,7 @@ function attachEventHandlers() {
           jobsManager.save?.();
         }
       }
-      showToast('Task retried ✓');
+      showToast('Task retried âœ“');
       render();
     });
   });
@@ -2822,7 +3075,7 @@ function attachEventHandlers() {
       const noteId = btn.getAttribute('data-note-id');
       try {
         await notesManager.runAIStudyAction(noteId, action);
-        showToast(`AI ${action.replace('_', ' ')} completed ✓`);
+        showToast(`AI ${action.replace('_', ' ')} completed âœ“`);
         render();
       } catch (e) {
         showToast(e.message || 'AI action failed');
@@ -2851,7 +3104,7 @@ function attachEventHandlers() {
   // MODAL EVENT HANDLERS
   // =========================================================================
 
-  // — Assignment Creation Modal —
+  // â€” Assignment Creation Modal â€”
   const closeAsgModal = document.getElementById('close-assignment-modal');
   const closeAsgModalCancel = document.getElementById('close-assignment-modal-cancel');
   const closeModal = () => { state.assignmentModalOpen = false; state.assignmentModalPreset = {}; render(); };
@@ -2871,7 +3124,7 @@ function attachEventHandlers() {
       checklistNewInput.value = '';
       const li = document.createElement('div');
       li.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:0.85rem;';
-      li.innerHTML = `<span style="color:var(--accent);">◆</span> ${text}`;
+      li.innerHTML = `<span style="color:var(--accent);">â—†</span> ${text}`;
       checklistContainer.appendChild(li);
       checklistNewInput.focus();
     };
@@ -2893,13 +3146,13 @@ function attachEventHandlers() {
       status: 'not_started', priority, description,
       requirementsChecklist: checklist
     });
-    showToast('Assignment created ✓');
+    showToast('Assignment created âœ“');
     state.assignmentModalOpen = false;
     state.assignmentModalPreset = {};
     render();
   });
 
-  // — Assignment Detail Modal —
+  // â€” Assignment Detail Modal â€”
   const closeAsgDetailModal = document.getElementById('close-asg-detail-modal');
   const closeAsgDetailCancel = document.getElementById('close-asg-detail-modal-cancel');
   const closeDetailModal = () => { state.assignmentDetailId = null; render(); };
@@ -2913,7 +3166,7 @@ function attachEventHandlers() {
     if (asg) {
       const newStatus = document.getElementById('asg-detail-status')?.value;
       if (newStatus) { asg.status = newStatus; assignmentsManager.save(); }
-      showToast('Assignment updated ✓');
+      showToast('Assignment updated âœ“');
     }
     state.assignmentDetailId = null;
     render();
@@ -2926,12 +3179,12 @@ function attachEventHandlers() {
       try {
         if (assignmentsManager.rewriteAssignment) {
           await assignmentsManager.rewriteAssignment({ assignmentId: asgId, style: 'clear_concise' });
-          showToast('AI rewrite complete ✓');
+          showToast('AI rewrite complete âœ“');
         } else {
           showToast('AI rewrite queued');
         }
       } catch(e) {
-        showToast('AI rewrite failed — check Gemini config');
+        showToast('AI rewrite failed â€” check Gemini config');
       }
     });
   });
@@ -2960,14 +3213,14 @@ function attachEventHandlers() {
           else { asg.id = asgId; assignmentsManager.getAll().push(asg); assignmentsManager.save(); }
           toast.remove();
           render();
-          showToast('Assignment restored ✓');
+          showToast('Assignment restored âœ“');
         }
       });
       setTimeout(() => toast.remove(), 4000);
     });
   });
 
-  // — Note Editor Modal —
+  // â€” Note Editor Modal â€”
   const closeNoteModal = document.getElementById('close-note-modal');
   const closeNoteModalCancel = document.getElementById('close-note-modal-cancel');
   const closeNoteM = () => { state.noteModalOpen = false; state.noteModalPreset = {}; render(); };
@@ -2983,13 +3236,13 @@ function attachEventHandlers() {
     const tagsRaw = document.getElementById('note-tags-input')?.value || '';
     const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean);
     notesManager.createNote({ title, content: content || '', courseId: courseId || null, tags });
-    showToast('Note saved ✓');
+    showToast('Note saved âœ“');
     state.noteModalOpen = false;
     state.noteModalPreset = {};
     render();
   });
 
-  // — Flashcards Modal —
+  // â€” Flashcards Modal â€”
   const closeFlashcardsModal = document.getElementById('close-flashcards-modal');
   if (closeFlashcardsModal) closeFlashcardsModal.addEventListener('click', () => {
     state.flashcardsModalOpen = false;
