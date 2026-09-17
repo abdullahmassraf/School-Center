@@ -2568,7 +2568,7 @@ function bootstrap() {
         }
         if (state.view === 'ai' || state.view === 'settings') render();
       });
-      loadAiChatHistory().then(result => {
+      loadAiChatHistory().then(async result => {
         state.aiCloudUser = result.user || null;
         state.aiCloudConnected = !!result.cloud;
         if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
