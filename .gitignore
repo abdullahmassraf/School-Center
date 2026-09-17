@@ -1,0 +1,13 @@
+node_modules/
+.env
+.DS_Store
+Thumbs.db
+
+# Local Supabase temp dir
+supabase/.temp/
+
+# Local course files (seeded to Supabase Storage; too large for git)
+Sheridan/
+
+# Dev-only scripts
+scripts/apply-schema.js
