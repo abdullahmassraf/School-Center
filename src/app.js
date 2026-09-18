@@ -559,15 +559,15 @@ export async function syncDataFromSupabase() {
 
     if (courseRes.error) throw courseRes.error;
     if (moduleRes.error) throw moduleRes.error;
-    if (materialRes.error) throw materialRes.error;
 
     const dbCourses = courseRes.data || [];
     const dbModules = moduleRes.data || [];
-    let dbMaterials = materialRes.data || [];
+    // Do not fail the entire course library because the materials table is
+    // temporarily unavailable. Storage is the source of truth for uploaded
+    // files and gives us a second independent recovery path.
+    let dbMaterials = materialRes.error ? [] : (materialRes.data || []);
 
-    // Defensive fallback: if the flat material query unexpectedly returns no
-    // rows while courses/modules exist, ask the existing nested loader once.
-    // This protects against transient PostgREST relationship/cache states.
+    // Primary fallback: nested PostgREST relationship.
     if (!dbMaterials.length && dbModules.length) {
       try {
         const nested = await fetchCoursesWithMaterials();
@@ -581,6 +581,45 @@ export async function syncDataFromSupabase() {
         });
         if (nestedMaterials.length) dbMaterials = nestedMaterials;
       } catch (_) {}
+    }
+
+    // Last-resort browser recovery: enumerate the public course-materials
+    // Storage bucket. This keeps existing files visible even if PostgREST
+    // returns a transient error or the material relationship cache is stale.
+    const storageMaterialsByCourse = new Map();
+    if (!dbMaterials.length) {
+      await Promise.all(dbCourses.map(async dbC => {
+        try {
+          const { data: objects, error } = await sb.storage
+            .from('course-materials')
+            .list(dbC.code, {
+              limit: 1000,
+              offset: 0,
+              sortBy: { column: 'name', order: 'asc' }
+            });
+          if (error || !objects?.length) return;
+          const module = dbModules.find(m => m.course_id === dbC.id) || null;
+          const rows = objects
+            .filter(obj => obj?.name && !obj.name.endsWith('/'))
+            .map(obj => {
+              const filePath = dbC.code + '/' + obj.name;
+              const { data: urlData } = sb.storage.from('course-materials').getPublicUrl(filePath);
+              return {
+                id: 'storage-' + dbC.code + '-' + (obj.id || obj.name),
+                module_id: module?.id || null,
+                moduleTitle: module?.title || 'Course Materials & Readings',
+                title: obj.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' '),
+                type: /assignment|submission|homework|lab|project|worksheet|tutorial/i.test(obj.name) ? 'assignment' : 'other',
+                file_path: filePath,
+                file_url: urlData?.publicUrl || '',
+                content_json: {},
+                status: 'completed',
+                source: 'storage-fallback'
+              };
+            });
+          storageMaterialsByCourse.set(dbC.id, rows);
+        } catch (_) {}
+      }));
     }
 
     const modulesByCourse = new Map();
@@ -625,6 +664,14 @@ export async function syncDataFromSupabase() {
             return nestedCourse && cleanCourseCode(nestedCourse) === dbKey;
           })
           .forEach(material => flattenedMaterials.push({ ...material }));
+      }
+
+      // If the database relationship still yielded no rows, use the actual
+      // Storage objects as the final visible-library fallback.
+      if (!flattenedMaterials.length) {
+        (storageMaterialsByCourse.get(dbC.id) || []).forEach(material => {
+          flattenedMaterials.push({ ...material });
+        });
       }
 
       if (match) {
