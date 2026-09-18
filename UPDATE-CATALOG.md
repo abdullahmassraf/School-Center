@@ -1,3 +1,41 @@
+## v1.4.1 — Honest material-load failures, spotlight flicker fix, truthful sync status
+
+**Date:** 2026-09-18 19:45 ET · **Commit:** 6666a9d · **Rollback:** branch `backup/before-v1.4.1-stabilization` (d4f9288)
+
+### Problem
+1. When the materials fetch failed, the course Materials tab showed the same "No document files uploaded / Upload Course Material" empty state as a genuinely empty course — a silent failure that told the user to re-upload existing files.
+2. Spotlight search rebuilt the entire modal on every keystroke, destroying and recreating the focused input each character (visible flicker, caret/focus loss).
+3. The Sync drawer always claimed "Connected & Active (Realtime)" even when realtime was degraded or sync had errored.
+4. Closing the accent picker triggered a full-page re-render for no reason (theme lives on CSS custom properties).
+
+### Root cause
+1. `syncDataFromSupabase()` caught fetch errors and returned false without recording the failure anywhere the UI could see.
+2. The spotlight `input` handler called global `render()`, which re-`innerHTML`s the whole app.
+3. `renderSyncDrawer()` used only `isSupabaseConfigured()` (a static credential check) as its health signal.
+4. A redundant `change → render()` listener on the accent inputs.
+
+### Changes (src/app.js, src/style.css, package.json)
+- New `state.materialsSyncError`; set on materials-fetch failure, cleared on success. The Materials empty state now distinguishes "no materials exist" from "materials could not be loaded" (with the cloud error message) and offers a working **Retry loading materials** button.
+- Spotlight input now repaints only the `.spotlight-results` subtree; the input keeps focus and caret. Results-list click handlers are re-bound after each targeted update.
+- Sync drawer reports real state: `Sync error: <message>` / `Connected & streaming (Realtime)` / `Connected — periodic sync (Realtime unavailable)` / `Offline Local Storage Mode`.
+- Removed the accent-picker `change → render()`.
+
+### Database changes
+None. No Supabase schema/policy/storage changes.
+
+### Verification
+- `node --check` on src/app.js passes.
+- `test_calendar_engine.js` and `test_courses_dedup.js` pass (5 courses, correct weekday logic).
+- Headless Chrome against a local server of this build: app boots, Today view renders the correct Friday agenda (ENGR 43301D · Online (VTL) · Manju Sunil Varghese), all ES modules served without 404s.
+- Production Supabase re-verified live: 5 courses, 139 materials, Storage bucket populated, both Edge Functions still absent (404).
+
+### Known limitations
+- `process-document` and `gemini-live-token` Edge Functions remain **not deployed** on the Supabase project; AI document classification and live voice transcription stay unavailable (frontend degrades gracefully and says so).
+- Cross-device sync of notes/assignments/settings remains unverified end-to-end until a user signs in on two devices (cloud tables currently have zero rows).
+- Catalog version history above (v1.5–v1.9) does not match `package.json`; historical drift left as-is, not silently rewritten.
+
+---
+
 ## v1.9.0 — Storage-backed course library recovery + AI capacity fallback
 
 **Date:** 2026-09-18 03:20 ET
