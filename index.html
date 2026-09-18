@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>School Center</title>
+
+<!-- Supabase Credentials (configurable via Settings in UI or localStorage) -->
+<meta name="supabase-url" content="https://vxsphvrvulhbyhqmoeex.supabase.co">
+<meta name="supabase-anon-key" content="sb_publishable_-47cMd86DgLZvnE48DMFkw_0R3lpPWn">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+<!-- Modern Mobile-First Design System -->
+<link rel="stylesheet" href="src/style.css">
+
+<!-- KaTeX Styles & Math Engine -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+</head>
+<body>
+
+<!-- Static CSS-only app background (see "APP BACKGROUND" in src/style.css).
+     v1.3.0 removed the <canvas id="lava-canvas"> animated blob field that
+     used to live here. -->
+<div id="lava-wrap" aria-hidden="true"></div>
+
+<div id="app"></div>
+
+<script type="module" src="src/app.js"></script>
+
+</body>
+</html>

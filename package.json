@@ -1,0 +1,16 @@
+{
+  "name": "school-center",
+  "version": "1.3.0",
+  "description": "Dynamic Full-Stack School Center Platform with Supabase and Gemini AI",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve . -p 8080",
+    "seed": "node scripts/seed-sheridan.js",
+    "seed:dry": "node scripts/seed-sheridan.js --dry-run",
+    "seed:ai": "node scripts/seed-sheridan.js --trigger-ai"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^16.4.7"
+  }
+}
