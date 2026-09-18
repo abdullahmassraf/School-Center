@@ -1,3 +1,38 @@
+## v1.6.0 — Course material hydration + map interaction cleanup
+
+**Date:** 2026-09-18 02:20 ET
+**Time note:** exact implementation time recorded for future developers; keep an exact date/time in this catalog for every subsequent change.
+
+### Changes
+- Reworked course/material hydration to query the public `courses`, `modules`, and `materials` tables directly and explicitly rebuild the course → module → material graph.
+- Removed dependence on the nested Supabase relation response for Course Materials, eliminating the failure mode where courses load but their child materials are missing from the UI.
+- Flattened every module's material rows into each course's `cloudMaterials` collection during sync, preserving module titles and existing course metadata.
+- Preserved the existing ENGR 43301D routing rule so the two background/biography documents remain in Assignments and are excluded from Materials.
+- Removed the Campus Map “Show all” button.
+- Clicking the map background now clears the focused building and restores all buildings; clicking a building still focuses it.
+- Existing Show location controls from class cards continue to focus the requested building.
+
+### Files changed
+- src/app.js
+- src/campus-map.js
+- UPDATE-CATALOG.md
+
+### Database verification
+Production Supabase project `vxsphvrvulhbyhqmoeex` was rechecked during this update:
+- ANTH17028GD: 62 materials
+- ENGL17889GD: 70 materials
+- ENGR36035D: 16 materials
+- ENGR43301D: 9 materials
+- MATH15325D: 12 materials
+- Total: 169 materials
+
+### Validation
+- Verified the production database contains all 5 courses, 5 modules, and 169 material rows.
+- Browser end-to-end testing is still required after GitHub Pages deployment; the GitHub connector cannot reproduce the user's browser session.
+- No full-repo replacement was performed.
+
+---
+
 ## v1.5.0 — AI/Search reliability + course materials visibility
 
 **Date:** 2026-09-18 02:00 ET
