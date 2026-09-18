@@ -2996,7 +2996,6 @@ function bootstrap() {
         if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
         state.aiHistoryLoaded = true;
         if (state.aiCloudUser?.id) {
-          startThemeCloudSync(state.aiCloudUser.id).catch(e => console.warn('Appearance sync start:', e));
           startAutomaticDataSync().then(() => { if (state.view === 'courses' || state.view === 'today') render(); }).catch(e => console.warn('Data sync start:', e));
         }
         if (!aiHistoryUnsubscribe && state.aiCloudConnected && state.aiCloudUser?.id) {
