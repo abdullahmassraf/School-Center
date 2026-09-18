@@ -187,3 +187,64 @@ See "HOW TO UPDATE GITHUB" and "HOW TO UPDATE SUPABASE" below.
 ### Known limitations
 - This release fixes visibility and error-reporting; it does not change the underlying sync mechanism. If the Supabase migration `002_user_notes_assignments.sql` was never run, sync will still fail — but now the app will tell you why instead of staying silent.
 - Mobile nav bar redesign, search UI polish, "stay on last page after refresh", and banner portfolio-link/redesign requests are **not** included in this release — they were deferred by request so this sync fix could be done thoroughly first.
+
+---
+
+## Release v1.2.0 — 2026-09-17
+
+### Date
+2026-09-17
+
+### Version
+v1.2.0 (up from v1.1.0)
+
+### Change
+Two independent fixes/features in this release:
+
+**A. Mobile bottom navigation bar — consolidated and fixed.**
+The nav bar had accumulated roughly six separate, conflicting CSS definitions of `.bottom-nav` / `.bottom-nav-wrap` / `.nav-item` across the stylesheet (several using `!important` against each other), from what looks like several past "make it glassy" passes stacked without cleanup. Concretely, this caused:
+- An opaque strip painted across the *entire* width of the fixed bottom container (`.bottom-nav-wrap`), not just the floating pill — because a later rule accidentally included `.bottom-nav-wrap` in a shared selector list meant for the pill only.
+- The pill's `border-radius: 999px` fighting with later `18px`/`16px`/`14px` `!important` overrides at different breakpoints, so the shape could shift depending on which rule won the cascade.
+- Nav item size flip-flopping between `54px` → `48px` → `44px` across three different, uncoordinated media queries.
+- A leftover rule from an earlier design (when nav items had visible text labels) still setting `font-size`/padding on `.nav-item` even though no label text is rendered anymore.
+
+All of this is now a single canonical block (search `CANONICAL BOTTOM NAV` in `src/style.css`) with one clean mobile breakpoint. No other rule in the file targets these three selectors anymore.
+
+**B. Interactive Campus Map widget (new feature).**
+A new glassmorphism-styled Campus Map card on the Today view:
+- Inline SVG showing Buildings A, B, C, H, J, M, Parking Lots 1–6, and the Shuttle stop, styled with the app's dark translucent glass tokens (`rgba(18, 18, 24, 0.65)` background, `blur(20px) saturate(180%)`, `1px solid rgba(255,255,255,0.08)` border).
+- "Show location" buttons now appear next to: the next-class summary at the top of Today, each scheduled class in the Calendar day agenda, and each schedule row on a course's detail page — wherever a room like `C328` or `J301` appears. The building is derived automatically from the room's leading letter; rooms with no physical building (e.g. "Online (VTL)") get no button.
+- Clicking a building (or a "Show location" button) smooth-scrolls to the map, adds a pulsing glow + pin marker on that building, and dims every other building/lot/shuttle node for contrast. A "Show all" button clears the highlight. Clicking from a view other than Today (e.g. Calendar) switches to Today first, then highlights.
+
+### Reason
+(A) was reported as "the navigation bar UI style sucks for mobile" — root cause was CSS rule conflicts, not a single missing style. (B) was a new feature request: link upcoming classes/rooms to a visual campus map.
+
+### User-facing behavior
+- The bottom nav is now a single, consistent floating glass pill on every screen size, with no background bleeding across the full width behind it.
+- A new "Campus Map" card appears near the bottom of the Today tab.
+- "📍 Show location" buttons appear next to any class/session that has a real room.
+
+### Files changed
+- `src/style.css` — nav bar consolidation (removed ~5 duplicate/conflicting rule blocks, added one canonical block); added Campus Map widget styles.
+- `src/app.js` — imports and renders the campus map widget on Today; adds "Show location" buttons to the next-class summary, Calendar agenda items, and course schedule rows; adds a view-aware click handler for `[data-show-location]` buttons.
+- `src/campus-map.js` — **new file**. Exports `renderCampusMapWidget()`, `renderShowLocationButton(room)`, `getBuildingIdForRoom(room)`, `highlightBuilding(buildingId)`, `clearCampusHighlight()`, `attachCampusMapHandlers()`.
+
+### Database changes
+None.
+
+### Configuration changes
+None.
+
+### Deployment instructions
+See "HOW TO UPDATE GITHUB" below. No Supabase changes.
+
+### Testing
+- `node --check` passed on every file in `src/`.
+- Verified every local `./*.js` import in `src/` resolves to a real file.
+- Verified CSS brace balance (690 open / 690 close) after the nav consolidation.
+- Manually traced the highlight/scroll logic and the room→building resolver against the actual room codes already in the app's schedule data (`C328`, `J301`, `C271`, `A305`, `Online (VTL)`).
+- Could not perform a live browser/visual test in this environment (no network/browser access here) — please verify the nav bar and map visually on an actual phone per the checklist below.
+
+### Known limitations
+- The campus map is a **stylized schematic diagram**, not a to-scale rendering of a real reference photo — none was attached to this request. If you have an actual campus map image, share it and the building positions can be adjusted to match it precisely.
+- Search UI polish, refresh-persists-last-page, AI chat history cross-device sync, live theme sync, and the banner redesign/portfolio link are still queued for a future release.
