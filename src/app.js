@@ -2237,18 +2237,24 @@ function sanitizeHistory(messages) {
 }
 
 async function callGeminiOnce(model, payload, apiKey) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  // Hard-stop browser requests so the composer can never spin forever.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
   let res;
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
   } catch (networkError) {
-    const err = new Error('Could not reach the Gemini API. Check your internet connection.');
-    err.status = 0;
+    const err = new Error(networkError?.name === 'AbortError' ? 'Gemini took too long to respond. Please try again.' : 'Could not reach the Gemini API. Check your internet connection.');
+    err.status = networkError?.name === 'AbortError' ? 408 : 0;
     throw err;
+  } finally {
+    clearTimeout(timeout);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
