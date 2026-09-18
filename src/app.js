@@ -561,6 +561,8 @@ let state = {
   syncBannerDismissed: false
 };
 
+let courseMaterialHydrationInFlight = false;
+
 let aiLiveTranscriber = null;
 let aiActiveAttachments = [];
 let focusModeInstance = null;
@@ -1043,6 +1045,21 @@ function renderCourseDetailView(c) {
   } else if (state.courseTab === 'materials') {
     const routed = routeCourseContent(c);
     const mats = routed.materials;
+
+    // Course Materials is a required surface. If the background hydration has
+    // not completed yet (or a previous request was interrupted), retry the
+    // exact public course/module/material query in the background and repaint
+    // this course when the rows arrive instead of permanently showing Upload.
+    if (!mats.length && !courseMaterialHydrationInFlight && isSupabaseConfigured()) {
+      courseMaterialHydrationInFlight = true;
+      syncDataFromSupabase()
+        .catch(err => console.warn('Course material hydration retry:', err))
+        .finally(() => {
+          courseMaterialHydrationInFlight = false;
+          if (state.view === 'courses' && state.courseId === c.id && state.courseTab === 'materials') render();
+        });
+    }
+
     bodyHtml = mats.length ? `
       <div class="course-materials-stack">
         <div class="section-sub" style="margin-bottom:2px;">${mats.length} material${mats.length === 1 ? '' : 's'} available in the course cloud.</div>
