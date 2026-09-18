@@ -2510,9 +2510,14 @@ export async function queryGemini(userText, attachments = [], options = {}) {
         if (isModelUnavailable(status, error.message)) break;
         // The tool schema was rejected — retry the same model without tools.
         if (allowTools && isToolSchemaRejection(status, error.message)) continue;
-        // Bad key, quota, or outage: retrying other models will not help.
-        if (status === 401 || status === 403 || status === 429 || (status >= 500 && status < 600) || status === 0) {
+        // Authentication errors cannot be fixed by switching models. Rate
+        // limits and transient provider outages can be model-specific,
+        // however, so keep the fallback chain alive for 429/5xx responses.
+        if (status === 401 || status === 403 || status === 0) {
           throw error;
+        }
+        if (status === 429 || (status >= 500 && status < 600)) {
+          continue;
         }
         break;
       }
