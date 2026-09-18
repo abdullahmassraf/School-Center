@@ -208,12 +208,6 @@ export function renderCampusMapWidget() {
         </svg>
       </div>
 
-      <div class="cm-legend">
-        <span><i class="cm-key cm-key-building"></i>Building</span>
-        <span><i class="cm-key cm-key-lot"></i>Parking</span>
-        <span><i class="cm-key cm-key-minor"></i>Residence &amp; services</span>
-        <span><i class="cm-key cm-key-shuttle"></i>Shuttle stop</span>
-      </div>
     </div>
   `;
 }
