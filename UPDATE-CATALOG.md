@@ -1,3 +1,38 @@
+## v1.5.0 — AI/Search reliability + course materials visibility
+
+**Date:** 2026-09-18 02:00 ET
+**Time note:** implementation time recorded for future developers; keep an exact date/time in this catalog for every subsequent change.
+
+### Changes
+- Added a 30-second Gemini request timeout and clear failure message so the AI composer cannot spin forever.
+- Switched browser GenerateContent authentication to the documented x-goog-api-key header.
+- Made AI history persistence best-effort so slow cloud history cannot block an AI response.
+- Fixed live AI/Search suggestion clicks with persistent event delegation; re-rendered results no longer lose their click handlers.
+- Improved universal-search deduplication and increased the result cap to 40.
+- Added a direct Supabase course → module → material fallback when nested material relations are empty.
+- Restyled search suggestions with stronger contrast, clean hierarchy, compact spacing, and modern interactive states.
+- Preserved the existing Sheridan source tree and Notes/Assignments sync.
+
+### Production data verified
+- ANTH17028GD: 62 materials
+- ENGL17889GD: 70 materials
+- ENGR36035D: 16 materials
+- ENGR43301D: 9 materials
+- MATH15325D: 12 materials
+
+### Files changed
+- src/app.js
+- src/search.js
+- src/style.css
+- UPDATE-CATALOG.md
+
+### Validation
+- Current Google Gemini documentation confirms gemini-3.8-flash is a stable GenerateContent model and gemini-3.5-transcribe-live is the current Live transcription model.
+- Browser end-to-end testing is still required after GitHub Pages deploy; the GitHub connector cannot reproduce the user's browser session.
+- No full-repo replacement was performed.
+
+---
+
 ## Release v1.4.0 — 2026-09-18
 
 ### Date / time
