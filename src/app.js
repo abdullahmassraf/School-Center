@@ -542,15 +542,15 @@ let aiHistoryUnsubscribe = null;
    DATA SYNC WITH SUPABASE
    ========================================================================= */
 export async function syncDataFromSupabase() {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const sb = getSupabase();
-    if (!sb) return;
+  if (!isSupabaseConfigured()) return false;
 
-    // v1.6.0: hydrate the course library from the three public tables directly.
-    // The nested PostgREST relation is convenient, but it can return courses
-    // without their child rows depending on relation metadata/cache state.
-    // Courses/materials are essential app content, so build the graph explicitly.
+  const sb = getSupabase();
+  if (!sb) return false;
+
+  try {
+    // Course content is foundational app data. Fetch the three tables
+    // independently so a PostgREST relationship/cache issue cannot make the
+    // course appear empty when the underlying rows already exist.
     const [courseRes, moduleRes, materialRes] = await Promise.all([
       sb.from('courses').select('*').order('code'),
       sb.from('modules').select('*').order('order_index'),
@@ -561,27 +561,46 @@ export async function syncDataFromSupabase() {
     if (moduleRes.error) throw moduleRes.error;
     if (materialRes.error) throw materialRes.error;
 
+    const dbCourses = courseRes.data || [];
+    const dbModules = moduleRes.data || [];
+    let dbMaterials = materialRes.data || [];
+
+    // Defensive fallback: if the flat material query unexpectedly returns no
+    // rows while courses/modules exist, ask the existing nested loader once.
+    // This protects against transient PostgREST relationship/cache states.
+    if (!dbMaterials.length && dbModules.length) {
+      try {
+        const nested = await fetchCoursesWithMaterials();
+        const nestedMaterials = [];
+        (nested || []).forEach(course => {
+          (course.modules || []).forEach(module => {
+            (module.materials || []).forEach(material => {
+              nestedMaterials.push({ ...material, moduleTitle: module.title });
+            });
+          });
+        });
+        if (nestedMaterials.length) dbMaterials = nestedMaterials;
+      } catch (_) {}
+    }
+
     const modulesByCourse = new Map();
     const moduleById = new Map();
 
-    (moduleRes.data || []).forEach(module => {
+    dbModules.forEach(module => {
       const normalized = { ...module, materials: [] };
       if (!modulesByCourse.has(module.course_id)) modulesByCourse.set(module.course_id, []);
       modulesByCourse.get(module.course_id).push(normalized);
       moduleById.set(module.id, normalized);
     });
 
-    (materialRes.data || []).forEach(material => {
+    dbMaterials.forEach(material => {
+      // Nested fallback rows already carry moduleTitle and may not be in the
+      // flat module map, so support both forms.
       const module = moduleById.get(material.module_id);
       if (module) module.materials.push(material);
     });
 
-    const dbCourses = (courseRes.data || []).map(course => ({
-      ...course,
-      modules: modulesByCourse.get(course.id) || []
-    }));
-
-    if (!dbCourses.length) return;
+    if (!dbCourses.length) return false;
 
     dbCourses.forEach(dbC => {
       const dbKey = cleanCourseCode(dbC.code || dbC.id);
@@ -592,18 +611,28 @@ export async function syncDataFromSupabase() {
       );
 
       const flattenedMaterials = [];
-      (dbC.modules || []).forEach(module => {
+      (modulesByCourse.get(dbC.id) || []).forEach(module => {
         (module.materials || []).forEach(material => {
           flattenedMaterials.push({ ...material, moduleTitle: module.title });
         });
       });
+
+      // If the defensive nested fallback was used, preserve those rows too.
+      if (!flattenedMaterials.length) {
+        dbMaterials
+          .filter(material => {
+            const nestedCourse = material.course_id || material.courseId;
+            return nestedCourse && cleanCourseCode(nestedCourse) === dbKey;
+          })
+          .forEach(material => flattenedMaterials.push({ ...material }));
+      }
 
       if (match) {
         match.dbId = dbC.id;
         if (dbC.name) match.name = dbC.name;
         if (dbC.instructor) match.instructor = dbC.instructor;
         if (dbC.color) match.accent = dbC.color;
-        match.modules = dbC.modules || [];
+        match.modules = modulesByCourse.get(dbC.id) || match.modules || [];
         match.cloudMaterials = flattenedMaterials;
         match.hasMaterial = flattenedMaterials.length > 0;
       } else {
@@ -619,14 +648,12 @@ export async function syncDataFromSupabase() {
           syllabus: [],
           lectures: [],
           worksheets: [],
-          modules: dbC.modules || [],
+          modules: modulesByCourse.get(dbC.id) || [],
           cloudMaterials: flattenedMaterials
         });
       }
     });
 
-    // Keep the five enrolled courses unique while retaining their static
-    // timetable/academic metadata.
     const seen = new Set();
     COURSES = COURSES.filter(course => {
       const key = cleanCourseCode(course.code) || cleanCourseCode(course.id);
@@ -635,9 +662,13 @@ export async function syncDataFromSupabase() {
       return true;
     });
 
+    // Always repaint after hydration. This is important when the user is
+    // already inside a course and the background request finishes later.
     render();
+    return true;
   } catch (err) {
     console.error('Failed to sync courses/materials from Supabase:', err);
+    return false;
   }
 }
 
@@ -1174,6 +1205,75 @@ function renderCourseDetailView(c) {
       <div class="panel">${bodyHtml}</div>
     </div>
   `;
+}
+
+async function ingestAiAttachments(files = [], userInstruction = '') {
+  if (!files.length) return;
+
+  // Make sure every static course has its current Supabase id before filing.
+  await syncDataFromSupabase();
+
+  const instruction = String(userInstruction || '');
+  const looksLikeAssignment = (name) =>
+    /(assignment|submission|submitted|homework|lab.?report|project|worksheet|tutorial|quiz|midterm|final|report)/i.test(name) ||
+    /(assignment|submission|submitted|homework|lab report|project|worksheet|tutorial|quiz|midterm|final report)/i.test(instruction);
+
+  for (const file of files) {
+    try {
+      const detection = detectCourseFromContent(file.name || '', instruction, COURSES);
+      const course = courseById(detection.courseId);
+      if (!course) {
+        showToast(`I couldn't identify a course for ${file.name}. The file was left in the AI conversation.`);
+        continue;
+      }
+
+      if (!course.dbId) {
+        await syncDataFromSupabase();
+      }
+      const readyCourse = courseById(course.id);
+      if (!readyCourse?.dbId) {
+        showToast(`Couldn't connect ${file.name} to ${course.code}.`);
+        continue;
+      }
+
+      showToast(`Filing ${file.name} → ${course.code}…`);
+      const material = await uploadAndProcessFile({
+        file,
+        course: readyCourse,
+        onProgress: progress => {
+          if (progress?.status === 'completed') showToast(`${file.name} added to ${course.code} ✓`);
+        },
+        onLog: () => {}
+      });
+
+      // Assignment-like uploads are also registered in the course's
+      // assignment workspace so the file is not stranded in Materials.
+      if (looksLikeAssignment(file.name || '')) {
+        assignmentsManager.createAssignment({
+          title: (file.name || 'Uploaded assignment').replace(/\\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+          courseId: readyCourse.id,
+          description: instruction || `Imported from AI upload: ${file.name}`,
+          status: 'not_started',
+          assignmentType: /lab.?report|report/i.test(file.name) ? 'report' : 'homework',
+          sourceFiles: [{
+            id: material?.id || `file_${Date.now()}`,
+            name: file.name,
+            type: file.type || 'file',
+            url: material?.file_url || '',
+            materialId: material?.id || null,
+            uploadedAt: Date.now()
+          }]
+        });
+      }
+
+      // Rehydrate immediately so the newly filed material is visible in the
+      // current course without a page reload.
+      await syncDataFromSupabase();
+    } catch (err) {
+      console.error('AI attachment ingestion failed:', err);
+      showToast(`Couldn't file ${file.name}: ${err?.message || 'upload failed'}`);
+    }
+  }
 }
 
 /* ========================================================================
@@ -2645,6 +2745,12 @@ function attachEventHandlers() {
           state.aiChatMessages[last] = { sender: 'assistant', text: raw, attachments: generatedMedia, createdAt: new Date().toISOString() };
         }
         state.aiConnectionState = 'ready';
+        // The AI workspace is also the universal intake point: attached files
+        // are filed into the detected course after Gemini has reviewed them.
+        // Do not block the AI response on the storage/processing pipeline.
+        if (files.length) {
+          ingestAiAttachments(files, text).catch(error => console.warn('AI file filing:', error));
+        }
       } catch (err) {
         console.error(err);
         const last = state.aiChatMessages.length - 1;
@@ -2698,10 +2804,22 @@ function attachEventHandlers() {
     render();
   }));
 
-  document.querySelectorAll('[data-course-id]').forEach(el => el.addEventListener('click', () => { state.courseId = el.getAttribute('data-course-id'); state.view = 'courses'; state.courseTab = 'overview'; render(); }));
+  document.querySelectorAll('[data-course-id]').forEach(el => el.addEventListener('click', async () => {
+    state.courseId = el.getAttribute('data-course-id');
+    state.view = 'courses';
+    state.courseTab = 'overview';
+    render();
+    // Foreground hydrate on course open guarantees the user sees the cloud
+    // library even if the initial background sync finished too early/failed.
+    await syncDataFromSupabase();
+  }));
   const courseBack = document.getElementById('course-back-btn');
   if (courseBack) courseBack.addEventListener('click', () => { state.courseId = null; render(); });
-  document.querySelectorAll('[data-course-tab]').forEach(el => el.addEventListener('click', () => { state.courseTab = el.getAttribute('data-course-tab'); render(); }));
+  document.querySelectorAll('[data-course-tab]').forEach(el => el.addEventListener('click', async () => {
+    state.courseTab = el.getAttribute('data-course-tab');
+    render();
+    if (state.courseTab === 'materials') await syncDataFromSupabase();
+  }));
 
   const focusBtn = document.getElementById('quick-focus-btn');
   if (focusBtn) focusBtn.addEventListener('click', () => {
