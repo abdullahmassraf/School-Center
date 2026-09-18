@@ -3983,3 +3983,7 @@ main#view-host,
 .ai-discovery h2{margin:10px 0 6px;color:var(--ink)!important;font-size:1.2rem}
 .ai-discovery p{max-width:520px;margin:0 auto;color:var(--muted)!important;line-height:1.6}
 @media(max-width:720px){.unified-search-result{padding:12px 13px}.unified-search-result .search-result-badge{min-width:62px;font-size:.62rem}}
+
+/* v1.4.1 — materials load-failure state (course Materials tab) */
+.materials-error-banner{border:1px solid rgba(240,96,138,.35);background:rgba(240,96,138,.08);border-radius:12px;padding:14px 16px;color:var(--ink)}
+.materials-error-banner p{margin:0 0 4px}

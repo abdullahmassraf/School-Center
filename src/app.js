@@ -530,7 +530,8 @@ let state = {
   aiSearchResultsCount: 0,
   dataSyncLastError: null,
   dataSyncLastOkAt: null,
-  syncBannerDismissed: false
+  syncBannerDismissed: false,
+  materialsSyncError: null // set by syncDataFromSupabase() when course/material fetch fails
 };
 
 let aiLiveTranscriber = null;
@@ -709,12 +710,22 @@ export async function syncDataFromSupabase() {
       return true;
     });
 
+    // Hydration succeeded. Clear any previous failure so the course view
+    // never keeps showing a stale "materials could not be loaded" banner.
+    state.materialsSyncError = null;
+
     // Always repaint after hydration. This is important when the user is
     // already inside a course and the background request finishes later.
     render();
     return true;
   } catch (err) {
     console.error('Failed to sync courses/materials from Supabase:', err);
+    // Surface the failure instead of silently rendering an empty library:
+    // the course Materials tab distinguishes "no materials exist" from
+    // "loading failed" through this flag.
+    state.materialsSyncError = err?.message
+      ? `Cloud error: ${err.message}`
+      : 'Could not reach Supabase. Check your connection and try again.';
     return false;
   }
 }
@@ -1136,8 +1147,14 @@ function renderCourseDetailView(c) {
       </div>
     ` : `
       <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
-        <p>No document files uploaded for ${c.code} yet.</p>
-        <button class="btn-primary" id="trigger-upload-modal" style="margin-top:8px;">Upload Course Material</button>
+        ${state.materialsSyncError
+          ? `<p style="color:var(--accent-3);font-weight:600;">Course materials could not be loaded.</p>
+             <p style="font-size:0.82rem;margin-top:4px;">${escapeHtml(state.materialsSyncError)}</p>`
+          : `<p>No document files uploaded for ${escapeHtml(c.code)} yet.</p>`}
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn-primary" id="trigger-upload-modal">Upload Course Material</button>
+          <button class="btn-ghost" id="retry-materials-btn">Retry loading materials</button>
+        </div>
       </div>
     `;
   } else if (state.courseTab === 'assignments') {
@@ -2061,9 +2078,15 @@ function renderSyncDrawer() {
           <div class="sync-stat-row">
             <div>
               <div style="font-weight:700;font-size:0.9rem;">Supabase Cloud Database</div>
-              <div style="font-size:0.75rem;color:var(--muted);">${isOnline ? 'Connected & Active (Realtime)' : 'Offline Local Storage Mode'}</div>
+              <div style="font-size:0.75rem;color:var(--muted);">${!isOnline
+                ? 'Offline Local Storage Mode'
+                : (state.dataSyncLastError
+                    ? `Sync error: ${escapeHtml(state.dataSyncLastError)}`
+                    : (state.dataSyncRealtime === 'subscribed'
+                        ? 'Connected & streaming (Realtime)'
+                        : 'Connected — periodic sync (Realtime unavailable)'))}</div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-weight:600;color:${isOnline ? 'var(--accent-2)' : 'var(--accent-amber)'};">
+            <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-weight:600;color:${!isOnline ? 'var(--accent-amber)' : (state.dataSyncLastError ? 'var(--accent-3)' : 'var(--accent-2)')};">
               <span style="width:8px;height:8px;border-radius:50%;background:currentColor;"></span>
               ${isOnline ? 'Synced' : 'Local'}
             </div>
@@ -2849,11 +2872,30 @@ function attachEventHandlers() {
   const quickSearchBtn = document.getElementById('quick-search-btn');
   if (quickSearchBtn) quickSearchBtn.addEventListener('click', () => { state.spotlightSearchOpen = true; state.spotlightQuery = ''; render(); setTimeout(() => document.getElementById('spotlight-search-input')?.focus(), 50); });
   const closeSpotlight = document.getElementById('close-spotlight-modal');
-  if (closeSpotlight) closeSpotlight.addEventListener('click', () => { state.spotlightSearchOpen = false; render(); });
+  if (closeSpotlight) closeSpotlight.addEventListener('click', () => { state.spotlightSearchOpen = false; state.spotlightQuery = ''; render(); });
   const spotlightOverlay = document.getElementById('spotlight-modal-overlay');
-  if (spotlightOverlay) spotlightOverlay.addEventListener('click', e => { if (e.target === spotlightOverlay) { state.spotlightSearchOpen = false; render(); } });
+  if (spotlightOverlay) spotlightOverlay.addEventListener('click', e => { if (e.target === spotlightOverlay) { state.spotlightSearchOpen = false; state.spotlightQuery = ''; render(); } });
   const spotlightInput = document.getElementById('spotlight-search-input');
-  if (spotlightInput) spotlightInput.addEventListener('input', e => { state.spotlightQuery = e.target.value; render(); setTimeout(() => { const inp = document.getElementById('spotlight-search-input'); if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } }, 0); });
+  if (spotlightInput) spotlightInput.addEventListener('input', e => {
+    // Repaint ONLY the results list: rebuilding the whole modal on every
+    // keystroke destroyed and recreated the focused input each character,
+    // which was the visible "spotlight flicker". The input itself is left
+    // untouched, so focus and the caret position survive naturally.
+    state.spotlightQuery = e.target.value;
+    const resultsHost = document.querySelector('.spotlight-results');
+    if (!resultsHost) { render(); return; }
+    const probe = document.createElement('div');
+    try { probe.innerHTML = renderSpotlightModal(); } catch (_) { render(); return; }
+    const nextResults = probe.querySelector('.spotlight-results');
+    if (nextResults) resultsHost.replaceWith(nextResults);
+    document.querySelectorAll('[data-spotlight-nav]').forEach(item => item.addEventListener('click', () => {
+      const navType = item.getAttribute('data-spotlight-nav'); const targetId = item.getAttribute('data-spotlight-id'); state.spotlightSearchOpen = false;
+      if (navType === 'course') { state.courseId = targetId; state.view = 'courses'; state.courseTab = 'overview'; }
+      else if (navType === 'asg') state.assignmentDetailId = targetId;
+      else if (navType === 'note') state.view = 'settings';
+      render();
+    }));
+  });
   document.querySelectorAll('[data-spotlight-nav]').forEach(item => item.addEventListener('click', () => {
     const navType = item.getAttribute('data-spotlight-nav'); const targetId = item.getAttribute('data-spotlight-id'); state.spotlightSearchOpen = false;
     if (navType === 'course') { state.courseId = targetId; state.view = 'courses'; state.courseTab = 'overview'; }
@@ -2935,6 +2977,19 @@ function attachEventHandlers() {
     input.click();
   });
 
+  const retryMaterialsBtn = document.getElementById('retry-materials-btn');
+  if (retryMaterialsBtn) retryMaterialsBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    showToast('Reloading course materials…');
+    try {
+      await syncDataFromSupabase();
+      if (state.materialsSyncError) showToast('Materials still unavailable. See the course page for details.');
+      else showToast('Course materials loaded ✓');
+    } catch (err) {
+      showToast(`Retry failed: ${err?.message || 'Unknown error'}`);
+    }
+  });
+
   attachCampusMapHandlers();
   document.querySelectorAll('[data-show-location]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -3007,8 +3062,11 @@ function attachEventHandlers() {
     render();
   }));
   const accentInputs = [document.getElementById('accent-color-input'), document.getElementById('accent-color-input-inline')].filter(Boolean);
+  // applyCustomAccent() already persists and pushes to the cloud, and the
+  // theme lives on CSS custom properties, so no repaint is needed at all.
+  // The old 'change' -> render() call rebuilt the whole page the moment the
+  // picker closed — pure flicker with zero effect.
   accentInputs.forEach(input => input.addEventListener('input', e => applyCustomAccent(e.target.value, true)));
-  accentInputs.forEach(input => input.addEventListener('change', () => render()));
   const lavaSlider = document.getElementById('lava-slider');
   if (lavaSlider) lavaSlider.addEventListener('input', e => {
     const value = Number(e.target.value); document.documentElement.style.setProperty('--bg-glow', String(value)); document.documentElement.style.setProperty('--lava-opacity', String(value)); localStorage.setItem('sc_lava_opacity', String(value)); if (!applyingRemoteTheme) pushThemeToCloud().catch(() => {});
