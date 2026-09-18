@@ -244,8 +244,6 @@ export function clearCampusHighlight() {
   }
   const pin = document.getElementById('cm-pin');
   if (pin) pin.setAttribute('hidden', '');
-  const resetBtn = document.getElementById('cm-reset-btn');
-  if (resetBtn) resetBtn.setAttribute('hidden', '');
   const statusText = document.getElementById('cm-status-text');
   if (statusText) statusText.textContent = 'Davis Campus. Select a building, or use Show location on a class.';
 }
