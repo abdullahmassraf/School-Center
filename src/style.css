@@ -3916,3 +3916,54 @@ main#view-host,
   stroke-width: 1.8;
   stroke-linejoin: round;
 }
+
+
+/* ============================================================================
+   DESKTOP SURFACE REFINEMENT — v1.4.0
+   Desktop should read as a composed application surface, not a grid of
+   identical rounded rectangles. Keep cards where they represent an actual
+   object; remove the heavy container treatment from page-level sections.
+   Mobile keeps the existing compact glass treatment.
+   ============================================================================ */
+@media (min-width: 768px) {
+  .enter {
+    max-width: 1180px;
+    margin-inline: auto;
+    padding-inline: 28px;
+  }
+
+  .enter > .panel {
+    background: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .enter > .panel.settings-card,
+  .enter > .panel.campus-map-card {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Course detail keeps one deliberate content surface instead of a nested
+     stack of identical boxes. */
+  .enter > .panel > .panel:first-child {
+    background: var(--glass-background) !important;
+    border: 1px solid var(--glass-border) !important;
+    box-shadow: var(--glass-shadow) !important;
+  }
+
+  /* Give distinct cards a little more separation now that page containers
+     are open. */
+  .course-card,
+  .assignment-card,
+  .assignment-folder-card,
+  .settings-account-row,
+  .settings-auth-row,
+  .unified-search-result {
+    box-shadow: 0 12px 30px -16px rgba(0,0,0,.52), var(--glass-highlight) !important;
+  }
+}
