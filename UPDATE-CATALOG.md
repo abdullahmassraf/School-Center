@@ -1,3 +1,38 @@
+## v1.9.0 — Storage-backed course library recovery + AI capacity fallback
+
+**Date:** 2026-09-18 03:20 ET
+
+### Follow-up after deployed-browser verification
+The live browser still showed an empty Materials tab despite the production database containing the course files. The recovery path was strengthened rather than assuming the PostgREST material query is always healthy.
+
+### Course library
+- `src/app.js` now treats the Supabase Storage bucket `course-materials` as an independent fallback source for visible files.
+- Normal path remains: courses → modules → materials database metadata.
+- If the materials query/relationship produces no usable rows, the app enumerates each course folder in Storage and constructs viewable material cards from the actual uploaded files.
+- This prevents a transient material-table/RLS/PostgREST relationship problem from turning a populated course into an empty UI.
+- Course open and Materials-tab hydration remain active.
+- Existing files therefore remain accessible even when AI document processing is unavailable.
+
+### ENGR 43301D routing
+- Material-title normalization now tolerates repeated spaces, underscores, and hyphens, so the Background Assignment and Abdullah Massraf Biography continue to route into the dedicated Background Assignment & Biography folder even when uploaded filenames produce slightly different spacing.
+
+### Gemini
+- A 429 rate-limit or transient 5xx response now advances through the configured Gemini model fallback chain instead of immediately displaying the provider capacity message.
+- 401/403 authentication errors still surface immediately.
+
+### Files changed
+- src/app.js
+- src/course-data.js
+- UPDATE-CATALOG.md
+
+### Validation
+- Production Supabase still contains 139 material rows and the public course-materials Storage objects.
+- Browser screenshot supplied by the user showed the old empty Materials presentation and a Gemini high-demand response; these two failure modes are specifically addressed above.
+- No full-repo replacement was performed.
+- Browser refresh after GitHub Pages deployment is required.
+
+---
+
 ## v1.8.0 — Course library hydration + reliable file availability + AI intake
 
 **Date:** 2026-09-18 03:05 ET
