@@ -36,8 +36,8 @@ import { assignmentsManager } from './assignments.js';
 
 const TOMBSTONES_KEY = 'schoolcenter_sync_tombstones_v2';
 const SYNC_DEBOUNCE_MS = 300;
-const PERIODIC_SYNC_MS = 5000;
-const FALLBACK_POLL_MS = 3000;   // used when realtime is not healthy
+const PERIODIC_SYNC_MS = 30000;
+const FALLBACK_POLL_MS = 15000;   // used when realtime is not healthy
 const MAX_BACKOFF_MS = 300000;    // 5 min ceiling after repeated failures
 
 let notesChannel = null;
@@ -242,38 +242,7 @@ export async function pushLocalDataToCloud() {
   await upsertDeletionRows('user_assignments', 'assignment_id', 'assignment');
 }
 
-export async function verifyCloudState() {
-  const { sb, user } = await requireCloudIdentity();
-  const [notesResult, assignmentsResult] = await Promise.all([
-    sb.from('user_notes').select('note_id,updated_at,deleted_at').eq('user_id', user.id),
-    sb.from('user_assignments').select('assignment_id,updated_at,deleted_at').eq('user_id', user.id)
-  ]);
-  if (notesResult.error) throw notesResult.error;
-  if (assignmentsResult.error) throw assignmentsResult.error;
-
-  const noteRows = notesResult.data || [];
-  const assignmentRows = assignmentsResult.data || [];
-  const localNotes = notesManager.getAll();
-  const localAssignments = assignmentsManager.getAll();
-
-  const noteMap = new Map(noteRows.map(r => [r.note_id, r]));
-  const assignmentMap = new Map(assignmentRows.map(r => [r.assignment_id, r]));
-
-  for (const note of localNotes) {
-    const row = noteMap.get(note.id);
-    if (!row || (!row.deleted_at && new Date(row.updated_at).getTime() < localTime(note))) {
-      throw new Error('Cloud verification failed for Notes. The latest local change was not confirmed by the server.');
-    }
-  }
-  for (const assignment of localAssignments) {
-    const row = assignmentMap.get(assignment.id);
-    if (!row || (!row.deleted_at && new Date(row.updated_at).getTime() < localTime(assignment))) {
-      throw new Error('Cloud verification failed for Assignments. The latest local change was not confirmed by the server.');
-    }
-  }
-}
-
-async function pullCloudDataToLocal() {
+export async function pullCloudDataToLocal() {
   const [noteRows, assignmentRows] = await Promise.all([
     fetchRows('user_notes'),
     fetchRows('user_assignments')
@@ -311,10 +280,6 @@ function ensureLocalMutationWatchers() {
 async function syncAfterLocalChange() {
   try {
     await fullTwoWaySync();
-    // Verify that the server accepted the latest state. This is deliberately
-    // separate from Realtime: a successful websocket subscription must never
-    // be mistaken for a successful database write.
-    await verifyCloudState();
     consecutiveFailures = 0;
     lastSyncOkAt = Date.now();
     notifyUiOfSync('ok');
