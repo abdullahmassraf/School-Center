@@ -136,7 +136,6 @@ export function renderCampusMapWidget() {
           <h3 class="headfont">Campus Map</h3>
           <p class="cm-status" id="cm-status-text">Davis Campus. Select a building, or use Show location on a class.</p>
         </div>
-        <button class="btn-ghost cm-reset-btn" id="cm-reset-btn" type="button" hidden>Show all</button>
       </div>
 
       <div class="cm-stage">
@@ -233,9 +232,6 @@ export function highlightBuilding(buildingId) {
     pin.removeAttribute('hidden');
   }
 
-  const resetBtn = document.getElementById('cm-reset-btn');
-  if (resetBtn) resetBtn.removeAttribute('hidden');
-
   const statusText = document.getElementById('cm-status-text');
   if (statusText) statusText.textContent = `Showing ${target.label}.`;
 }
@@ -254,8 +250,9 @@ export function clearCampusHighlight() {
   if (statusText) statusText.textContent = 'Davis Campus. Select a building, or use Show location on a class.';
 }
 
-/** Wires clicks inside the map (building nodes + reset). Safe to call on
- *  every render. [data-show-location] buttons are wired in app.js instead,
+/** Wires clicks inside the map. Clicking a building focuses it; clicking the
+ *  map background clears the focus and restores every building. Safe to call
+ *  on every render. [data-show-location] buttons are wired in app.js instead,
  *  because they may need to switch views before highlighting. */
 export function attachCampusMapHandlers() {
   const svg = document.getElementById('campus-map-svg');
@@ -267,6 +264,9 @@ export function attachCampusMapHandlers() {
       });
     });
   }
-  const resetBtn = document.getElementById('cm-reset-btn');
-  if (resetBtn) resetBtn.addEventListener('click', clearCampusHighlight);
+  if (svg) {
+    svg.addEventListener('click', (event) => {
+      if (!event.target.closest('.cm-building')) clearCampusHighlight();
+    });
+  }
 }
