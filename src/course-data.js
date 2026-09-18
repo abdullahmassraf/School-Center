@@ -33,11 +33,17 @@ export function routeCourseContent(course) {
     return { materials: mats, assignmentFolders: [] };
   }
 
-  const assignmentTitles = new Set(rules.flatMap(folder => folder.items.map(item => item.title)));
+  const normalizeTitle = value => String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  const assignmentTitles = new Set(rules.flatMap(folder => folder.items.map(item => normalizeTitle(item.title))));
   const routedItems = new Map();
   mats.forEach(material => {
-    if (!assignmentTitles.has(material?.title)) return;
-    const key = material.title;
+    const key = normalizeTitle(material?.title);
+    if (!assignmentTitles.has(key)) return;
     if (!routedItems.has(key)) routedItems.set(key, material);
   });
 
@@ -45,12 +51,12 @@ export function routeCourseContent(course) {
     ...folder,
     items: folder.items.map(spec => ({
       ...spec,
-      material: routedItems.get(spec.title) || null
+      material: routedItems.get(normalizeTitle(spec.title)) || null
     }))
   }));
 
   return {
-    materials: mats.filter(material => !assignmentTitles.has(material?.title)),
+    materials: mats.filter(material => !assignmentTitles.has(normalizeTitle(material?.title))),
     assignmentFolders
   };
 }
