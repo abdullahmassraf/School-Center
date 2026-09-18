@@ -188,7 +188,10 @@ export async function triggerDocumentProcessing(materialId, filePath) {
   });
 
   if (error) {
-    console.warn('Edge function direct invocation note:', error);
+    // Surface the failure to the caller. The upload layer can then keep the
+    // actual Storage file usable instead of leaving a permanent "pending"
+    // material when the optional processor is unavailable.
+    throw error;
   }
   return data;
 }
