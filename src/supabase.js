@@ -1,273 +1,256 @@
 // ============================================================================
-// src/supabase.js — Supabase Client & Database Service Layer (Fail-Safe)
-// FIXED: Production config fallback + real error surfacing
+// src/supabase.js — Supabase Client & Database Service Layer
+// School Center v0.9.9 — boot/auth stabilization
 // ============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
-// In-memory fallback if localStorage is blocked by browser security
-const memStorage = {};
+const FALLBACK_URL = 'https://vxsphvrvulhbyhqmoeex.supabase.co';
+// Public client key fallback. index.html can override this through the
+// supabase-anon-key meta tag, and Settings can override it through localStorage.
+const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ4c3BodnJ2d2xodnlxZXZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1OTI4MjcsImV4cCI6MjEwNTE2ODgyN30.afO1iisTwEwgdQKTTcxEXmzgNRD0io1ptbFK2RZ6Z8w';
+
+const memoryStorage = Object.create(null);
 
 function safeGetItem(key) {
-@@ -23,50 +23,54 @@ function safeSetItem(key, val) {
-}
+  try {
+    return localStorage.getItem(key);
+  } catch (_) {
+    return memoryStorage[key] || null;
+  }
 }
 
-// Read configuration from meta tags, localStorage, or global env
-// 🔥 CRITICAL FIX: hard fallback for GitHub Pages
-const FALLBACK_URL = 'https://vxsphvrvulhbyhqmoeex.supabase.co';
-const FALLBACK_KEY = 'REPLACE_WITH_REAL_ANON_KEY';
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (_) {
+    memoryStorage[key] = value;
+  }
+}
 
 function getConfig() {
-try {
-const metaUrl = document.querySelector('meta[name="supabase-url"]')?.content;
-const metaKey = document.querySelector('meta[name="supabase-anon-key"]')?.content;
+  try {
+    const metaUrl = document.querySelector('meta[name="supabase-url"]')?.content?.trim();
+    const metaKey = document.querySelector('meta[name="supabase-anon-key"]')?.content?.trim();
 
-    const url = metaUrl && !metaUrl.includes('YOUR_SUPABASE') 
-      ? metaUrl 
-      : (safeGetItem('sc_supabase_url') || '');
-    const url = metaUrl && !metaUrl.includes('YOUR_SUPABASE')
+    const url = (metaUrl && !metaUrl.includes('YOUR_SUPABASE'))
       ? metaUrl
       : (safeGetItem('sc_supabase_url') || FALLBACK_URL);
 
-    const key = metaKey && !metaKey.includes('YOUR_SUPABASE') 
-      ? metaKey 
-      : (safeGetItem('sc_supabase_anon_key') || '');
-    const key = metaKey && !metaKey.includes('YOUR_SUPABASE')
+    const key = (metaKey && !metaKey.includes('YOUR_SUPABASE'))
       ? metaKey
       : (safeGetItem('sc_supabase_anon_key') || FALLBACK_KEY);
 
-return { url: (url || '').trim(), key: (key || '').trim() };
-} catch (e) {
-    console.warn('Error reading Supabase config:', e);
-    return { url: '', key: '' };
-    console.error('Supabase config read error:', e);
+    return {
+      url: String(url || '').trim(),
+      key: String(key || '').trim()
+    };
+  } catch (error) {
+    console.error('Supabase config read error:', error);
     return { url: FALLBACK_URL, key: FALLBACK_KEY };
-}
+  }
 }
 
 let client = null;
 
 export function getSupabase() {
-if (client) return client;
+  if (client) return client;
 
-const { url, key } = getConfig();
-  if (url && key) {
-    try {
-      client = createClient(url, key, {
-        realtime: {
-          params: {
-            eventsPerSecond: 10
-          }
-        },
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true
-        }
-      });
-    } catch (e) {
-      console.warn('Failed to initialize Supabase client (using offline fallback):', e);
-      client = null;
-    }
+  const { url, key } = getConfig();
 
-  if (!url || !key) {
-    console.error('❌ Supabase NOT configured — app offline');
+  if (!url || !key || key.includes('REPLACE_WITH')) {
+    console.error('❌ Supabase is not configured.');
     return null;
-}
+  }
 
   try {
     client = createClient(url, key, {
-      realtime: { params: { eventsPerSecond: 10 } },
-      auth: { persistSession: true, autoRefreshToken: true }
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce'
+      },
+      realtime: {
+        params: { eventsPerSecond: 10 }
+      }
     });
 
-    console.log('✅ Supabase connected:', url);
-  } catch (e) {
-    console.error('❌ Supabase init failed:', e);
+    console.log('✅ Supabase client initialized:', url);
+    return client;
+  } catch (error) {
+    console.error('❌ Supabase client initialization failed:', error);
     client = null;
+    return null;
+  }
+}
+
+export function isSupabaseConfigured() {
+  const { url, key } = getConfig();
+  return Boolean(url && key && !key.includes('REPLACE_WITH'));
+}
+
+export function saveSupabaseConfig(url, key) {
+  if (url) safeSetItem('sc_supabase_url', String(url).trim());
+  if (key) safeSetItem('sc_supabase_anon_key', String(key).trim());
+
+  client = null;
+  return getSupabase();
+}
+
+export async function fetchCoursesWithMaterials() {
+  const sb = getSupabase();
+  if (!sb) throw new Error('Supabase is not initialized.');
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Supabase request timed out.')), 10000);
+  });
+
+  const request = sb
+    .from('courses')
+    .select('*, modules (*, materials (*))')
+    .order('code');
+
+  const { data, error } = await Promise.race([request, timeout]);
+
+  if (error) {
+    console.error('❌ Course/material fetch failed:', error);
+    throw error;
   }
 
-return client;
+  return data || [];
 }
 
-@@ -78,146 +82,111 @@ export function isSupabaseConfigured() {
-export function saveSupabaseConfig(url, key) {
-if (url) safeSetItem('sc_supabase_url', url.trim());
-if (key) safeSetItem('sc_supabase_anon_key', key.trim());
-  client = null; // reset so next getSupabase() recreates client
-  client = null;
-return getSupabase();
-}
-
-/**
- * Fetches all courses with their modules and materials.
- * Gracefully times out after 8s to prevent blocking UI.
- */
-export async function fetchCoursesWithMaterials() {
-const sb = getSupabase();
-  if (!sb) return null;
-  if (!sb) throw new Error('Supabase not initialized');
-
-try {
-    // Timeout promise after 8 seconds
-    const timeout = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Supabase request timed out')), 8000)
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Supabase timeout')), 8000)
-);
-
-const fetchPromise = sb
-.from('courses')
-      .select(`
-        *,
-        modules (
-          *,
-          materials (*)
-        )
-      `)
-      .select(`*, modules (*, materials (*))`)
-.order('code');
-
-const result = await Promise.race([fetchPromise, timeout]);
-const { data, error } = result;
-
-if (error) {
-      console.warn('Supabase query returned error (using cached/static courses):', error.message);
-      return null;
-      console.error('❌ Fetch error:', error);
-      throw error;
-}
-
-    console.log('✅ Loaded courses:', data?.length || 0);
-return data;
-} catch (err) {
-    console.warn('Supabase network exception or timeout (using offline data):', err.message || err);
-    return null;
-    console.error('❌ Fetch failed:', err);
-    throw err;
-}
-}
-
-/**
- * Uploads a raw document file to the 'course-materials' Supabase Storage bucket.
- */
 export async function uploadCourseFile(courseCode, file) {
-const sb = getSupabase();
+  const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured.');
-  if (!sb) throw new Error('Supabase not configured');
 
-const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-const filePath = `${courseCode}/${Date.now()}_${cleanFileName}`;
+  if (!courseCode) throw new Error('A course code is required.');
+  if (!file) throw new Error('No file was supplied.');
 
-  const { data, error } = await sb.storage
+  const cleanCourseCode = String(courseCode).replace(/[^a-zA-Z0-9_-]/g, '');
+  const cleanFileName = String(file.name || 'upload')
+    .replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  const filePath = `${cleanCourseCode}/${Date.now()}_${cleanFileName}`;
+
   const { error } = await sb.storage
-.from('course-materials')
+    .from('course-materials')
     .upload(filePath, file, {
       cacheControl: '3600',
-      upsert: false
+      upsert: false,
+      contentType: file.type || 'application/octet-stream'
     });
-    .upload(filePath, file);
 
-  if (error) throw error;
   if (error) {
-    console.error('❌ Upload failed:', error);
+    console.error('❌ Course file upload failed:', error);
     throw error;
   }
 
-  const { data: publicUrlData } = sb.storage
   const { data } = sb.storage
-.from('course-materials')
-.getPublicUrl(filePath);
+    .from('course-materials')
+    .getPublicUrl(filePath);
 
-return {
-filePath,
-    publicUrl: publicUrlData?.publicUrl || ''
+  return {
+    filePath,
     publicUrl: data?.publicUrl || ''
-};
+  };
 }
 
-/**
- * Inserts a new material record into public.materials.
- */
-export async function insertMaterialRecord({ moduleId, title, type, filePath, fileUrl }) {
 export async function insertMaterialRecord(payload) {
-const sb = getSupabase();
+  const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured.');
-  if (!sb) throw new Error('Supabase not configured');
+  if (!payload?.moduleId && !payload?.module_id) {
+    throw new Error('A module ID is required for a material record.');
+  }
 
-const { data, error } = await sb
-.from('materials')
-    .insert([
-      {
-        module_id: moduleId,
-        title,
-        type: type || 'other',
-        file_path: filePath,
-        file_url: fileUrl,
-        status: 'pending'
-      }
-    ])
-    .insert([payload])
-.select()
-.single();
+  const row = {
+    ...payload,
+    module_id: payload.module_id || payload.moduleId,
+    title: payload.title || 'Untitled material',
+    type: payload.type || 'other',
+    file_path: payload.file_path || payload.filePath || null,
+    file_url: payload.file_url || payload.fileUrl || null,
+    status: payload.status || 'pending',
+    updated_at: payload.updated_at || new Date().toISOString()
+  };
 
-  if (error) throw error;
+  delete row.moduleId;
+  delete row.filePath;
+  delete row.fileUrl;
+
+  const { data, error } = await sb
+    .from('materials')
+    .insert(row)
+    .select()
+    .single();
+
   if (error) {
-    console.error('❌ Insert failed:', error);
+    console.error('❌ Material record insert failed:', error);
     throw error;
   }
 
-return data;
+  return data;
 }
 
-/**
- * Invokes the 'process-document' Edge Function for AI processing.
- */
 export async function triggerDocumentProcessing(materialId, filePath) {
-const sb = getSupabase();
+  const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured.');
-  if (!sb) throw new Error('Supabase not configured');
 
-const { data, error } = await sb.functions.invoke('process-document', {
-body: { material_id: materialId, file_path: filePath }
-});
+  const { data, error } = await sb.functions.invoke('process-document', {
+    body: {
+      material_id: materialId,
+      file_path: filePath
+    }
+  });
 
-if (error) {
-    // Surface the failure to the caller. The upload layer can then keep the
-    // actual Storage file usable instead of leaving a permanent "pending"
-    // material when the optional processor is unavailable.
-    console.error('❌ Processing failed:', error);
-throw error;
+  if (error) {
+    console.error('❌ Document processing function failed:', error);
+    throw error;
+  }
+
+  return data;
 }
 
-return data;
-}
+let materialsChannel = null;
 
-/**
- * Subscribes to real-time status updates on the materials table.
- */
 export function subscribeToMaterials(onChange) {
-const sb = getSupabase();
-if (!sb) return null;
+  const sb = getSupabase();
+  if (!sb || typeof onChange !== 'function') return null;
 
-try {
-    const channel = sb
-    return sb
-.channel('materials-changes')
+  if (materialsChannel) {
+    try { sb.removeChannel(materialsChannel); } catch (_) {}
+    materialsChannel = null;
+  }
+
+  try {
+    materialsChannel = sb
+      .channel('school-center-materials')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'materials' },
-        (payload) => {
-          try { onChange(payload); } catch (e) {}
+        {
+          event: '*',
+          schema: 'public',
+          table: 'materials'
+        },
+        payload => {
+          try {
+            onChange(payload);
+          } catch (error) {
+            console.error('Material realtime handler failed:', error);
+          }
         }
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' }, onChange)
-.subscribe();
+      .subscribe((status, error) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Material realtime degraded:', status, error);
+        }
+      });
 
-    return channel;
-} catch (err) {
-    console.warn('Failed to subscribe to realtime events:', err);
-    console.error('❌ Realtime failed:', err);
-return null;
-}
+    return materialsChannel;
+  } catch (error) {
+    console.error('❌ Material realtime initialization failed:', error);
+    materialsChannel = null;
+    return null;
+  }
 }
