@@ -544,89 +544,92 @@ let aiHistoryUnsubscribe = null;
 export async function syncDataFromSupabase() {
   if (!isSupabaseConfigured()) return;
   try {
-    let dbCourses = await fetchCoursesWithMaterials();
-    const nestedMaterialCount = (dbCourses || []).reduce((total, c) => total + (c.modules || []).reduce((n, m) => n + (m.materials || []).length, 0), 0);
-    if (!dbCourses?.length || nestedMaterialCount === 0) {
-      const sb = getSupabase();
-      if (sb) {
-        const [courseRes, moduleRes, materialRes] = await Promise.all([
-          sb.from('courses').select('*').order('code'),
-          sb.from('modules').select('*').order('order_index'),
-          sb.from('materials').select('*').order('created_at')
-        ]);
-        if (!courseRes.error && !moduleRes.error && !materialRes.error) {
-          const modulesByCourse = new Map();
-          (moduleRes.data || []).forEach(m => {
-            if (!modulesByCourse.has(m.course_id)) modulesByCourse.set(m.course_id, []);
-            modulesByCourse.get(m.course_id).push({ ...m, materials: [] });
-          });
-          const moduleById = new Map();
-          modulesByCourse.forEach(list => list.forEach(m => moduleById.set(m.id, m)));
-          (materialRes.data || []).forEach(mat => moduleById.get(mat.module_id)?.materials.push(mat));
-          dbCourses = (courseRes.data || []).map(c => ({ ...c, modules: modulesByCourse.get(c.id) || [] }));
-        }
-      }
-    }
-    if (!dbCourses || !dbCourses.length) return;
+    const sb = getSupabase();
+    if (!sb) return;
+
+    // v1.6.0: hydrate the course library from the three public tables directly.
+    // The nested PostgREST relation is convenient, but it can return courses
+    // without their child rows depending on relation metadata/cache state.
+    // Courses/materials are essential app content, so build the graph explicitly.
+    const [courseRes, moduleRes, materialRes] = await Promise.all([
+      sb.from('courses').select('*').order('code'),
+      sb.from('modules').select('*').order('order_index'),
+      sb.from('materials').select('*').order('created_at')
+    ]);
+
+    if (courseRes.error) throw courseRes.error;
+    if (moduleRes.error) throw moduleRes.error;
+    if (materialRes.error) throw materialRes.error;
+
+    const modulesByCourse = new Map();
+    const moduleById = new Map();
+
+    (moduleRes.data || []).forEach(module => {
+      const normalized = { ...module, materials: [] };
+      if (!modulesByCourse.has(module.course_id)) modulesByCourse.set(module.course_id, []);
+      modulesByCourse.get(module.course_id).push(normalized);
+      moduleById.set(module.id, normalized);
+    });
+
+    (materialRes.data || []).forEach(material => {
+      const module = moduleById.get(material.module_id);
+      if (module) module.materials.push(material);
+    });
+
+    const dbCourses = (courseRes.data || []).map(course => ({
+      ...course,
+      modules: modulesByCourse.get(course.id) || []
+    }));
+
+    if (!dbCourses.length) return;
 
     dbCourses.forEach(dbC => {
       const dbKey = cleanCourseCode(dbC.code || dbC.id);
-      const match = COURSES.find(c => 
-        cleanCourseCode(c.code) === dbKey || 
-        cleanCourseCode(c.id) === dbKey || 
+      const match = COURSES.find(c =>
+        cleanCourseCode(c.code) === dbKey ||
+        cleanCourseCode(c.id) === dbKey ||
         (c.dbId && c.dbId === dbC.id)
       );
 
+      const flattenedMaterials = [];
+      (dbC.modules || []).forEach(module => {
+        (module.materials || []).forEach(material => {
+          flattenedMaterials.push({ ...material, moduleTitle: module.title });
+        });
+      });
+
       if (match) {
         match.dbId = dbC.id;
-        if (dbC.name && (!match.name || match.name === dbC.code)) match.name = dbC.name;
-        if (dbC.instructor && (!match.instructor || match.instructor === 'Instructor')) match.instructor = dbC.instructor;
+        if (dbC.name) match.name = dbC.name;
+        if (dbC.instructor) match.instructor = dbC.instructor;
         if (dbC.color) match.accent = dbC.color;
-        match.modules = dbC.modules || match.modules || [];
-
-        const dbMaterials = [];
-        (dbC.modules || []).forEach(mod => {
-          (mod.materials || []).forEach(mat => {
-            dbMaterials.push({ ...mat, moduleTitle: mod.title });
-          });
-        });
-        match.cloudMaterials = dbMaterials;
-        if (dbMaterials.length > 0) match.hasMaterial = true;
+        match.modules = dbC.modules || [];
+        match.cloudMaterials = flattenedMaterials;
+        match.hasMaterial = flattenedMaterials.length > 0;
       } else {
-        const alreadyExists = COURSES.some(c => 
-          cleanCourseCode(c.code) === dbKey || 
-          cleanCourseCode(c.id) === dbKey
-        );
-        if (!alreadyExists) {
-          const newCourse = {
-            id: (dbC.code || dbC.id).toLowerCase().replace(/[^a-z0-9]/g, ''),
-            dbId: dbC.id,
-            code: dbC.code,
-            name: dbC.name,
-            instructor: dbC.instructor || 'Instructor',
-            hasMaterial: (dbC.modules || []).some(m => m.materials && m.materials.length > 0),
-            accent: dbC.color || '#8B7CF6',
-            schedule: [],
-            syllabus: [],
-            lectures: [],
-            worksheets: [],
-            modules: dbC.modules || [],
-            cloudMaterials: []
-          };
-          (dbC.modules || []).forEach(mod => {
-            (mod.materials || []).forEach(mat => {
-              newCourse.cloudMaterials.push({ ...mat, moduleTitle: mod.title });
-            });
-          });
-          COURSES.push(newCourse);
-        }
+        COURSES.push({
+          id: (dbC.code || dbC.id).toLowerCase().replace(/[^a-z0-9]/g, ''),
+          dbId: dbC.id,
+          code: dbC.code,
+          name: dbC.name,
+          instructor: dbC.instructor || 'Instructor',
+          hasMaterial: flattenedMaterials.length > 0,
+          accent: dbC.color || '#8B7CF6',
+          schedule: [],
+          syllabus: [],
+          lectures: [],
+          worksheets: [],
+          modules: dbC.modules || [],
+          cloudMaterials: flattenedMaterials
+        });
       }
     });
 
-    // Enforce strict deduplication so courses are never duplicated
+    // Keep the five enrolled courses unique while retaining their static
+    // timetable/academic metadata.
     const seen = new Set();
-    COURSES = COURSES.filter(c => {
-      const key = cleanCourseCode(c.code) || cleanCourseCode(c.id);
+    COURSES = COURSES.filter(course => {
+      const key = cleanCourseCode(course.code) || cleanCourseCode(course.id);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -634,7 +637,7 @@ export async function syncDataFromSupabase() {
 
     render();
   } catch (err) {
-    console.error('Failed to sync courses from Supabase:', err);
+    console.error('Failed to sync courses/materials from Supabase:', err);
   }
 }
 
