@@ -1,3 +1,46 @@
+## v1.7.0 — Cross-device sync hardening + permanent Course Materials recovery
+
+**Date:** 2026-09-18 02:45 ET
+**Time note:** exact implementation time recorded for future developers; keep an exact date/time in this catalog for every subsequent change.
+
+### Changes
+- Hardened Notes & Assignments cloud sync with a post-write server verification step. A local change is no longer treated as synchronized merely because the write request returned.
+- Increased reconciliation frequency to 5 seconds during healthy Realtime operation and 3 seconds when Realtime is degraded, so cross-device changes recover even when WebSockets are unavailable.
+- Kept Supabase Realtime as the fast path while treating database reads/writes as the source of truth.
+- Hardened Appearance/theme synchronization with an authoritative cloud pull on startup plus a 2-second polling fallback. Theme changes therefore no longer depend exclusively on the Realtime websocket.
+- Preserved same-user scoping through the authenticated Supabase user.
+- Added a self-healing Course Materials retry whenever a course's Materials tab is opened while hydration is empty/interrupted.
+- Inspected the newly uploaded `Sheridan.zip` source archive and verified the Linear Algebra source contains six PDFs:
+  - Class Plan - Linear Algebra MATH15325D Fall 2026
+  - Lecture 1 - Worksheet
+  - Lecture 2 - Worksheet
+  - Powerpoint Linear Algebra 1
+  - Powerpoint Linear Algebra 2
+  - Tutorial Week 1 (Complex Numbers)
+- Verified those six Linear Algebra files already exist in the Supabase `course-materials` Storage bucket and that their database material records have public file URLs.
+- Removed duplicate Linear Algebra material database rows so each of the six source files has one canonical material record.
+- Verified the production course database now reports the expected material distribution: ANTH17028GD 62, ENGL17889GD 70, ENGR36035D 16, ENGR43301D 9, MATH15325D 6 unique Linear Algebra files / 6 canonical material rows after duplicate cleanup.
+
+### Files changed
+- src/data-sync.js
+- src/app.js
+- UPDATE-CATALOG.md
+
+### Production verification
+- Supabase Realtime publication includes `user_notes`, `user_assignments`, `user_settings`, and `materials`.
+- RLS policies exist for authenticated user-owned Notes, Assignments, and Settings.
+- MATH15325D course id: `24f0041e-302b-4f8d-bd15-24584cfb45de`.
+- MATH15325D module: `Course Materials & Readings`.
+- All six Linear Algebra Storage objects exist under `MATH15325D/`.
+
+### Validation
+- Source archive contents were inspected directly.
+- Production Supabase schema, policies, Realtime publication, course/module/material records, and Storage objects were queried directly.
+- Browser end-to-end testing is still required after GitHub Pages deployment; the GitHub connector cannot reproduce the user's browser session.
+- No full-repo replacement was performed.
+
+---
+
 ## v1.6.0 — Course material hydration + map interaction cleanup
 
 **Date:** 2026-09-18 02:20 ET
