@@ -1,3 +1,50 @@
+## Release v1.4.0 — 2026-09-18
+
+### Date / time
+2026-09-18 — implementation update recorded during this maintenance session. Exact commit timestamps are retained by GitHub for each file commit.
+
+### Purpose
+Professional desktop presentation, cross-device Appearance synchronization, and reliable Course Materials access/upload.
+
+### Changes
+- Desktop UI: page-level panels no longer render as a repeated grid of heavy rounded rectangles on desktop. The page shell is now more open and editorial; meaningful cards retain glass depth.
+- Appearance sync: added signed-in Supabase cloud persistence for theme, custom accent, and background intensity. Changes are pulled on sign-in and received through Supabase Realtime on other signed-in devices.
+- Course Materials: confirmed the production database already contains course material records. Fixed the Course Materials upload action so the button uploads directly into the selected course's cloud storage/database pipeline instead of opening the generic AI attachment picker.
+- Materials UI: material counts are shown when course materials are available.
+- Supabase: created and applied 003_user_settings with RLS, authenticated-only access, Data API grants, and Realtime publication membership.
+
+### Files changed
+- src/app.js
+- src/style.css
+- supabase/migrations/003_user_settings.sql
+- UPDATE-CATALOG.md
+
+### Database verification
+Production Supabase project: School Center.
+- Migration 001 is present.
+- Migration 002 is present and its user_notes / user_assignments tables contain data.
+- courses: 5 rows.
+- modules: 5 rows.
+- materials: 169 rows.
+- Course material counts currently include: ANTH17028GD 62, ENGL17889GD 70, ENGR36035D 16, ENGR43301D 9, MATH15325D 12.
+- Migration 003 was applied successfully and creates public.user_settings.
+
+### Important implementation notes
+- Existing Notes/Assignments sync code was deliberately left untouched.
+- Existing course/material schema was deliberately left untouched.
+- The public course-materials bucket and existing material-processing pipeline remain in use.
+- Appearance sync is scoped to the signed-in user's auth.uid(); it is not a shared/global setting.
+
+### Verification performed
+- Verified the live Supabase database contains the expected courses/modules/materials rather than treating the materials problem as an empty-database issue.
+- Verified the existing frontend already maps nested courses → modules → materials into cloudMaterials.
+- Verified the previous Course Materials button was only opening the generic AI file picker; it now invokes uploadAndProcessFile for the selected course.
+- Verified migration 003 applied successfully.
+
+### Remaining validation
+- Browser-level visual verification of the desktop layout and two-device Appearance realtime update still requires opening the deployed GitHub Pages site on the user's devices.
+- After deployment, hard-refresh the site on each device before testing.
+
 # School Center — Update Catalog
 
 ## Purpose
