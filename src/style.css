@@ -427,7 +427,16 @@ body {
 }
 
 /* =========================================================================
-   Mobile Floating Bottom Navigation Bar
+   CANONICAL BOTTOM NAV — single source of truth.
+   Previously this project had ~6 separate, conflicting definitions of
+   .bottom-nav / .bottom-nav-wrap / .nav-item scattered across this file
+   (several using !important against each other), which is why the mobile
+   nav bar rendered inconsistently: a stray rule painted an opaque strip
+   across the .bottom-nav-wrap container itself (not just the pill), pill
+   radius fought with a later 14px/16px/18px square-radius override, and
+   item size flip-flopped between 54px/48px/44px at different breakpoints.
+   Everything nav-related now lives ONLY here. Do not add .bottom-nav,
+   .bottom-nav-wrap, or .nav-item rules anywhere else in this file.
    ========================================================================= */
 .bottom-nav-wrap {
   position: fixed;
@@ -439,51 +448,74 @@ body {
   display: flex;
   justify-content: center;
   pointer-events: none;
+  /* Deliberately transparent — this is just the fixed positioning
+     container that spans the full width; only .bottom-nav (the pill)
+     should ever carry a background/blur/shadow. */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .bottom-nav {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
   padding: 6px 8px;
   border-radius: 999px;
-  background: rgba(11, 15, 46, 0.78);
-  border: 1px solid var(--glass-primary-border);
-  -webkit-backdrop-filter: blur(32px) saturate(190%);
-  backdrop-filter: blur(32px) saturate(190%);
-  box-shadow: 0 1px 0 0 var(--glass-primary-spec) inset, 0 18px 42px -8px rgba(0, 0, 0, 0.65);
-  max-width: 480px;
+  background: rgba(18, 18, 24, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 0 0 rgba(255,255,255,0.06) inset, 0 12px 32px -6px rgba(0, 0, 0, 0.55);
+  max-width: 420px;
   width: 100%;
 }
 
 .nav-item {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-height: 48px;
-  padding: 4px 6px;
+  width: 52px;
+  height: 52px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
   border-radius: 999px;
   color: var(--muted);
+  background: transparent;
   cursor: pointer;
-  font-size: 0.72rem;
-  font-weight: 500;
-  transition: color 0.15s ease, background 0.15s ease;
   user-select: none;
+  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .nav-item svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.nav-item:not(.active):hover {
+  color: var(--ink);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .nav-item.active {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.12);
-  font-weight: 600;
+  background: rgba(var(--accent-rgb), 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28), 0 6px 20px rgba(var(--accent-rgb), 0.12);
+}
+
+/* Small phones: everything still fits without the item size fighting
+   itself across breakpoints the way it used to. */
+@media (max-width: 430px) {
+  .bottom-nav { max-width: 360px; gap: 2px; padding: 5px 6px; }
+  .nav-item { width: 46px; height: 46px; }
+  .nav-item svg { width: 20px; height: 20px; }
 }
 
 /* Floating Quick Capture FAB */
@@ -2373,7 +2405,6 @@ select.modal-input { cursor: pointer; }
 .assignment-card,
 .modal-box,
 .bottom-sheet,
-.bottom-nav,
 .jobs-pill,
 .ai-modal-box,
 .voice-memo-card,
@@ -2387,6 +2418,9 @@ select.modal-input { cursor: pointer; }
   border-radius: var(--glass-radius);
   box-shadow: var(--glass-shadow);
 }
+/* NOTE: .bottom-nav is intentionally excluded from this generic glass reset —
+   it has its own single canonical definition (search "CANONICAL BOTTOM NAV")
+   so its pill shape/radius never gets fought over by unrelated card styles. */
 
 .glass-primary::before,
 .glass-secondary::before,
@@ -2436,29 +2470,9 @@ select.modal-input { cursor: pointer; }
   box-shadow: 0 8px 24px rgba(0,0,0,0.20);
 }
 
-.bottom-nav {
-  padding: 6px 8px calc(6px + var(--sab));
-  background: rgba(18, 18, 24, 0.65);
-  border: 1px solid rgba(255,255,255,0.08);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: var(--glass-shadow);
-}
-
 .bottom-nav-wrap {
   padding-left: max(12px, var(--sal));
   padding-right: max(12px, var(--sar));
-}
-
-.nav-item {
-  min-width: 0;
-  min-height: 48px;
-}
-
-.nav-item span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .course-card::before {
@@ -2927,17 +2941,6 @@ select.modal-input { cursor: pointer; }
 }
 
 @media (max-width: 430px) {
-  .nav-item {
-    padding-left: 2px;
-    padding-right: 2px;
-    font-size: 0.64rem;
-  }
-
-  .nav-item svg {
-    width: 18px;
-    height: 18px;
-  }
-
   .bottom-nav-wrap {
     padding-left: 8px;
     padding-right: 8px;
@@ -3008,7 +3011,6 @@ select.modal-input { cursor: pointer; }
 .surface-content,
 .modal-box,
 .bottom-sheet,
-.bottom-nav,
 .app-header,
 .settings-card,
 .assignment-folder-card,
@@ -3048,25 +3050,6 @@ select.modal-input { cursor: pointer; }
 
 .bottom-nav-wrap {
   padding-bottom: calc(12px + var(--sab));
-}
-
-.bottom-nav {
-  max-width: 420px;
-  gap: 2px;
-  background: rgba(18, 18, 24, 0.65) !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.25) !important;
-}
-
-.nav-item {
-  min-height: 48px;
-  border-radius: 14px !important;
-}
-
-.nav-item.active {
-  background: rgba(255,255,255,0.07) !important;
 }
 
 .ai-launch-btn {
@@ -3333,13 +3316,24 @@ select.modal-input { cursor: pointer; }
 .modal-card::before,
 .modal-content::before { display: none !important; }
 
-.app-header,
-.bottom-nav-wrap {
+.app-header {
   background: rgba(16, 18, 27, 0.58) !important;
   -webkit-backdrop-filter: blur(20px) saturate(190%);
   backdrop-filter: blur(20px) saturate(190%);
   border-color: rgba(255,255,255,0.10) !important;
   box-shadow: 0 8px 32px rgba(0,0,0,0.18) !important;
+}
+/* .bottom-nav-wrap is intentionally left transparent — it's the full-width
+   fixed positioning container, not the visible pill. Painting a background
+   here previously drew an opaque strip across the whole bottom of the
+   screen behind the floating nav pill. Only .bottom-nav (the pill itself,
+   see "CANONICAL BOTTOM NAV" near the top of this file) should have one. */
+.bottom-nav-wrap {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 /* Full-screen AI/Search page — no modal rectangle, no dark card around the workspace. */
@@ -3468,25 +3462,8 @@ select.modal-input { cursor: pointer; }
 .ai-pending-media-card .ai-media { max-width:150px; }
 .ai-pending-media-card > button { width:30px; height:30px; border:0; border-radius:10px; background:rgba(255,255,255,.08); color:var(--ink); cursor:pointer; }
 
-/* Navigation: icon-only, consistent contrast, no white inactive state. */
-.bottom-nav { gap: 4px !important; }
-.nav-item {
-  width: 54px !important;
-  min-width: 54px !important;
-  height: 54px !important;
-  min-height: 54px !important;
-  padding: 0 !important;
-  border-radius: 18px !important;
-  color: var(--muted) !important;
-  background: transparent !important;
-}
-.nav-item svg { width: 22px !important; height: 22px !important; }
-.nav-item:not(.active):hover { background: rgba(var(--accent-rgb),.08) !important; color: var(--ink) !important; }
-.nav-item.active {
-  color: var(--ink) !important;
-  background: rgba(var(--accent-rgb), .18) !important;
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb),.28), 0 6px 20px rgba(var(--accent-rgb),.12) !important;
-}
+/* Navigation sizing/color lives in one canonical block near the top of this
+   file (search "CANONICAL BOTTOM NAV") — see it for .bottom-nav/.nav-item. */
 
 /* Accent consistency. */
 .btn-primary,
@@ -3521,8 +3498,6 @@ a { color: var(--accent) !important; }
   .ai-page-composer { bottom: max(6px, env(safe-area-inset-bottom)); margin: 4px 0 0 !important; border-radius: 22px !important; }
   .ai-message { max-width: 96% !important; }
   .ai-message-media-grid { grid-template-columns: 1fr; }
-  .nav-item { width: 48px !important; min-width: 48px !important; height: 48px !important; min-height: 48px !important; border-radius: 16px !important; }
-  .bottom-nav { justify-content: space-around !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3627,4 +3602,134 @@ main#view-host,
 }
 @media not all and (hover: hover), not all and (pointer: fine), (max-width: 768px) {
   .nav-hover-zone { display: none; }
+}
+
+/* =========================================================================
+   CAMPUS MAP WIDGET — matches app iOS glassmorphism tokens.
+   ========================================================================= */
+.campus-map-card { padding: 16px; }
+.cm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.cm-reset-btn { font-size: 0.75rem; padding: 6px 12px; min-height: 32px; flex-shrink: 0; }
+
+.cm-svg-wrap {
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(18, 18, 24, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+.campus-map-svg { display: block; width: 100%; height: auto; }
+
+.cm-ground { fill: rgba(255, 255, 255, 0.025); }
+.cm-path { stroke: rgba(255, 255, 255, 0.08); stroke-width: 10; fill: none; }
+
+.cm-building-rect {
+  fill: rgba(var(--accent-rgb), 0.16);
+  stroke: rgba(var(--accent-rgb), 0.45);
+  stroke-width: 1.5;
+  transition: fill 0.25s ease, stroke 0.25s ease, opacity 0.25s ease, filter 0.25s ease;
+  cursor: pointer;
+}
+.cm-building-label {
+  fill: var(--ink);
+  font-size: 26px;
+  font-weight: 700;
+  font-family: inherit;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.cm-building { cursor: pointer; outline: none; }
+.cm-building:focus-visible .cm-building-rect { stroke: var(--accent); stroke-width: 2.5; }
+.cm-building:hover .cm-building-rect { fill: rgba(var(--accent-rgb), 0.26); }
+
+.cm-lot-rect {
+  fill: rgba(255, 255, 255, 0.035);
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  transition: opacity 0.25s ease;
+}
+.cm-lot-label {
+  fill: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.cm-shuttle-dot { fill: rgba(52, 209, 191, 0.22); stroke: rgba(52, 209, 191, 0.7); stroke-width: 1.5; transition: opacity 0.25s ease; }
+.cm-shuttle-icon { font-size: 16px; pointer-events: none; }
+.cm-shuttle-label { fill: var(--muted); font-size: 13px; font-weight: 600; font-family: inherit; pointer-events: none; transition: opacity 0.25s ease; }
+.cm-shuttle { cursor: default; }
+
+/* Selection state: dim everything not selected, spotlight the active node. */
+.cm-dimmed .cm-building-rect,
+.cm-dimmed.cm-building-rect { opacity: 1; }
+.cm-building.cm-dimmed .cm-building-rect { fill: rgba(255, 255, 255, 0.03); stroke: rgba(255, 255, 255, 0.08); }
+.cm-building.cm-dimmed .cm-building-label { opacity: 0.35; }
+.cm-lot.cm-dimmed .cm-lot-rect,
+.cm-lot.cm-dimmed .cm-lot-label { opacity: 0.25; }
+.cm-shuttle.cm-dimmed .cm-shuttle-dot,
+.cm-shuttle.cm-dimmed .cm-shuttle-icon,
+.cm-shuttle.cm-dimmed .cm-shuttle-label { opacity: 0.25; }
+
+.cm-building.cm-active .cm-building-rect {
+  fill: rgba(var(--accent-rgb), 0.4);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.55));
+}
+.cm-building.cm-active .cm-building-label { opacity: 1; font-weight: 800; }
+
+/* Glowing pin marker for the highlighted building. */
+.cm-pin-dot { fill: var(--accent); }
+.cm-pin-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.7;
+  animation: cmPinPulse 1.8s ease-out infinite;
+}
+.cm-pin-ring-b { animation-delay: 0.9s; }
+@keyframes cmPinPulse {
+  0% { r: 6px; opacity: 0.8; }
+  100% { r: 22px; opacity: 0; }
+}
+
+.cm-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.cm-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cm-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.cm-dot-building { background: rgba(var(--accent-rgb), 0.5); border: 1px solid var(--accent); }
+.cm-dot-lot { background: rgba(255, 255, 255, 0.06); border: 1px dashed rgba(255, 255, 255, 0.25); border-radius: 3px; }
+.cm-dot-shuttle { background: rgba(52, 209, 191, 0.3); border: 1px solid rgba(52, 209, 191, 0.8); border-radius: 50%; }
+
+.cm-show-location-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(var(--accent-rgb), 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cm-show-location-btn:hover { background: rgba(var(--accent-rgb), 0.28); }
+
+@media (max-width: 480px) {
+  .cm-building-label { font-size: 22px; }
+  .cm-lot-label { font-size: 12px; }
 }
