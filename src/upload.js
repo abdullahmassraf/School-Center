@@ -117,13 +117,41 @@ export async function uploadAndProcessFile({ file, course, onProgress, onLog }) 
   onLog(`Invoking Gemini document intelligence...`);
   onProgress({ status: 'processing', text: 'Gemini AI parsing document...' });
 
+  let processorStarted = false;
   try {
     await triggerDocumentProcessing(materialRecord.id, filePath);
+    processorStarted = true;
   } catch (fnErr) {
-    onLog(`Note: Edge function call: ${fnErr.message}`);
+    // Storage is already complete and the material record is valid. The
+    // optional AI processor is not required for viewing/downloading a file.
+    // Mark it available instead of trapping the upload in a 120-second
+    // "pending" state when the processor function is unavailable.
+    onLog(`Document processor unavailable; keeping uploaded file available: ${fnErr.message || fnErr}`);
+    try {
+      await sb.from('materials').update({
+        status: 'completed',
+        content_json: {
+          source: 'course-material-upload',
+          processing: 'unavailable',
+          note: 'Original file is available in Supabase Storage. AI can analyze a fresh attachment directly in the AI workspace.'
+        },
+        error_message: null,
+        updated_at: new Date().toISOString()
+      }).eq('id', materialRecord.id);
+    } catch (availabilityErr) {
+      onLog(`Could not mark uploaded file available: ${availabilityErr.message || availabilityErr}`);
+    }
   }
 
-  // 5. Wait for completion with timeout & polling fallback
+  // 5. If no processor is installed, the file is already ready to view.
+  // Return immediately rather than polling a permanently pending record.
+  if (!processorStarted) {
+    const { data: available } = await sb.from('materials').select('*').eq('id', materialRecord.id).single();
+    onProgress({ status: 'completed', text: 'Uploaded & ready to view ✓', data: available || materialRecord });
+    return available || materialRecord;
+  }
+
+  // 6. Wait for an installed processor with timeout & polling fallback
   return new Promise((resolve, reject) => {
     let attempts = 0;
     const maxAttempts = 60; // 60 * 2s = 120s timeout
