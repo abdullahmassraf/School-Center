@@ -1,3 +1,44 @@
+## v1.8.0 — Course library hydration + reliable file availability + AI intake
+
+**Date:** 2026-09-18 03:05 ET
+
+### User-reported issue fixed
+- Opening a course could still show an empty Materials tab with “Upload Course Material” even though the production Supabase database already contained the course files.
+- The root cause was treated as a data-hydration/runtime problem rather than assuming the database was empty.
+- Course opening now performs a foreground cloud hydration pass, and switching to Materials performs another hydration pass so the course library can populate even if the initial background request completed too early.
+- Material hydration now uses independent courses/modules/materials reads with a defensive nested fallback.
+
+### File availability / upload pipeline
+- Production inspection found the material rows were present but all were stuck in `pending` because the deployed Supabase project does not currently expose the optional process-document Edge Function.
+- Existing material rows with valid Storage URLs were marked `completed` so they are treated as available/viewable rather than permanently pending.
+- The upload pipeline was changed so an unavailable optional document processor no longer traps a valid uploaded file in a 120-second polling loop. The file remains stored and immediately viewable.
+- This does not claim that historical files received AI extraction; their original Storage files remain the source of truth.
+
+### AI workspace intake
+- Files attached directly to the unified AI composer are now automatically filed into the detected course after Gemini reviews them.
+- Course detection uses the existing course-code/domain detector.
+- Assignment-like uploads (assignment, submission, homework, lab report, project, worksheet, etc.) are additionally registered in that course’s Assignments workspace with the uploaded material as a source file.
+- The AI’s normal response is not blocked on the storage/filing pipeline.
+- Existing Gemini tool actions for notes, assignments, sync, and attached-file storage remain available.
+
+### Supabase verification
+- Production database currently contains 5 courses, 5 modules, and 139 material rows with Storage URLs.
+- After recovery, all 139 material rows report `completed`.
+- The six canonical MATH15325D files remain in the course-materials Storage bucket.
+
+### Files changed
+- src/app.js
+- src/supabase.js
+- src/upload.js
+- UPDATE-CATALOG.md
+
+### Important note for future developers
+- The previous v1.7 sync-hardening experiment caused a blank-screen regression and was intentionally reverted to the stable sync engine. Do not reintroduce that experiment without browser testing.
+- Browser end-to-end testing on the deployed GitHub Pages site is still required after this commit because the GitHub connector cannot reproduce the user’s browser session.
+- No full-repo replacement was performed.
+
+---
+
 ## v1.7.0 — Cross-device sync hardening + permanent Course Materials recovery
 
 **Date:** 2026-09-18 02:45 ET
