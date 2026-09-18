@@ -544,7 +544,29 @@ let aiHistoryUnsubscribe = null;
 export async function syncDataFromSupabase() {
   if (!isSupabaseConfigured()) return;
   try {
-    const dbCourses = await fetchCoursesWithMaterials();
+    let dbCourses = await fetchCoursesWithMaterials();
+    const nestedMaterialCount = (dbCourses || []).reduce((total, c) => total + (c.modules || []).reduce((n, m) => n + (m.materials || []).length, 0), 0);
+    if (!dbCourses?.length || nestedMaterialCount === 0) {
+      const sb = getSupabase();
+      if (sb) {
+        const [courseRes, moduleRes, materialRes] = await Promise.all([
+          sb.from('courses').select('*').order('code'),
+          sb.from('modules').select('*').order('order_index'),
+          sb.from('materials').select('*').order('created_at')
+        ]);
+        if (!courseRes.error && !moduleRes.error && !materialRes.error) {
+          const modulesByCourse = new Map();
+          (moduleRes.data || []).forEach(m => {
+            if (!modulesByCourse.has(m.course_id)) modulesByCourse.set(m.course_id, []);
+            modulesByCourse.get(m.course_id).push({ ...m, materials: [] });
+          });
+          const moduleById = new Map();
+          modulesByCourse.forEach(list => list.forEach(m => moduleById.set(m.id, m)));
+          (materialRes.data || []).forEach(mat => moduleById.get(mat.module_id)?.materials.push(mat));
+          dbCourses = (courseRes.data || []).map(c => ({ ...c, modules: modulesByCourse.get(c.id) || [] }));
+        }
+      }
+    }
     if (!dbCourses || !dbCourses.length) return;
 
     dbCourses.forEach(dbC => {
@@ -2500,20 +2522,7 @@ function attachEventHandlers() {
     render();
   }));
 
-  document.querySelectorAll('[data-unified-search-type]').forEach(item => item.addEventListener('click', () => {
-    const type = item.getAttribute('data-unified-search-type');
-    const courseId = item.getAttribute('data-course');
-    const tab = item.getAttribute('data-tab') || 'overview';
-    const assignmentId = item.getAttribute('data-assignment');
-    if (courseId) {
-      state.courseId = courseId;
-      state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : 'overview';
-      state.view = 'courses';
-    } else if (assignmentId) {
-      state.assignmentDetailId = assignmentId;
-    }
-    render();
-  }));
+
 
   const aiChatBody = document.getElementById('ai-page-body');
   if (aiChatBody) {
@@ -2522,6 +2531,23 @@ function attachEventHandlers() {
       const deleteBtn = e.target.closest('[data-ai-delete]');
       const cancelBtn = e.target.closest('[data-ai-cancel-edit]');
       const saveBtn = e.target.closest('[data-ai-save-edit]');
+      const searchHit = e.target.closest('[data-unified-search-type]');
+      if (searchHit) {
+        const courseId = searchHit.getAttribute('data-course');
+        const tab = searchHit.getAttribute('data-tab') || 'overview';
+        const assignmentId = searchHit.getAttribute('data-assignment');
+        if (courseId) {
+          state.courseId = courseId;
+          state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : tab === 'materials' ? 'materials' : 'overview';
+          state.view = 'courses';
+        } else if (assignmentId) {
+          state.assignmentDetailId = assignmentId;
+          state.view = 'courses';
+        }
+        state.searchQuery = '';
+        render();
+        return;
+      }
       if (editBtn) { state.aiEditingMessageId = editBtn.getAttribute('data-ai-edit'); render(); return; }
       if (cancelBtn) { state.aiEditingMessageId = null; render(); return; }
       if (saveBtn) {
@@ -2563,7 +2589,7 @@ function attachEventHandlers() {
       const q = state.searchQuery.trim();
       const direct = q ? performUniversalSearch(q, COURSES) : [];
       state.aiSearchResultsCount = direct.length;
-      body.innerHTML = q && direct.length ? renderAiSearchResultsView(q) : renderAiConversation();
+      body.innerHTML = q ? renderAiSearchResultsView(q) : renderAiConversation();
       // Only auto-scroll while browsing the conversation (no active search query).
       // Scrolling on every keystroke while typing a search was the source of the
       // jumpy/glitchy feel reported in the AI & Search page.
@@ -2594,13 +2620,27 @@ function attachEventHandlers() {
       aiInput.value = '';
       render();
       try {
-        const savedUser = await persistAiMessage({ sender: 'user', text: text || 'Please review these attached files.', files });
-        state.aiChatMessages[userLocalIndex] = savedUser;
+        const persistWithTimeout = (promise, ms = 7000) => Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Cloud history timed out')), ms))
+        ]);
+        try {
+          const savedUser = await persistWithTimeout(persistAiMessage({ sender: 'user', text: text || 'Please review these attached files.', files }));
+          state.aiChatMessages[userLocalIndex] = savedUser;
+        } catch (historyErr) {
+          console.warn('AI user-message cloud persistence skipped:', historyErr);
+        }
+
         const raw = await queryGemini(text || 'Please review the attached files and help me with them.', files);
         const last = state.aiChatMessages.length - 1;
         const generatedMedia = extractAiMediaAttachments(raw);
-        const savedAssistant = await persistAiMessage({ sender: 'assistant', text: raw, attachments: generatedMedia });
-        state.aiChatMessages[last] = savedAssistant;
+        try {
+          const savedAssistant = await persistWithTimeout(persistAiMessage({ sender: 'assistant', text: raw, attachments: generatedMedia }));
+          state.aiChatMessages[last] = savedAssistant;
+        } catch (historyErr) {
+          console.warn('AI assistant-message cloud persistence skipped:', historyErr);
+          state.aiChatMessages[last] = { sender: 'assistant', text: raw, attachments: generatedMedia, createdAt: new Date().toISOString() };
+        }
         state.aiConnectionState = 'ready';
       } catch (err) {
         console.error(err);
