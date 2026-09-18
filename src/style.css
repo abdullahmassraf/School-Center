@@ -3967,3 +3967,19 @@ main#view-host,
     box-shadow: 0 12px 30px -16px rgba(0,0,0,.52), var(--glass-highlight) !important;
   }
 }
+
+
+/* AI / SEARCH DISCOVERY POLISH — v1.5.0 */
+.unified-search-results{width:min(860px,100%);margin:18px auto 0;display:grid;gap:8px}
+.unified-search-result{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;padding:14px 16px;text-align:left;color:var(--ink)!important;background:rgba(255,255,255,.055)!important;border:1px solid rgba(255,255,255,.10)!important;border-radius:16px!important;cursor:pointer;appearance:none;-webkit-appearance:none;transition:transform .16s ease,background .16s ease,border-color .16s ease,box-shadow .16s ease}
+.unified-search-result:hover,.unified-search-result:focus-visible{color:var(--ink)!important;background:rgba(255,255,255,.10)!important;border-color:color-mix(in srgb,var(--accent) 38%,rgba(255,255,255,.16))!important;box-shadow:0 10px 28px rgba(0,0,0,.16);transform:translateY(-1px)}
+.unified-search-result .search-result-copy{min-width:0;display:grid;gap:4px}
+.unified-search-result .search-result-copy b{color:var(--ink)!important;font-size:.91rem;line-height:1.3;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unified-search-result .search-result-copy small{color:var(--muted)!important;font-size:.73rem;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unified-search-result .search-result-copy>span{color:var(--muted-dim)!important;font-size:.76rem;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.unified-search-result .search-result-badge{display:inline-flex;align-items:center;justify-content:center;min-width:74px;padding:5px 8px;border-radius:999px;color:var(--accent)!important;background:rgba(var(--accent-rgb),.10)!important;border:1px solid rgba(var(--accent-rgb),.18)!important;font-size:.67rem;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.unified-search-result>.icon-inline{color:var(--muted)!important}
+.ai-discovery{width:min(680px,100%);margin:8vh auto 0;padding:34px 24px;text-align:center}
+.ai-discovery h2{margin:10px 0 6px;color:var(--ink)!important;font-size:1.2rem}
+.ai-discovery p{max-width:520px;margin:0 auto;color:var(--muted)!important;line-height:1.6}
+@media(max-width:720px){.unified-search-result{padding:12px 13px}.unified-search-result .search-result-badge{min-width:62px;font-size:.62rem}}
