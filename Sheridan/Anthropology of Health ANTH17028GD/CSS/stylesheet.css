@@ -1,0 +1,414 @@
+@charset "utf-8";
+/* CSS Document */
+/* 2013 - Created by Desire2Learn for use by instructors */
+/* 
+Color Glossary for easy changing of colors later
+------------------------------------------------
+Blue and Grey color theme:
+Header blue: #0060aa
+Light grey: #cccccc
+Text: #222222
+Table row stripe: #f4f4f4
+
+*/
+/* ------- HTML5 display-role reset for older browsers ------- */
+article, aside, details, figcaption, figure, footer, header, hgroup, menu, nav, section {
+	display: block;
+}
+/* ------- Global HTML Styles ------- */
+html {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	font-size: 100%;
+	font: inherit;
+	font-family: Helvetica, Arial, sans-serif;
+	color: #333;
+	vertical-align: baseline;
+	background-color: #894321;
+}
+body {
+	margin: auto;
+	display: block;
+	width: 80%;
+	max-width: 906px;
+	min-width: 300px;
+	background-color: #fff;
+	padding-left: 2em;
+	padding-right: 2em;
+	border-top: 4px solid #c86738;
+}
+hr {
+	color: #333333;
+	background-color: #333;
+	clear: both;
+}
+img {
+	padding: 6px;
+	border-radius: 5px;
+	border: 1px solid #cccccc;
+	-webkit-box-shadow: 4px 4px 2px rgba(50, 50, 50, 0.5);
+	-moz-box-shadow:    4px 4px 2px rgba(50, 50, 50, 0.5);
+	box-shadow:         4px 4px 2px rgba(50, 50, 50, 0.5);
+	margin-left: 1em;
+	margin-right: 1em;
+	margin-bottom: 5px;
+	/* For IE 8 */
+	-ms-filter: "progid:DXImageTransform.Microsoft.Shadow(Strength=4, Direction=135, Color='#878787')";
+ 	filter: progid:DXImageTransform.Microsoft.Shadow(Strength=4, Direction=135, Color='#878787');	
+}
+math {
+}
+	/* ------- Links and Text ------- */
+	a:link {
+		color: #0060aa;
+	}
+	strong {
+		font-weight: bold;
+	}
+	em {
+		font-style: italic;
+	}
+	ul {
+		overflow: hidden;
+		line-height: 1.2em; 
+	}
+	ol {
+		overflow: hidden; 
+		line-height: 1.2em;
+	}
+	ol.footnotes {
+		font-size: smaller;
+	}
+	li {
+		padding: 5px;
+	}
+	dl {
+	}
+	dt {
+	}
+	dd {
+	}
+	p {
+		line-height: 1.4em;
+	}
+	blockquote {
+	background: url(blockquote.png) no-repeat;
+	padding-left: 75px;
+	font-style: italic;
+	min-height: 60px;
+	}
+	pre {
+		font-family: "Courier New", Courier, monospace;
+		background-color: #fefefe;
+		border: 1px solid #222222;
+		padding: 20px;
+	}
+	address {
+	}
+	sub {
+	}
+	sup {
+	}
+	cite {
+		font-style: italic;
+	}
+	figcaption, p.caption {
+		text-align: center;
+		display: block;
+		margin: auto;
+		font-size: smaller;
+		line-height: 1.1em;
+		padding-bottom: 5px;
+		margin-bottom: .5em;
+		width: 90%;
+		border-bottom: 1px solid #aaa;
+	}
+	/* ------- Headings ------- */
+	h1 {
+		color: #692605;
+		text-transform: uppercase;
+		font-weight: bold;
+		font-family: sans-serif;
+		font-size: 1.4em;
+		margin-bottom: 40px;
+		clear: both;
+	}
+	h2 {
+		clear: both;
+		color: #333333;
+		font-size: 1.5em; 
+		font-family: sans-serif;
+		padding: 16px;
+		border-top: 1px solid #cccccc;
+		border-bottom: 1px solid #cccccc;
+	}
+	div.box h2 {
+		color: #333;
+		border: 0;
+		margin: 0;
+		padding: .25em;
+	}
+	h3 {
+		color: #692605;
+		font-size: 1.1em;
+		font-family: sans-serif;
+		clear: both;
+	}
+	div.note h2, div.note h3 {
+		font-size: 1em;
+		font-weight: bolder;
+		text-transform: uppercase;
+	}
+	h4 {
+		clear: both;
+	}
+	h5 {
+		clear: both;
+		font-size: large;
+	}
+	h6 {
+		clear: both;
+		font-size: large;
+	}
+	/* ------- Tables ------- */
+	table {
+		border-spacing: 0;
+		margin: 20px;
+		border-top-left-radius: 5px;
+		border-top-right-radius: 5px;
+	}
+	table thead th:first-child{
+ 		 border-radius:5px 0 0 0;
+		 
+	}
+	table thead th:last-child{
+  		border-radius:0 5px 0 0;	
+	}
+	table thead th {
+		background: #3191a9; /* Old browsers */
+		background: -moz-linear-gradient(top, #3191a9 0%, #0060aa 100%); /* FF3.6+ */
+		background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#3191a9), color-stop(100%,#0060aa)); /* Chrome,Safari4+ */
+		background: -webkit-linear-gradient(top, #3191a9 0%,#0060aa 100%); /* Chrome10+,Safari5.1+ */
+		background: -o-linear-gradient(top, #3191a9 0%,#0060aa 100%); /* Opera 11.10+ */
+		background: -ms-linear-gradient(top, #3191a9 0%,#0060aa 100%); /* IE10+ */
+		background: linear-gradient(to bottom, #3191a9 0%,#0060aa 100%); /* W3C */
+		filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#3191a9', endColorstr='#0060aa',GradientType=0 ); /* IE6-9 */
+		background-color: #0060aa;
+		color: #fff;
+		height: 36px;
+		font-size: 16px; 
+		line-height: 36px;
+		padding: 5px;
+	}
+	table tbody th {
+		background-color: #0060aa;
+		color: #fff;
+		height: 36px;
+		font-size: 16px; 
+		line-height: 36px;
+		padding: 5px;
+		border: 1px solid #aaa;
+	}
+	table thead th:empty{
+    	background:transparent;
+    	border:none;
+	}
+	table caption {
+		font-weight: bold;
+	}
+	table tr.odd {
+		background-color: #f4f4f4;
+		color: #000;
+	}
+	table tr.even {
+		background-color: #fff;
+		color: #222222;
+	}
+	table td {
+		padding: 5px;
+		border-collapse: collapse;
+		border: 1px solid #aaa;
+	}
+/* ------- Page Structure, Layout classes ------- */
+div#content {
+
+}
+header, div#header {
+	
+}
+.floatleft {
+	float: left;
+}
+.floatright {
+	float: right;
+}
+.center {
+	margin: auto;
+	display: block;
+	text-align: center;
+}
+iframe {
+	margin: auto;
+	border: 0;
+}
+div.note {
+	background-color: #fff;
+	border-top: 1px solid #cccccc;
+	border-bottom: 1px solid #cccccc;
+	padding-left: 10px;
+	padding-right: 10px;
+	margin-left: 3em;
+	margin-right: 3em;
+	margin-top: 20px;
+	margin-bottom: 1em;
+	clear: both;
+	}
+div.video {
+	width: 600px;
+	max-width: 100%;	
+}
+div.multimedia-container {
+	position: relative;
+	padding-bottom: 56.25%;
+	padding-top: 30px;
+	height: 0;
+	overflow: hidden;
+}
+div.multimedia-container iframe,  
+div.multimedia-container object,  
+div.multimedia-container embed {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+}
+div.box {
+	background-color: #e8e8e8;
+	border-radius: 5px;
+	border: 1px solid #cccccc;
+	padding-bottom: .5em;
+	padding: 20px;
+	margin: .5em;
+	clear: both;
+}
+div#footer {
+	background-color: #492716;
+	color: #fefefe;
+	padding-top: 10px;
+	padding-bottom: 10px;
+	padding-left: 3%;
+	margin-top: 1em;
+	margin-left: -2em;
+	margin-right: -2em;
+	clear: both;
+}
+div#footer p {
+	font-size: smaller;
+	color: #fff;
+}
+div#footer a {
+	color: #fff;
+	font-weight: bold;
+}
+.row1{
+	background-color:#ebeaea;
+}
+.row2{
+	background-color:#cbe3fb;
+}
+.imgRight {
+margin-left:10px;
+border-color:#ffd008;
+border-style:double;
+float:right;
+}
+
+.imgLeft {
+margin-left:10px;
+border-color:#ffd008;
+border-style:double;
+float:left;
+}
+
+.presentation{
+	background-color:#ffd008;
+	color:#000000;
+	padding:5px;
+	font-size:1.8em;
+	margin-left:auto;
+	margin-right:auto;
+	display:block;
+	text-align:center;
+}
+.caption {font-size:.8em; color:#000080; font-style:italic; font-family:Verdana, Geneva, sans-serif;}
+
+.pullquote {background-color:#ffd008;
+	font-size:1.2em;
+	border-bottom:double;
+	border-bottom-color:#000080;
+	border-top:double;
+	border-top-color:#000080;
+	float:right;
+	width:200px;
+}
+	
+
+.table {height:100px;}
+
+.col1 {width:300px;
+position:absolute;left:50px;}
+.col2 {width:320px;
+position:absolute;left:277px;}
+.col3 {width:120px;
+position:absolute;left:400px;}
+.col4 {width:58px;
+position:absolute;left:560px;}
+
+.ir {position:relative;}
+.ir p {z-index:-99;
+position:absolute;left:0;top:0;
+width:200px;
+height:200px;
+overflow:hidden;}
+
+/* Spans */
+
+span.new { 
+	font-family: Verdana, Arial, sans-serif;
+	font-size: 0.85em; 
+	color: #A81400; 
+	letter-spacing: 0; 
+	font-style: bold; 
+	font-weight: bold; 
+	text-decoration: none;
+}
+
+span.note { 
+	word-spacing: 0.250em;
+    font-family: Verdana, sans-serif; 
+	font-style: bold;
+	font-weight: bold;
+	font-size: 1em;
+	color: #A81400;
+	letter-spacing: 0;
+	text-decoration: none;
+	text-transform: uppercase;
+}
+
+p.emphasis{
+	background-color: #FFFFCC;
+}
+
+p.note {
+	text-align: left;
+	text-indent: 0;
+	padding: 8px;
+	background-color: #F8F8DC;
+	font-size: 1em;
+	text-decoration: none;
+	line-height: 19px;
+	border-top: 1px dashed #999;
+	border-bottom: 1px dashed #999;
+}
