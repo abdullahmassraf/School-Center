@@ -18,6 +18,7 @@ import {
 import { jobsManager } from './jobs.js';
 import { detectCourseFromContent } from './course-detector.js';
 import { assignmentsManager } from './assignments.js';
+import { renderCampusMapWidget, renderShowLocationButton, attachCampusMapHandlers, highlightBuilding } from './campus-map.js';
 import { notesManager } from './notes.js';
 import { routeCourseContent } from './course-data.js';
 import { FocusMode } from './focus.js';
@@ -769,6 +770,7 @@ function renderTodayView() {
           ? `Next session: <b>${nextClass.course.code}</b> (${nextClass.schedule.type}) at ${nextClass.schedule.start} · Room ${nextClass.schedule.room || 'Online'}${nextClass.schedule.instructor ? ' · ' + nextClass.schedule.instructor : ''}`
           : `No scheduled campus lectures today. Great day to tackle coursework and practice.`}
       </p>
+      ${nextClass ? renderShowLocationButton(nextClass.schedule.room, 'margin-top:10px;') : ''}
     </div>
 
     <!-- Urgent Deadlines -->
@@ -794,6 +796,8 @@ function renderTodayView() {
         </div>
       ` : `<div style="color:var(--muted-dim);font-size:0.88rem;padding:8px 0;">No pending assignments due this week.</div>`}
     </div>
+
+    ${renderCampusMapWidget()}
   `;
 }
 
@@ -863,6 +867,7 @@ function renderCalendarView() {
               <div class="agenda-course">${c.course.code}</div>
               <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
               <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
+              ${renderShowLocationButton(c.schedule.room, 'margin-top:6px;')}
             </div>
           </div>
         `).join('')}
@@ -944,7 +949,7 @@ function renderCourseDetailView(c) {
         <div class="surface-content" style="padding:16px;">
           <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Instructor & Classroom</div>
           <div style="font-size:1.05rem;font-weight:600;margin-top:2px;">${c.instructor || 'Instructor'}</div>
-          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;">• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'C328'}</div>`).join('')}
+          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span>• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'C328'}</span>${renderShowLocationButton(s.room, 'padding:2px 8px;font-size:0.72rem;min-height:0;')}</div>`).join('')}
         </div>
 
         ${c.evaluation ? `
@@ -2476,6 +2481,21 @@ function attachEventHandlers() {
     state.aiAssistantOpen = true;
     render();
     setTimeout(() => document.getElementById('ai-file-input')?.click(), 50);
+  });
+
+  attachCampusMapHandlers();
+  document.querySelectorAll('[data-show-location]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const buildingId = btn.dataset.showLocation;
+      if (state.view !== 'today') {
+        state.view = 'today';
+        render();
+        requestAnimationFrame(() => highlightBuilding(buildingId));
+      } else {
+        highlightBuilding(buildingId);
+      }
+    });
   });
 
   const syncBannerSignin = document.getElementById('sync-banner-signin-btn');
