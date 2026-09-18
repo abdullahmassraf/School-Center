@@ -1,10 +1,10 @@
-# 🚀 Full-Stack Dynamic School Center Platform
+# Full-Stack Dynamic School Center Platform
 
 An automated, full-stack, cloud-persisted academic platform for **Honours B.Eng (Mechanical)** coursework. Built with vanilla glassmorphic UI, interactive canvas lava lamp, **Supabase PostgreSQL & Storage**, and automated **Google Gemini 2.0 Flash document intelligence**.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -36,7 +36,7 @@ An automated, full-stack, cloud-persisted academic platform for **Honours B.Eng 
 
 ---
 
-## 📦 Project Structure
+## Project Structure
 
 ```
 School Center/
