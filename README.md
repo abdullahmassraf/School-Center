@@ -63,7 +63,7 @@ School Center/
 
 ---
 
-## ⚡ Quickstart Guide
+## Quickstart Guide
 
 ### 1. Install Dependencies
 ```bash
@@ -89,7 +89,7 @@ GEMINI_API_KEY=AIza...
 
 ---
 
-## 🗄️ Supabase Cloud Setup
+## Supabase Cloud Setup
 
 ### 1. Apply Database Schema
 Go to your **Supabase Dashboard** → **SQL Editor** → create a new query, paste the contents of:
@@ -115,7 +115,7 @@ npx supabase functions deploy process-document
 
 ---
 
-## 📂 Sheridan Automated Seeding
+## Sheridan Automated Seeding
 
 You can ingest the Sheridan course materials directory into Supabase Storage and database:
 
@@ -136,7 +136,7 @@ npm run seed:ai
 
 ---
 
-## 🌐 Local Development & GitHub Pages
+## Local Development & GitHub Pages
 
 ### Running Locally
 ```bash
@@ -158,7 +158,7 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ---
 
-## 💡 In-App Features
+## In-App Features
 
 1. **AI Materials & Documents Tab**: Each course view displays documents parsed by Gemini with executive summaries, key formulas, step-by-step practice questions, and download links to original files.
 2. **Real-time Status Tracking**: Dropping files into the Settings upload zone transitions status badges automatically: `pending` → `processing` → `completed` without page reload.
