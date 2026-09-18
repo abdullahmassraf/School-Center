@@ -2467,7 +2467,13 @@ async function runGeminiConversation(model, basePayload, apiKey, allowTools) {
       const args = call.functionCall.args || {};
       try {
         const result = await executeGeminiTool(name, args);
-        functionResponses.push({ functionResponse: { name, response: result } });
+        functionResponses.push({
+          functionResponse: {
+            id: call.functionCall.id,
+            name,
+            response: result
+          }
+        });
       } catch (error) {
         functionResponses.push({ functionResponse: { name, response: { ok: false, error: error.message } } });
       }
