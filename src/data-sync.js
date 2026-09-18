@@ -328,24 +328,25 @@ function scheduleLocalSync() {
  *  on our topics by an earlier racing start. Called before every subscribe. */
 function teardownChannels() {
   const sb = getSupabase();
-  if (!sb) { notesChannel = null; assignmentsChannel = null; return; }
-  for (const ch of [notesChannel, assignmentsChannel]) {
-    if (ch) { try { sb.removeChannel(ch); } catch (_) {} }
+  if (!sb) {
+    notesChannel = null;
+    assignmentsChannel = null;
+    return;
   }
+
+  // IMPORTANT: only remove channels owned by this sync module.
+  // The previous implementation removed every topic containing
+  // "school-center-", which also destroyed the independent theme-settings
+  // and course-material realtime channels created by app.js/upload.js.
+  for (const ch of [notesChannel, assignmentsChannel]) {
+    if (ch) {
+      try { sb.removeChannel(ch); } catch (_) {}
+    }
+  }
+
   notesChannel = null;
   assignmentsChannel = null;
-
-  // Belt and braces: supabase-js keeps its own registry, and a channel leaked
-  // by a previous race would otherwise block a fresh subscribe on that topic.
-  try {
-    (sb.getChannels?.() || []).forEach(ch => {
-      if (typeof ch?.topic === 'string' && ch.topic.includes('school-center-')) {
-        try { sb.removeChannel(ch); } catch (_) {}
-      }
-    });
-  } catch (_) {}
 }
-
 function onChannelStatus(status, error) {
   if (status === 'SUBSCRIBED') {
     realtimeStatus = 'subscribed';
