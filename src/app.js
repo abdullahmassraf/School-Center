@@ -400,8 +400,6 @@ function applyCustomAccent(hex, persist=true){
    CROSS-DEVICE APPEARANCE SYNC
    ========================================================================= */
 let themeSettingsChannel = null;
-let themeSettingsPollTimer = null;
-let themeSettingsUserId = null;
 let applyingRemoteTheme = false;
 
 function themeKeyFor(theme) {
@@ -409,11 +407,11 @@ function themeKeyFor(theme) {
 }
 
 async function pushThemeToCloud() {
-  if (applyingRemoteTheme) return false;
+  if (applyingRemoteTheme) return;
   const sb = getSupabase();
-  if (!sb) return false;
+  if (!sb) return;
   const user = await getCurrentAiUser().catch(() => null);
-  if (!user) return false;
+  if (!user) return;
   const customAccent = localStorage.getItem('sc_custom_accent') || null;
   const themeKey = customAccent ? null : (localStorage.getItem('sc_theme_key') || themeKeyFor(currentTheme) || 'violet');
   const bgGlow = Number(localStorage.getItem('sc_lava_opacity') || getComputedStyle(document.documentElement).getPropertyValue('--bg-glow') || '1');
@@ -424,11 +422,7 @@ async function pushThemeToCloud() {
     bg_glow: Number.isFinite(bgGlow) ? bgGlow : 1,
     updated_at: new Date().toISOString()
   }, { onConflict: 'user_id' });
-  if (error) {
-    console.warn('Appearance cloud sync push failed:', error.message);
-    return false;
-  }
-  return true;
+  if (error) console.warn('Appearance cloud sync push failed:', error.message);
 }
 
 function applyCloudTheme(row) {
@@ -447,54 +441,32 @@ function applyCloudTheme(row) {
   }
 }
 
-async function pullThemeFromCloud(userId) {
-  const sb = getSupabase();
-  if (!sb || !userId) return;
-  const { data, error } = await sb.from('user_settings').select('*').eq('user_id', userId).maybeSingle();
-  if (error) {
-    console.warn('Appearance cloud sync pull failed:', error.message);
-    return;
-  }
-  if (data) applyCloudTheme(data);
-  else await pushThemeToCloud();
-}
-
 async function startThemeCloudSync(userId) {
   const sb = getSupabase();
   if (!sb || !userId) return;
-  themeSettingsUserId = userId;
-
   if (themeSettingsChannel) {
     try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
     themeSettingsChannel = null;
   }
-  if (themeSettingsPollTimer) clearInterval(themeSettingsPollTimer);
-  themeSettingsPollTimer = null;
-
-  // Pull immediately, then poll as the authoritative cross-device fallback.
-  // Realtime is still enabled for instant delivery when available, but the
-  // app no longer depends on a websocket to synchronize appearance.
-  await pullThemeFromCloud(userId);
-
+  const { data, error } = await sb.from('user_settings').select('*').eq('user_id', userId).maybeSingle();
+  if (!error && data) applyCloudTheme(data);
+  else if (error && error.code !== 'PGRST116') console.warn('Appearance cloud sync pull failed:', error.message);
+  else await pushThemeToCloud();
   themeSettingsChannel = sb.channel(`school-center-settings-${userId}`)
     .on('postgres_changes', {
       event: '*', schema: 'public', table: 'user_settings',
       filter: `user_id=eq.${userId}`
     }, payload => {
-      if (payload.new) applyCloudTheme(payload.new);
+      if (payload.new) {
+        applyCloudTheme(payload.new);
+        if (state.view === 'settings') render();
+      }
     })
     .subscribe();
-
-  themeSettingsPollTimer = setInterval(() => {
-    if (themeSettingsUserId === userId) pullThemeFromCloud(userId).catch(() => {});
-  }, 2000);
 }
 
 async function stopThemeCloudSync() {
   const sb = getSupabase();
-  if (themeSettingsPollTimer) clearInterval(themeSettingsPollTimer);
-  themeSettingsPollTimer = null;
-  themeSettingsUserId = null;
   if (sb && themeSettingsChannel) {
     try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
   }
@@ -560,8 +532,6 @@ let state = {
   dataSyncLastOkAt: null,
   syncBannerDismissed: false
 };
-
-let courseMaterialHydrationInFlight = false;
 
 let aiLiveTranscriber = null;
 let aiActiveAttachments = [];
@@ -1045,21 +1015,6 @@ function renderCourseDetailView(c) {
   } else if (state.courseTab === 'materials') {
     const routed = routeCourseContent(c);
     const mats = routed.materials;
-
-    // Course Materials is a required surface. If the background hydration has
-    // not completed yet (or a previous request was interrupted), retry the
-    // exact public course/module/material query in the background and repaint
-    // this course when the rows arrive instead of permanently showing Upload.
-    if (!mats.length && !courseMaterialHydrationInFlight && isSupabaseConfigured()) {
-      courseMaterialHydrationInFlight = true;
-      syncDataFromSupabase()
-        .catch(err => console.warn('Course material hydration retry:', err))
-        .finally(() => {
-          courseMaterialHydrationInFlight = false;
-          if (state.view === 'courses' && state.courseId === c.id && state.courseTab === 'materials') render();
-        });
-    }
-
     bodyHtml = mats.length ? `
       <div class="course-materials-stack">
         <div class="section-sub" style="margin-bottom:2px;">${mats.length} material${mats.length === 1 ? '' : 's'} available in the course cloud.</div>
