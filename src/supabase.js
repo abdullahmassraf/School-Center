@@ -1,7 +1,3 @@
-// ============================================================================
-// src/supabase.js — Supabase Client & Database Service Layer (Auth FIXED)
-// ============================================================================
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
 const FALLBACK_URL = 'https://vxsphvrvulhbyhqmoeex.supabase.co';
@@ -9,10 +5,19 @@ const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 let client = null;
 
+function getConfig() {
+  return {
+    url: FALLBACK_URL,
+    key: FALLBACK_KEY
+  };
+}
+
 export function getSupabase() {
   if (client) return client;
 
-  client = createClient(FALLBACK_URL, FALLBACK_KEY, {
+  const { url, key } = getConfig();
+
+  client = createClient(url, key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -23,6 +28,6 @@ export function getSupabase() {
     }
   });
 
-  console.log('✅ Supabase connected (auth enabled)');
+  console.log('✅ Supabase connected');
   return client;
 }
