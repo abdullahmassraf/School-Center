@@ -10,11 +10,18 @@ export function performUniversalSearch(query, courses = []) {
   if (!q) return [];
 
   const results = [];
+  const seen = new Set();
+  const addResult = (result) => {
+    const key = [result.type || '', result.courseId || '', result.assignmentId || '', result.noteId || '', result.title || ''].join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(result);
+  };
 
   // 1. Search Courses
   courses.forEach(c => {
     if ((c.name && c.name.toLowerCase().includes(q)) || (c.code && c.code.toLowerCase().includes(q)) || (c.instructor && c.instructor.toLowerCase().includes(q))) {
-      results.push({
+      addResult({
         type: 'course',
         badge: 'Course',
         title: `${c.code} — ${c.name}`,
@@ -31,7 +38,7 @@ export function performUniversalSearch(query, courses = []) {
       (l.concepts || []).forEach(([term, def]) => {
         if (term.toLowerCase().includes(q) || def.toLowerCase().includes(q)) {
           matchedConcept = true;
-          results.push({
+          addResult({
             type: 'concept',
             badge: 'Lecture Concept',
             title: term,
@@ -45,7 +52,7 @@ export function performUniversalSearch(query, courses = []) {
       });
 
       if (!matchedConcept && l.title.toLowerCase().includes(q)) {
-        results.push({
+        addResult({
           type: 'lecture',
           badge: 'Lecture',
           title: l.title,
@@ -65,7 +72,7 @@ export function performUniversalSearch(query, courses = []) {
       const inSummary = summary.toLowerCase().includes(q);
 
       if (inTitle || inSummary) {
-        results.push({
+        addResult({
           type: 'material',
           badge: 'Document',
           title: m.title,
@@ -83,7 +90,7 @@ export function performUniversalSearch(query, courses = []) {
   const allAssignments = assignmentsManager.getAll();
   allAssignments.forEach(a => {
     if (a.title.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q)) || (a.notes && a.notes.toLowerCase().includes(q))) {
-      results.push({
+      addResult({
         type: 'assignment',
         badge: 'Assignment',
         title: a.title,
@@ -100,7 +107,7 @@ export function performUniversalSearch(query, courses = []) {
   const allNotes = notesManager.getAll();
   allNotes.forEach(n => {
     if (n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q)) {
-      results.push({
+      addResult({
         type: 'note',
         badge: 'Note',
         title: n.title,
@@ -113,5 +120,5 @@ export function performUniversalSearch(query, courses = []) {
     }
   });
 
-  return results.slice(0, 25);
+  return results.slice(0, 40);
 }
