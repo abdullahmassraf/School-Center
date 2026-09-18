@@ -380,6 +380,7 @@ function applyTheme(t, persist=true){
     localStorage.setItem('sc_theme_key', Object.entries(THEME_PRESETS).find(([,v])=>v===t)?.[0] || 'custom');
     if (t.__customAccent) localStorage.setItem('sc_custom_accent', t.accent);
     else localStorage.removeItem('sc_custom_accent');
+    if (!applyingRemoteTheme) pushThemeToCloud().catch(() => {});
   }
 }
 
@@ -389,9 +390,89 @@ function applyCustomAccent(hex, persist=true){
   const next = { ...THEME_PRESETS.violet, label: 'Custom', accent: clean, accent2: hslToHex((h+150)%360, Math.min(100,s+4), Math.min(82,l+8)), accent3: hslToHex((h+320)%360, Math.min(100,s+8), Math.min(78,l+4)), __customAccent: true };
   next.lava = [clean, next.accent2, next.accent3, hslToHex((h+35)%360, Math.min(100,s+8), Math.max(15,l-22))];
   applyTheme(next, false);
-  if(persist) localStorage.setItem('sc_custom_accent', clean);
+  if(persist) {
+    localStorage.setItem('sc_custom_accent', clean);
+    if (!applyingRemoteTheme) pushThemeToCloud().catch(() => {});
+  }
   return next;
 }
+/* =========================================================================
+   CROSS-DEVICE APPEARANCE SYNC
+   ========================================================================= */
+let themeSettingsChannel = null;
+let applyingRemoteTheme = false;
+
+function themeKeyFor(theme) {
+  return Object.entries(THEME_PRESETS).find(([, value]) => value === theme)?.[0] || null;
+}
+
+async function pushThemeToCloud() {
+  if (applyingRemoteTheme) return;
+  const sb = getSupabase();
+  if (!sb) return;
+  const user = await getCurrentAiUser().catch(() => null);
+  if (!user) return;
+  const customAccent = localStorage.getItem('sc_custom_accent') || null;
+  const themeKey = customAccent ? null : (localStorage.getItem('sc_theme_key') || themeKeyFor(currentTheme) || 'violet');
+  const bgGlow = Number(localStorage.getItem('sc_lava_opacity') || getComputedStyle(document.documentElement).getPropertyValue('--bg-glow') || '1');
+  const { error } = await sb.from('user_settings').upsert({
+    user_id: user.id,
+    theme_key: themeKey,
+    custom_accent: customAccent,
+    bg_glow: Number.isFinite(bgGlow) ? bgGlow : 1,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id' });
+  if (error) console.warn('Appearance cloud sync push failed:', error.message);
+}
+
+function applyCloudTheme(row) {
+  if (!row) return;
+  applyingRemoteTheme = true;
+  try {
+    if (row.custom_accent) applyCustomAccent(row.custom_accent, false);
+    else if (row.theme_key && THEME_PRESETS[row.theme_key]) applyTheme(THEME_PRESETS[row.theme_key], false);
+    if (typeof row.bg_glow === 'number') {
+      document.documentElement.style.setProperty('--bg-glow', String(row.bg_glow));
+      document.documentElement.style.setProperty('--lava-opacity', String(row.bg_glow));
+      localStorage.setItem('sc_lava_opacity', String(row.bg_glow));
+    }
+  } finally {
+    applyingRemoteTheme = false;
+  }
+}
+
+async function startThemeCloudSync(userId) {
+  const sb = getSupabase();
+  if (!sb || !userId) return;
+  if (themeSettingsChannel) {
+    try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
+    themeSettingsChannel = null;
+  }
+  const { data, error } = await sb.from('user_settings').select('*').eq('user_id', userId).maybeSingle();
+  if (!error && data) applyCloudTheme(data);
+  else if (error && error.code !== 'PGRST116') console.warn('Appearance cloud sync pull failed:', error.message);
+  else await pushThemeToCloud();
+  themeSettingsChannel = sb.channel(`school-center-settings-${userId}`)
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'user_settings',
+      filter: `user_id=eq.${userId}`
+    }, payload => {
+      if (payload.new) {
+        applyCloudTheme(payload.new);
+        if (state.view === 'settings') render();
+      }
+    })
+    .subscribe();
+}
+
+async function stopThemeCloudSync() {
+  const sb = getSupabase();
+  if (sb && themeSettingsChannel) {
+    try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
+  }
+  themeSettingsChannel = null;
+}
+
 
 /* =========================================================================
    BACKGROUND
@@ -910,7 +991,9 @@ function renderCourseDetailView(c) {
     const routed = routeCourseContent(c);
     const mats = routed.materials;
     bodyHtml = mats.length ? `
-      <div style="display:flex;flex-direction:column;gap:14px;">
+      <div class="course-materials-stack">
+        <div class="section-sub" style="margin-bottom:2px;">${mats.length} material${mats.length === 1 ? '' : 's'} available in the course cloud.</div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
         ${mats.map(m => {
           const json = m.content_json || {};
           const questions = json.practice_questions || [];
@@ -946,6 +1029,7 @@ function renderCourseDetailView(c) {
             </div>
           `;
         }).join('')}
+        </div>
       </div>
     ` : `
       <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
@@ -2593,9 +2677,37 @@ function attachEventHandlers() {
   document.querySelectorAll('[data-ai-note]').forEach(btn => btn.addEventListener('click', async () => { try { await notesManager.runAIStudyAction(btn.getAttribute('data-note-id'), btn.getAttribute('data-ai-note')); showToast('Note updated ✓'); render(); } catch (e) { showToast(`Note action failed: ${e.message}`); } }));
   const triggerUpload = document.getElementById('trigger-upload-modal');
   if (triggerUpload) triggerUpload.addEventListener('click', () => {
-    state.aiAssistantOpen = true;
-    render();
-    setTimeout(() => document.getElementById('ai-file-input')?.click(), 50);
+    const course = courseById(state.courseId);
+    if (!course) { showToast('Select a course first.'); return; }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf,.txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif';
+    input.addEventListener('change', async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      if (!course.dbId) await syncDataFromSupabase();
+      const refreshedCourse = courseById(state.courseId);
+      if (!refreshedCourse?.dbId) {
+        showToast('This course is not connected to the cloud database yet.');
+        return;
+      }
+      for (const file of files) {
+        try {
+          showToast(`Uploading ${file.name}…`);
+          await uploadAndProcessFile({
+            file, course: refreshedCourse,
+            onProgress: progress => { if (progress?.text) showToast(progress.text); },
+            onLog: () => {}
+          });
+        } catch (err) {
+          showToast(`Upload failed: ${err?.message || 'Unknown error'}`);
+        }
+      }
+      await syncDataFromSupabase();
+      showToast('Course material uploaded and saved ✓');
+    });
+    input.click();
   });
 
   attachCampusMapHandlers();
@@ -2674,7 +2786,7 @@ function attachEventHandlers() {
   accentInputs.forEach(input => input.addEventListener('change', () => render()));
   const lavaSlider = document.getElementById('lava-slider');
   if (lavaSlider) lavaSlider.addEventListener('input', e => {
-    const value = Number(e.target.value); document.documentElement.style.setProperty('--bg-glow', String(value)); document.documentElement.style.setProperty('--lava-opacity', String(value)); localStorage.setItem('sc_lava_opacity', String(value));
+    const value = Number(e.target.value); document.documentElement.style.setProperty('--bg-glow', String(value)); document.documentElement.style.setProperty('--lava-opacity', String(value)); localStorage.setItem('sc_lava_opacity', String(value)); if (!applyingRemoteTheme) pushThemeToCloud().catch(() => {});
   });
 
   const aiSignin = document.getElementById('ai-signin-btn');
@@ -2684,7 +2796,7 @@ function attachEventHandlers() {
     try { await sendAiMagicLink(email); showToast('Check your email for the sign-in link.'); } catch (e) { showToast(`Sign-in failed: ${e.message}`); }
   });
   const aiSignout = document.getElementById('ai-signout-btn');
-  if (aiSignout) aiSignout.addEventListener('click', async () => { try { await signOutAiCloud(); stopAutomaticDataSync(); if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; } state.aiCloudUser=null; state.aiCloudConnected=false; render(); showToast('Signed out.'); } catch (e) { showToast(e.message); } });
+  if (aiSignout) aiSignout.addEventListener('click', async () => { try { await signOutAiCloud(); await stopThemeCloudSync(); stopAutomaticDataSync(); if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; } state.aiCloudUser=null; state.aiCloudConnected=false; render(); showToast('Signed out.'); } catch (e) { showToast(e.message); } });
   const closeAssignmentDetail = document.getElementById('close-asg-detail-modal');
   if (closeAssignmentDetail) closeAssignmentDetail.addEventListener('click', () => { state.assignmentDetailId = null; render(); });
   const assignmentDetailOverlay = document.getElementById('asg-detail-modal-overlay');
@@ -2863,8 +2975,10 @@ function bootstrap() {
         if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
         state.aiHistoryLoaded = true;
         if (state.aiCloudUser?.id) {
+          startThemeCloudSync(state.aiCloudUser.id).catch(e => console.warn('Appearance sync start:', e));
           startAutomaticDataSync().then(() => { if (state.view === 'courses' || state.view === 'today') render(); }).catch(e => console.warn('Data sync start:', e));
         } else {
+          stopThemeCloudSync().catch(() => {});
           stopAutomaticDataSync();
         }
         if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; }
@@ -2882,6 +2996,7 @@ function bootstrap() {
         if (Array.isArray(result.messages)) state.aiChatMessages = result.messages;
         state.aiHistoryLoaded = true;
         if (state.aiCloudUser?.id) {
+          startThemeCloudSync(state.aiCloudUser.id).catch(e => console.warn('Appearance sync start:', e));
           startAutomaticDataSync().then(() => { if (state.view === 'courses' || state.view === 'today') render(); }).catch(e => console.warn('Data sync start:', e));
         }
         if (!aiHistoryUnsubscribe && state.aiCloudConnected && state.aiCloudUser?.id) {
