@@ -400,6 +400,8 @@ function applyCustomAccent(hex, persist=true){
    CROSS-DEVICE APPEARANCE SYNC
    ========================================================================= */
 let themeSettingsChannel = null;
+let themeSettingsPollTimer = null;
+let themeSettingsUserId = null;
 let applyingRemoteTheme = false;
 
 function themeKeyFor(theme) {
@@ -407,11 +409,11 @@ function themeKeyFor(theme) {
 }
 
 async function pushThemeToCloud() {
-  if (applyingRemoteTheme) return;
+  if (applyingRemoteTheme) return false;
   const sb = getSupabase();
-  if (!sb) return;
+  if (!sb) return false;
   const user = await getCurrentAiUser().catch(() => null);
-  if (!user) return;
+  if (!user) return false;
   const customAccent = localStorage.getItem('sc_custom_accent') || null;
   const themeKey = customAccent ? null : (localStorage.getItem('sc_theme_key') || themeKeyFor(currentTheme) || 'violet');
   const bgGlow = Number(localStorage.getItem('sc_lava_opacity') || getComputedStyle(document.documentElement).getPropertyValue('--bg-glow') || '1');
@@ -422,7 +424,11 @@ async function pushThemeToCloud() {
     bg_glow: Number.isFinite(bgGlow) ? bgGlow : 1,
     updated_at: new Date().toISOString()
   }, { onConflict: 'user_id' });
-  if (error) console.warn('Appearance cloud sync push failed:', error.message);
+  if (error) {
+    console.warn('Appearance cloud sync push failed:', error.message);
+    return false;
+  }
+  return true;
 }
 
 function applyCloudTheme(row) {
@@ -441,32 +447,54 @@ function applyCloudTheme(row) {
   }
 }
 
+async function pullThemeFromCloud(userId) {
+  const sb = getSupabase();
+  if (!sb || !userId) return;
+  const { data, error } = await sb.from('user_settings').select('*').eq('user_id', userId).maybeSingle();
+  if (error) {
+    console.warn('Appearance cloud sync pull failed:', error.message);
+    return;
+  }
+  if (data) applyCloudTheme(data);
+  else await pushThemeToCloud();
+}
+
 async function startThemeCloudSync(userId) {
   const sb = getSupabase();
   if (!sb || !userId) return;
+  themeSettingsUserId = userId;
+
   if (themeSettingsChannel) {
     try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
     themeSettingsChannel = null;
   }
-  const { data, error } = await sb.from('user_settings').select('*').eq('user_id', userId).maybeSingle();
-  if (!error && data) applyCloudTheme(data);
-  else if (error && error.code !== 'PGRST116') console.warn('Appearance cloud sync pull failed:', error.message);
-  else await pushThemeToCloud();
+  if (themeSettingsPollTimer) clearInterval(themeSettingsPollTimer);
+  themeSettingsPollTimer = null;
+
+  // Pull immediately, then poll as the authoritative cross-device fallback.
+  // Realtime is still enabled for instant delivery when available, but the
+  // app no longer depends on a websocket to synchronize appearance.
+  await pullThemeFromCloud(userId);
+
   themeSettingsChannel = sb.channel(`school-center-settings-${userId}`)
     .on('postgres_changes', {
       event: '*', schema: 'public', table: 'user_settings',
       filter: `user_id=eq.${userId}`
     }, payload => {
-      if (payload.new) {
-        applyCloudTheme(payload.new);
-        if (state.view === 'settings') render();
-      }
+      if (payload.new) applyCloudTheme(payload.new);
     })
     .subscribe();
+
+  themeSettingsPollTimer = setInterval(() => {
+    if (themeSettingsUserId === userId) pullThemeFromCloud(userId).catch(() => {});
+  }, 2000);
 }
 
 async function stopThemeCloudSync() {
   const sb = getSupabase();
+  if (themeSettingsPollTimer) clearInterval(themeSettingsPollTimer);
+  themeSettingsPollTimer = null;
+  themeSettingsUserId = null;
   if (sb && themeSettingsChannel) {
     try { await sb.removeChannel(themeSettingsChannel); } catch (_) {}
   }
