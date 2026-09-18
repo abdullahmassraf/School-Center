@@ -84,11 +84,85 @@ export async function sendAiMagicLink(email) {
   const sb = getSupabase();
   if (!sb) throw new Error('Connect Supabase in Settings first.');
   const redirectTo = `${window.location.origin}${window.location.pathname}`;
-  const { error } = await sb.auth.signInWithOtp({
-    email: String(email || '').trim(),
-    options: { emailRedirectTo: redirectTo }
+  try {
+    const { error } = await sb.auth.signInWithOtp({
+      email: String(email || '').trim(),
+      options: { emailRedirectTo: redirectTo }
+    });
+    if (error) throw error;
+  } catch (error) {
+    // Magic links depend on Supabase's built-in email service, which allows
+    // only a couple of messages per hour on the free tier. A 429 here used to
+    // surface as a generic failure with no hint of the real cause or that a
+    // password sign-in below needs no email at all.
+    const raw = String(error?.message || error || '');
+    if (error?.code === 'over_email_send_rate_limit' || raw.includes('rate limit')) {
+      throw new Error('Email sign-in is rate limited right now (Supabase free tier allows very few emails per hour). Use the email + password option below instead — it works immediately.');
+    }
+    throw new Error(raw || 'Could not send the sign-in email.');
+  }
+}
+
+/**
+ * Email + password sign-in / registration. Password sign-in has NO email
+ * dependency, so it works even when the built-in mailer is rate limited —
+ * which is exactly why it is offered: on this project the hourly magic-link
+ * quota was exhausted, leaving users unable to sign in at all.
+ * - Existing account + correct password: signs in.
+ * - No account yet: creates one with these credentials (first device sets
+ *   the password; other devices then sign in with the same email+password).
+ * - Existing account + wrong password: falls through with the auth error.
+ */
+export async function signInAiWithPassword(email, password) {
+  const sb = getSupabase();
+  if (!sb) throw new Error('Connect Supabase in Settings first.');
+  const cleanEmail = String(email || '').trim();
+  const cleanPassword = String(password || '');
+  if (!cleanEmail) throw new Error('Enter your email address.');
+  if (cleanPassword.length < 6) throw new Error('Password must be at least 6 characters.');
+
+  const { data: signInData, error: signInError } = await sb.auth.signInWithPassword({
+    email: cleanEmail,
+    password: cleanPassword
   });
-  if (error) throw error;
+  if (!signInError) return signInData.session;
+
+  // An existing account whose email was never confirmed cannot sign in with a
+  // password. Registration cannot proceed either, so explain the two real
+  // ways out instead of falling into the "wrong password" path below.
+  const rawSignIn = String(signInError.message || '');
+  if (/email not confirmed/i.test(rawSignIn)) {
+    throw new Error('This account\'s email has not been confirmed yet. Open the sign-in link email once on this device to confirm it — or turn OFF "Confirm email" in Supabase Dashboard → Authentication → Sign In / Providers → Email, which makes password sign-in work with no email at all.');
+  }
+
+  const notFound = signInError.code === 'user_not_found'
+    || /invalid login credentials/i.test(rawSignIn);
+
+  if (!notFound) throw signInError;
+
+  // No existing account for this email — register it with these credentials.
+  const { data: signUpData, error: signUpError } = await sb.auth.signUp({
+    email: cleanEmail,
+    password: cleanPassword
+  });
+  if (signUpError) {
+    // A user already exists but with a different password lands here on
+    // some project configs; make the actionable answer obvious.
+    const raw = String(signUpError.message || '');
+    if (/already registered|already exists/i.test(raw)) {
+      throw new Error('An account with this email already exists. Enter its original password.');
+    }
+    if (signUpError.code === 'over_email_send_rate_limit' || /rate limit/i.test(raw) || !raw) {
+      throw new Error('Account creation is temporarily rate limited because this project emails a confirmation for new sign-ups and the built-in mailer quota is exhausted. Try again in about an hour — or turn OFF "Confirm email" in Supabase Dashboard → Authentication → Providers → Email, which removes the email requirement entirely.');
+    }
+    throw signUpError;
+  }
+  if (!signUpData?.session) {
+    // "Confirm email" is enabled on this project: the account was created but
+    // stays unusable until the confirmation link in the email is opened once.
+    throw new Error('Account created, but this project requires email confirmation before first sign-in. Open the confirmation email on this device once. To skip this requirement on every future device, turn OFF "Confirm email" in Supabase Dashboard → Authentication → Providers → Email.');
+  }
+  return signUpData.session;
 }
 
 export async function signOutAiCloud() {

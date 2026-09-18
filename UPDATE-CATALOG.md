@@ -1,3 +1,33 @@
+## v1.4.2 — Password sign-in (sync was dead because nobody could sign in)
+
+**Date:** 2026-09-18 20:30 ET
+
+### Problem (user-reported)
+Theme changes did not synchronize across devices. Theme sync requires a signed-in user, and live verification showed **no sign-in had ever succeeded**: `user_settings`, `ai_conversations`, `user_notes`, and `user_assignments` all had zero rows.
+
+### Root cause (live-verified against production)
+- Magic-link sign-in depends on Supabase's built-in email service. Probing the project's auth endpoint returned `over_email_send_rate_limit` (HTTP 429): the **hourly email quota is exhausted**, so "Email me a sign-in link" cannot deliver. Free tier allows only a handful of emails per hour.
+- New-account signup is rate limited the same way (HTTP 429 on `/auth/v1/signup`), which also implies "Confirm email" is enabled — a freshly registered account would stay unusable until an email is opened.
+- Result: an invisible wall. The UI offered only the magic-link path, which failed silently from the user's point of view.
+
+### Changes
+- `src/ai-history.js` — new `signInAiWithPassword(email, password)`: password sign-in for existing accounts; registers the account when the email has none; explicit, actionable messages for "email not confirmed" and "rate limited (turn off Confirm email in the Supabase dashboard)". `sendAiMagicLink` now maps the 429 rate limit to a message that says the quota is exhausted and to use the password option instead.
+- `src/app.js` — Settings → Account now has an email + password row (primary) with the magic link as secondary; password sign-in has **no email dependency** and works immediately.
+- `package.json` — version 1.4.2.
+
+### Database changes
+None.
+
+### Verification
+- Syntax checks pass; calendar/dedup tests pass; headless-Chrome boot test renders correctly.
+- Production probes: password grant on a nonexistent account → `invalid_credentials` (path works); signup → HTTP 429 (confirms the quota diagnosis and the "Confirm email" implication).
+- ⚠️ **One dashboard setting decides whether first-ever signup works without email:** Supabase Dashboard → Authentication → Sign In / Providers → Email → **turn "Confirm email" OFF**. With it off, password sign-up/sign-in needs no email at all. With it on, the confirmation email is also subject to the exhausted quota.
+
+### Known limitations
+- The existing hourly quota applies to any email path (magic link, confirmation). Password sign-in bypasses it entirely once "Confirm email" is off.
+
+---
+
 ## v1.4.1 — Honest material-load failures, spotlight flicker fix, truthful sync status
 
 **Date:** 2026-09-18 19:45 ET · **Commit:** 6666a9d · **Rollback:** branch `backup/before-v1.4.1-stabilization` (d4f9288)

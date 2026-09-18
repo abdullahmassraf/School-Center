@@ -24,7 +24,7 @@ import { routeCourseContent } from './course-data.js';
 import { FocusMode } from './focus.js';
 import { performUniversalSearch } from './search.js';
 import { prepareGeminiFileParts, GeminiLiveTranscriber, GEMINI_FILE_ACCEPT } from './ai-workspace.js';
-import { loadAiChatHistory, persistAiMessage, getCurrentAiUser, sendAiMagicLink, signOutAiCloud, getEphemeralLiveToken, subscribeToAiChatHistory, deleteAiMessage, updateAiMessageText, clearAiConversation } from './ai-history.js';
+import { loadAiChatHistory, persistAiMessage, getCurrentAiUser, sendAiMagicLink, signInAiWithPassword, signOutAiCloud, getEphemeralLiveToken, subscribeToAiChatHistory, deleteAiMessage, updateAiMessageText, clearAiConversation } from './ai-history.js';
 import { pushLocalDataToCloud, pullCloudDataToLocal, fullTwoWaySync, startAutomaticDataSync, stopAutomaticDataSync, getDataSyncStatus } from './data-sync.js';
 
 /* =========================================================================
@@ -1498,8 +1498,9 @@ function renderSettingsView() {
         ${authEmail ? `
           <div class="settings-account-row"><div><b>${escapeHtml(authEmail)}</b><div class="settings-account-state"><span class="ai-connection-dot ready"></span> Signed in — Notes, Assignments, and AI history sync automatically</div></div><button class="btn-ghost" id="ai-signout-btn" type="button">Sign out</button></div>
         ` : `
-          <div class="settings-auth-row"><input type="email" id="ai-signin-email" class="search-input" placeholder="you@example.com" autocomplete="email"><button class="btn-primary" id="ai-signin-btn" type="button">Email me a sign-in link</button></div>
-          <div class="settings-account-help">Click the link that arrives by email on <b>this</b> device to finish signing in, then repeat with the <b>same email</b> on every other device you use. Nothing syncs until you've done this on at least two devices.</div>
+          <div class="settings-auth-row"><input type="email" id="ai-signin-email" class="search-input" placeholder="you@example.com" autocomplete="email"><input type="password" id="ai-signin-password" class="search-input" placeholder="Password (min 6 characters)" autocomplete="current-password"><button class="btn-primary" id="ai-signin-password-btn" type="button">Sign in</button></div>
+          <div class="settings-account-help">Use the <b>same email and password on every device</b>. First time here? Signing in with a new email creates your account instantly — no email confirmation required. After that, your notes, assignments, and theme follow you to every device signed in with these credentials.</div>
+          <div style="margin-top:10px;"><button class="btn-ghost" id="ai-signin-btn" type="button">Prefer email only? Email me a sign-in link instead</button></div>
         `}
       </div>
 
@@ -3072,6 +3073,24 @@ function attachEventHandlers() {
     const value = Number(e.target.value); document.documentElement.style.setProperty('--bg-glow', String(value)); document.documentElement.style.setProperty('--lava-opacity', String(value)); localStorage.setItem('sc_lava_opacity', String(value)); if (!applyingRemoteTheme) pushThemeToCloud().catch(() => {});
   });
 
+  const aiPasswordSignin = document.getElementById('ai-signin-password-btn');
+  if (aiPasswordSignin) aiPasswordSignin.addEventListener('click', async () => {
+    const email = document.getElementById('ai-signin-email')?.value.trim();
+    const password = document.getElementById('ai-signin-password')?.value || '';
+    if (!email) { showToast('Enter your email first.'); return; }
+    if (!password) { showToast('Enter a password (min 6 characters).'); return; }
+    aiPasswordSignin.disabled = true;
+    aiPasswordSignin.textContent = 'Signing in…';
+    try {
+      await signInAiWithPassword(email, password);
+      showToast('Signed in ✓');
+    } catch (e) {
+      showToast(`Sign-in failed: ${e.message}`);
+    } finally {
+      aiPasswordSignin.disabled = false;
+      aiPasswordSignin.textContent = 'Sign in';
+    }
+  });
   const aiSignin = document.getElementById('ai-signin-btn');
   if (aiSignin) aiSignin.addEventListener('click', async () => {
     const email = document.getElementById('ai-signin-email')?.value.trim();
