@@ -1,3 +1,33 @@
+## v1.5.4 — Stall guard: the indefinite "Loading course materials…" fix
+
+**Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+### Root cause (reproduced deterministically, not inferred)
+A real machine's network can STALL a request without erroring (half-open socket, proxy, AV
+interception, DNS hang). supabase-js has NO built-in request timeout, and the hydration chain
+(`courses`/`modules`/`materials` queries + Storage list) awaited them bare. On a stall the await
+pended forever → neither the hydrated flag nor the error flag was ever set → the Materials tab sat
+on "Loading course materials…" indefinitely. This is exactly the user's reported state after cache
+clearing (which never affects OS-level socket behavior). Clean-network test profiles could never
+see it; a fetch-interceptor harness reproduced it against the LIVE v1.5.3 site byte-for-byte
+(`loading:true` forever, `sawError:false, sawMaterials:false`).
+
+### Changes
+- `src/app.js` — `withTimeout()` deadline (20s) raced onto every awaited network call in the
+  hydration chain (3 table queries + per-course Storage list). A stall now rejects with an honest
+  SyncHttpTimeoutError naming the likely device-side cause. One automatic retry 4s later on fresh
+  connections converts transient stalls into materials without user action; persistent failure
+  shows the explicit error banner with Retry. No silent path remains.
+- `test_stall_recovery.js` (NEW) — reproduces the stall against the live site (proves v1.5.3 hangs
+  forever) and proves the fix recovers (honest error → auto-retry → materials rendered).
+
+### Verification
+- BEFORE on live v1.5.3: stall → loading forever (reproduces the bug).
+- AFTER with fix: stall → timed-out error → auto-retry → 6/6 MATH materials render.
+- Full suite green: syntax, race, clean, POISON, STALE, dedup, calendar, two-device sync E2E.
+
+---
+
 ## v1.5.3 — Wrong-project device-state guard (final silent-path hardening)
 
 **Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex

@@ -547,6 +547,25 @@ let aiHistoryUnsubscribe = null;
    DATA SYNC WITH SUPABASE
    ========================================================================= */
 
+/** v1.5.4 STALL GUARD: supabase-js requests have NO built-in timeout. On a
+ * machine with a stalled connection (AV/proxy/DNS/half-open socket — invisible
+ * in clean-network test profiles), an awaited query can pend FOREVER. That is
+ * the exact mechanism behind a Materials tab stuck on "Loading course
+ * materials…" for 10+ minutes: neither the hydrated flag nor the error flag is
+ * ever reached because the await never settles. Every awaited network call in
+ * the hydration chain is therefore raced against a hard deadline. */
+const SYNC_HTTP_TIMEOUT_MS = 20000;
+class SyncHttpTimeoutError extends Error {
+  constructor(ms) { super(`Request stalled with no response for ${Math.round(ms / 1000)}s and was aborted. Usually a network, proxy, antivirus, or DNS problem on this device.`); this.name = 'SyncHttpTimeoutError'; }
+}
+function withTimeout(promise, ms = SYNC_HTTP_TIMEOUT_MS) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new SyncHttpTimeoutError(ms)), ms);
+  });
+  return Promise.race([Promise.resolve(promise), deadline]).finally(() => clearTimeout(timer));
+}
+
 /** Enumerate a course folder in the public course-materials Storage bucket
  * and turn every file into a viewable material row. Storage is an
  * independent source of truth for uploaded files: when the materials table
@@ -557,13 +576,17 @@ let aiHistoryUnsubscribe = null;
  * as "this course has no files". */
 async function listCourseMaterialsFromStorage(sb, dbCourse, dbModule) {
   try {
-    const { data: objects, error } = await sb.storage
-      .from('course-materials')
-      .list(dbCourse.code, {
-        limit: 1000,
-        offset: 0,
-        sortBy: { column: 'name', order: 'asc' }
-      });
+    // v1.5.4: hard deadline — without it a stalled storage request pends
+    // forever and this whole fallback path hangs with it.
+    const { data: objects, error } = await withTimeout(
+      sb.storage
+        .from('course-materials')
+        .list(dbCourse.code, {
+          limit: 1000,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' }
+        })
+    );
     if (error) {
       console.warn(`Storage listing failed for ${dbCourse.code}:`, error.message || error);
       return { rows: [], error };
@@ -604,10 +627,14 @@ async function runSupabaseCourseSync() {
     // Course content is foundational app data. Fetch the three tables
     // independently so a PostgREST relationship/cache issue cannot make the
     // course appear empty when the underlying rows already exist.
+    // v1.5.4: each query races a deadline (see SYNC_HTTP_TIMEOUT_MS above) so
+    // a request that NEVER completes rejects with SyncHttpTimeoutError and the
+    // sync settles with an explicit, visible error instead of an eternal
+    // "Loading…".
     const [courseRes, moduleRes, materialRes] = await Promise.all([
-      sb.from('courses').select('*').order('code'),
-      sb.from('modules').select('*').order('order_index'),
-      sb.from('materials').select('*').order('created_at')
+      withTimeout(sb.from('courses').select('*').order('code')),
+      withTimeout(sb.from('modules').select('*').order('order_index')),
+      withTimeout(sb.from('materials').select('*').order('created_at'))
     ]);
 
     if (courseRes.error) throw courseRes.error;
@@ -825,8 +852,23 @@ async function runSupabaseCourseSync() {
  * the user manually clears site data. Also repaints after success so a
  * course that is already open updates in place. */
 let syncHealAttempted = false;
+let stallRetryAttempted = false;
 export async function syncDataFromSupabase() {
   const ok = await runSupabaseCourseSync();
+  if (ok) { syncHealAttempted = false; stallRetryAttempted = false; return true; }
+  // v1.5.4: a STALLED request (timeout guard fired) gets ONE automatic retry
+  // after a short pause. Stalls are usually transient on the user's side
+  // (proxy/AV/DNS hiccup); a fresh attempt on new sockets commonly succeeds
+  // and turns the error state into actual materials without user action.
+  if (!stallRetryAttempted && /stalled with no response/i.test(state.materialsSyncError || '')) {
+    stallRetryAttempted = true;
+    console.warn('[stall-guard] sync request stalled; retrying once in 4s on fresh connections…');
+    await new Promise(r => setTimeout(r, 4000));
+    const retried = await runSupabaseCourseSync();
+    if (retried) { syncHealAttempted = false; stallRetryAttempted = false; return true; }
+    console.warn('[stall-guard] retry still failing; leaving explicit error state visible.');
+    return false;
+  }
   // Heal when the failure is an auth/config error OR the device is running a
   // saved connection override that differs from the deployed origin config
   // (wrong/dead project signature: queries fail or return [] with no
@@ -835,9 +877,8 @@ export async function syncDataFromSupabase() {
   // sc_supabase_url needs. The mismatch check is purely local, so it cannot
   // misfire on transient network failures.
   const wrongProject = !ok && (hasConfigOverrideMismatch() || /returned no courses/.test(state.materialsSyncError || ''));
-  if (ok || (!isAuthError(state.materialsSyncError) && !wrongProject)) {
-    if (ok) syncHealAttempted = false;
-    return ok;
+  if (!isAuthError(state.materialsSyncError) && !wrongProject) {
+    return false;
   }
   if (syncHealAttempted) {
     console.warn('Materials sync still failing after self-heal attempt; not retrying again this session.');
