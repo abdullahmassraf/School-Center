@@ -3010,7 +3010,7 @@ function attachEventHandlers() {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = '.pdf,.txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif';
+    input.accept = '.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.xlsm,.csv,.html,.htm,.css,.js,.json,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.mlx,.epw,.ddy,.stat';
     input.addEventListener('change', async () => {
       const files = Array.from(input.files || []);
       if (!files.length) return;

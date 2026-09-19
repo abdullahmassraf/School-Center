@@ -139,11 +139,24 @@ async function runSeed() {
     const allFiles = getFilesRecursively(courseDir);
     totalDiscovered += allFiles.length;
 
-    // Filter files (PDF, HTML, DOCX, TXT under size limit)
+    // Filter files by type (under size limit).
+    // v1.5.1: this whitelist previously only allowed .pdf/.txt/.html/.htm/.docx/.png/.jpg,
+    // which silently dropped 57 archive files (all .pptx lectures, .xlsx/.xlsm, .doc,
+    // .mlx, .epw/.ddy/.stat, .css/.js, .gif/.jpeg) — the root cause of the v1.5.0 gap.
+    // The 'course-materials' bucket has no MIME/size restrictions server-side, so any
+    // extension not in MIME_MAP below simply uploads as application/octet-stream.
+    // Duplicate material inserts on rerun are now blocked by the unique index
+    // uq_materials_file_path (migration 004) instead of creating duplicate rows.
     const eligibleFiles = allFiles.filter(filePath => {
       const ext = path.extname(filePath).toLowerCase();
       const stats = fs.statSync(filePath);
-      const isSupportedType = ['.pdf', '.txt', '.html', '.htm', '.docx', '.png', '.jpg'].includes(ext);
+      const isSupportedType = [
+        '.pdf', '.txt', '.md', '.html', '.htm', '.doc', '.docx',
+        '.ppt', '.pptx', '.xls', '.xlsx', '.xlsm', '.csv',
+        '.mlx', '.epw', '.ddy', '.stat',
+        '.css', '.js', '.mjs', '.json',
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'
+      ].includes(ext);
       const isUnderLimit = stats.size <= MAX_FILE_SIZE_BYTES;
       return isSupportedType && isUnderLimit;
     });

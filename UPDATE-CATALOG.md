@@ -1,3 +1,34 @@
+## v1.5.1 — Root-cause fix: extension whitelist that caused the v1.5.0 gap
+
+**Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+### Problem
+The v1.5.0 audit flagged that the ingest filter's root cause was "likely in the original
+seed script or upload validator" and left it unconfirmed. Confirmed and fixed now.
+
+### Root cause (confirmed)
+`scripts/seed-sheridan.js` hard-coded a 7-extension whitelist
+(`.pdf .txt .html .htm .docx .png .jpg`) that silently dropped every other file type —
+exactly the 57 files the v1.5.0 seeder had to backfill. The Storage bucket has no
+MIME/size restrictions; the filter was purely client-side. `src/upload.js` (in-app
+upload path) has **no** filter and was never the problem.
+
+### Changes
+- `scripts/seed-sheridan.js` — whitelist expanded to all archive types
+  (.ppt/.pptx .xls/.xlsx/.xlsm .doc .md .csv .mlx .epw/.ddy/.stat .css/.js/.mjs
+  .json .gif .jpeg .webp .svg). Duplicate inserts on rerun are now blocked by
+  `uq_materials_file_path` (migration 004) instead of creating duplicate rows.
+- `src/app.js` — course-file upload picker `accept` hint extended with the missing
+  types (.md .xlsm .html .htm .css .js .json .gif .mlx .epw .ddy .stat) so manual
+  uploads are no longer discouraged by the file dialog. Cosmetic only; upload.js
+  accepted these all along.
+
+### Verification
+- `node --check` passes on both files; `seed-sheridan.js --dry-run` now reports
+  ANTH 78/78 eligible (was 51-ish) and ENGR36035D 40/43 (remainder: 2 extensionless
+  + 1 non-listed file, by design).
+- Headless-browser regression run: app boots, materials load, zero page errors.
+
 ## v1.5.0 — Sheridan archive gap audit, unique-path constraint, gap-fill seeder
 
 **Date:** 2026-09-18 · **Supabase project:** vxsphvrvulhbyhqmoeex
