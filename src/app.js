@@ -977,17 +977,34 @@ function render() {
   }
 }
 
+let mathRenderRetries = 0;
 function renderMath() {
-  if (typeof window.renderMathInElement === 'function') {
+  if (typeof window.renderMathInElement !== 'function') {
+    // KaTeX is loaded with defer; on slower mobile browsers the first render
+    // can happen before auto-render.js has installed its global. Retry after
+    // the deferred scripts and also after the window load event.
+    if (mathRenderRetries < 20) {
+      mathRenderRetries += 1;
+      setTimeout(renderMath, 100);
+    }
+    return;
+  }
+  mathRenderRetries = 0;
+  try {
     window.renderMathInElement(document.body, {
       delimiters: [
-        {left: '$$', right: '$$', display: true},
-        {left: '$', right: '$', display: false}
+        { left: '$$', right: '$$', display: true },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '$', right: '$', display: false }
       ],
-      throwOnError: false
+      throwOnError: false,
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
     });
+  } catch (error) {
+    console.warn('Math rendering skipped:', error?.message || error);
   }
 }
+window.addEventListener('load', renderMath, { once: true });
 
 /* =========================================================================
    HEADER & DYNAMIC ISLAND PILL
