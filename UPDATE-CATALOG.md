@@ -1,3 +1,30 @@
+## v1.5.3 — Wrong-project device-state guard (final silent-path hardening)
+
+**Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+### What changed
+- `src/supabase.js` — new `hasConfigOverrideMismatch()`: purely local, deterministic detection of a
+  device running a saved `sc_supabase_url`/`sc_supabase_anon_key` override that differs from the
+  deployed origin meta tags (the wrong/dead-project signature).
+- `src/app.js` — `syncDataFromSupabase()` now also triggers its one-shot self-heal (purge stored
+  overrides, rebuild client from deployed meta tags, retry) when that mismatch exists, in addition
+  to the existing 401/JWT trigger. A successful hydration with ZERO courses now records an explicit
+  diagnostic instead of silently returning false.
+- `test_browser_debug.js` — new `SC_WRONGPROJECT=1` mode (seeds a dead project URL+key) proving the
+  guard never fires on healthy paths and the deployed meta tags win over stored overrides.
+
+### Finding (important, empirically verified)
+On the CURRENT deployment, `getConfig()` prefers the deployed meta tags over localStorage, so a
+stored override is already inert and materials load regardless — WRONGPROJECT mode loads 6/6
+materials with no heal needed. The guard matters for the placeholder-meta edge case and as a
+self-repair for future config drift. No user-visible behavior changed on healthy devices.
+
+### Tests run
+All six suites green: syntax (all modules), race regression, clean, POISON, STALE, WRONGPROJECT,
+course-dedup, calendar, and the two-device sync E2E (re-run after touching supabase.js).
+
+---
+
 ## v1.5.2 — Materials false-empty root cause fixed + real cross-device sync proof + RLS hardening
 
 **Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex

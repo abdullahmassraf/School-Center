@@ -7,6 +7,7 @@ import {
   getSupabase, 
   isSupabaseConfigured, 
   isAuthError,
+  hasConfigOverrideMismatch,
   resetSupabaseAuthState,
   saveSupabaseConfig, 
   fetchCoursesWithMaterials 
@@ -693,7 +694,24 @@ async function runSupabaseCourseSync() {
       if (module) module.materials.push(material);
     });
 
-    if (!dbCourses.length) return false;
+    if (!dbCourses.length) {
+      // v1.5.3 honest-failure contract, part 2: a successful query that returns
+      // ZERO courses is not a valid hydration. It means this device is almost
+      // certainly talking to the WRONG cloud project (a saved
+      // sc_supabase_url/sc_supabase_anon_key override from an older build, or a
+      // stale/cached page without the deployed meta tags). Previously this
+      // returned false with no error and no render — the silent path that can
+      // leave a device showing an empty course library forever. Name the real
+      // cause and let syncDataFromSupabase() self-heal it once.
+      state.materialsSyncError =
+        'Cloud error: The connected Supabase project returned no courses. ' +
+        'This device may be pointing at the wrong cloud project (a saved connection override) ' +
+        'or the project database was reset.';
+      if (state.view === 'courses' && state.courseTab === 'materials') {
+        render();
+      }
+      return false;
+    }
 
     dbCourses.forEach(dbC => {
       const dbKey = cleanCourseCode(dbC.code || dbC.id);
@@ -809,7 +827,15 @@ async function runSupabaseCourseSync() {
 let syncHealAttempted = false;
 export async function syncDataFromSupabase() {
   const ok = await runSupabaseCourseSync();
-  if (ok || !isAuthError(state.materialsSyncError)) {
+  // Heal when the failure is an auth/config error OR the device is running a
+  // saved connection override that differs from the deployed origin config
+  // (wrong/dead project signature: queries fail or return [] with no
+  // auth-style error). The heal purges saved overrides and rebuilds the
+  // client from the deployed meta tags — exactly the repair a stale
+  // sc_supabase_url needs. The mismatch check is purely local, so it cannot
+  // misfire on transient network failures.
+  const wrongProject = !ok && (hasConfigOverrideMismatch() || /returned no courses/.test(state.materialsSyncError || ''));
+  if (ok || (!isAuthError(state.materialsSyncError) && !wrongProject)) {
     if (ok) syncHealAttempted = false;
     return ok;
   }

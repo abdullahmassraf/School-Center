@@ -234,6 +234,27 @@ export function isSupabaseConfigured() {
   return Boolean(url && key && !key.includes('REPLACE_WITH'));
 }
 
+/** v1.5.3: deterministic wrong-project detector. A device that once saved a
+ * sc_supabase_url / sc_supabase_anon_key override (older builds invited this
+ * via Settings) talks to a dead or foreign project forever: every query
+ * either network-fails or returns [] with NO auth-style error, so the old
+ * self-heal (401/JWT-triggered) never fires. A localStorage/origin comparison
+ * is fully local and cannot misfire on transient network problems. */
+export function hasConfigOverrideMismatch() {
+  try {
+    const deployed = getDeployedConfig();
+    const storedUrl = localStorage.getItem('sc_supabase_url');
+    const storedKey = localStorage.getItem('sc_supabase_anon_key');
+    if (!storedUrl && !storedKey) return false;
+    return Boolean(
+      (storedUrl && storedUrl !== deployed.url) ||
+      (storedKey && storedKey !== deployed.key)
+   );
+  } catch (_) {
+    return false;
+  }
+}
+
 export function saveSupabaseConfig(url, key) {
   if (url) safeSetItem('sc_supabase_url', String(url).trim());
   if (key) safeSetItem('sc_supabase_anon_key', String(key).trim());

@@ -124,6 +124,20 @@ if (process.env.SC_STALE === '1') {
   });
   console.log('STALE MODE: DOM meta tag will be rewritten to retired key (simulates cached old index.html)');
 }
+if (process.env.SC_WRONGPROJECT === '1') {
+  // v1.5.3: simulate a device whose saved sc_supabase_url points at a dead or
+  // wrong Supabase project. Every REST query fails at the network layer, so
+  // courses/modules queries return [] with no auth-style error. The app must
+  // name the cause and self-heal by purging the stored override and rebuilding
+  // from the deployed meta tags.
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `try{
+      localStorage.setItem('sc_supabase_url', 'https://dead-wrong-project.supabase.co');
+      localStorage.setItem('sc_supabase_anon_key', 'sb_publishable_wrongprojectkey000000000000000');
+    }catch(e){}`
+  });
+  console.log('WRONGPROJECT MODE: seeded dead project URL + key into localStorage before app boot');
+}
 
 console.log('TARGET:', TARGET_URL);
 await send('Page.navigate', { url: TARGET_URL });
