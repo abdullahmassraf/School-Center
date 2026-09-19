@@ -297,7 +297,35 @@ const STATIC_COURSES = [
   }
 ];
 
+const COURSE_MATERIAL_CACHE_KEY = 'schoolcenter_course_materials_cache_v1';
 let COURSES = JSON.parse(JSON.stringify(STATIC_COURSES));
+
+function restoreCachedCourseMaterials() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(COURSE_MATERIAL_CACHE_KEY) || '{}');
+    if (!cached || typeof cached !== 'object') return;
+    COURSES.forEach(course => {
+      const key = cleanCourseCode(course.code || course.id);
+      const materials = Array.isArray(cached[key]) ? cached[key] : [];
+      if (!materials.length) return;
+      course.cloudMaterials = materials;
+      course.hasMaterial = true;
+    });
+  } catch (_) {}
+}
+
+function persistCourseMaterials() {
+  try {
+    const cached = {};
+    COURSES.forEach(course => {
+      const materials = Array.isArray(course.cloudMaterials) ? course.cloudMaterials : [];
+      if (materials.length) cached[cleanCourseCode(course.code || course.id)] = materials;
+    });
+    localStorage.setItem(COURSE_MATERIAL_CACHE_KEY, JSON.stringify(cached));
+  } catch (_) {}
+}
+
+restoreCachedCourseMaterials();
 
 export function cleanCourseCode(code) {
   return (code || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -788,8 +816,13 @@ async function runSupabaseCourseSync() {
         if (dbC.instructor) match.instructor = dbC.instructor;
         if (dbC.color) match.accent = dbC.color;
         match.modules = modulesByCourse.get(dbC.id) || match.modules || [];
-        match.cloudMaterials = flattenedMaterials;
-        match.hasMaterial = flattenedMaterials.length > 0;
+        // A sign-in callback can briefly return an authenticated cloud
+        // response with no material rows while the session/RLS context is
+        // settling. Never replace a known-good local/cloud snapshot with an
+        // empty array; that is what made materials disappear after email auth.
+        const previousMaterials = Array.isArray(match.cloudMaterials) ? match.cloudMaterials : [];
+        match.cloudMaterials = flattenedMaterials.length ? flattenedMaterials : previousMaterials;
+        match.hasMaterial = match.cloudMaterials.length > 0 || match.hasMaterial === true;
       } else {
         COURSES.push({
           id: (dbC.code || dbC.id).toLowerCase().replace(/[^a-z0-9]/g, ''),
@@ -817,8 +850,12 @@ async function runSupabaseCourseSync() {
       return true;
     });
 
-    // Hydration succeeded. Clear any previous failure so the course view
-    // never keeps showing a stale "materials could not be loaded" banner.
+    // Hydration succeeded. Cache the last known-good material snapshot so an
+    // email-link redirect, temporary RLS/session gap, or signed-out reload can
+    // continue showing the user's latest course library immediately.
+    persistCourseMaterials();
+    // Clear any previous failure so the course view never keeps showing a
+    // stale "materials could not be loaded" banner.
     state.materialsSyncError = null;
     state.materialsHydrated = true;
     // v1.5.2 ROOT-CAUSE FIX (false "No document files uploaded"): the user can

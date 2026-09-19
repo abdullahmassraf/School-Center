@@ -11,9 +11,10 @@
   z-index: 1;
 }
 
-/* Fallback label keeps the active assessment tab readable even if a browser has an old inherited text-color rule. */
-.course-tab.active[data-course-tab="assignments"]::after {
-  content: "Assignments";
+/* Draw the active label above any inherited accent-color/text-fill rule. The
+   attribute source keeps this resilient if a tab label is changed in markup. */
+.course-tab.active::before {
+  content: attr(data-course-tab);
   position: absolute;
   inset: 0;
   display: grid;
@@ -21,7 +22,13 @@
   color: #0B0F2E !important;
   -webkit-text-fill-color: #0B0F2E !important;
   font: inherit;
+  font-weight: 700;
+  text-transform: capitalize;
   pointer-events: none;
+}
+
+.course-tab.active[data-course-tab="assignments"]::after {
+  content: none;
 }
 
 /* The deadline panel is intentionally compact and visually grouped with the course workspace. */
