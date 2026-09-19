@@ -5,7 +5,10 @@
   color: #0B0F2E !important;
   background: var(--course-accent, var(--accent)) !important;
   border-color: transparent !important;
-  text-shadow: none;
+  -webkit-text-fill-color: #0B0F2E !important;
+  text-shadow: 0 0 0 #0B0F2E;
+  position: relative;
+  z-index: 1;
 }
 
 /* The deadline panel is intentionally compact and visually grouped with the course workspace. */
