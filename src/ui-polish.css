@@ -11,6 +11,19 @@
   z-index: 1;
 }
 
+/* Fallback label keeps the active assessment tab readable even if a browser has an old inherited text-color rule. */
+.course-tab.active[data-course-tab="assignments"]::after {
+  content: "Assignments";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #0B0F2E !important;
+  -webkit-text-fill-color: #0B0F2E !important;
+  font: inherit;
+  pointer-events: none;
+}
+
 /* The deadline panel is intentionally compact and visually grouped with the course workspace. */
 .deadlines-ui-panel {
   background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.035)) !important;
