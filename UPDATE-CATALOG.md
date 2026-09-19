@@ -1,3 +1,46 @@
+## v1.4.3 — Course materials self-healing: surviving a rotated Supabase key on already-visited devices
+
+**Date:** 2026-09-18 22:30 ET
+
+### Problem (user-reported)
+Course materials did not show for a course even after clicking Reload, although the production Supabase database contained the files and a fresh browser profile rendered them fine.
+
+### Root cause (reproduced in headless Chrome against production)
+A fresh browser against the same site loaded all 6 MATH15325D materials, proving the code and database were healthy. The failure mode was device state: any device that had opened the app while the **retired JWT anon key** (`eyJ...`) was deployed kept failing forever, because
+1. `getConfig()` prefers localStorage (`sc_supabase_anon_key`) over the meta tag, so the dead key overrode the new publishable key (`sb_publishable_...`) deployed 2026-09-17 in index.html;
+2. a device still holding a **stale cached index.html** (with the old JWT key in its meta tag) 401s even with clean localStorage, and Retry only re-ran the same poisoned config;
+3. the Storage fallback in `syncDataFromSupabase()` was gated on the whole materials table being empty, so per-course orphaned rows still produced an empty library.
+
+### Changes
+- `src/supabase.js`
+  - New `isAuthError(err)`: detects 401 / "Invalid API key" / dead-JWT failures, from raw error objects **and** the display strings stored in `state.materialsSyncError`.
+  - New `repairConfigFromOrigin()`: re-fetches the app's own index.html with `cache: 'reload'` and rewrites the live meta tags from what the origin actually deploys today, defeating a stale cached page. Hard 6s cap.
+  - New `resetSupabaseAuthState({ purgeStoredConfig })`: deliberately **no** `client.signOut()` (its internal auth-lock acquisition can hang forever against a dead config, which deadlocked the rebuilt client's queries); sweeps legacy `sb-*-auth-token` keys locally, purges a stored `sc_supabase_anon_key`/`sc_supabase_url` that differs from origin (or is a retired JWT), removes the dead materials realtime channel, and forces a client rebuild.
+- `src/app.js`
+  - `syncDataFromSupabase()` reworked into `runSupabaseCourseSync()` + a self-healing wrapper: on auth failure it resets config/session once and retries, instead of leaving the app stuck until manual site-data clear. Re-armed by an explicit Retry click.
+  - Materials Storage fallback now runs **per course** and merges **additively** (deduped by file_path/URL) with DB rows, instead of only when the entire materials table was empty.
+  - Hydration no longer calls `render()` on success (every Retry click was re-rendering the whole app); callers repaint where needed.
+  - Materials empty state: when the error is an auth error, explains the saved-credential problem and offers a **"Fix cloud connection"** button (one-click `resetSupabaseAuthState` + re-sync).
+  - Settings → Save cloud config now clears stale sessions after saving, so the rebuilt client cannot inherit a foreign-token session.
+- `test_browser_debug.js` — new headless-Chrome harness (CDP over Chrome for Testing) that boots the real app against production Supabase, navigates Courses → course → Materials, and asserts. Modes: clean, `SC_POISON=1` (dead key in localStorage), `SC_STALE=1` (dead key in localStorage **and** a cached old index.html — the exact user failure).
+- `package.json` — version 1.4.3.
+
+### Database changes
+None.
+
+### Verification
+- `node --check` passes on all touched files; `test_calendar_engine.js` and `test_courses_dedup.js` pass.
+- Headless Chrome against production Supabase: clean device loads 6/6 MATH15325D materials with no heal; simulated stale-cached-page device shows the exact reported failure, then **self-heals within ~5s**: origin config repaired, dead key purged, client rebuilt, 6/6 materials loaded. Poisoned-localStorage device loads 6/6 regardless.
+
+### User-facing behavior
+If materials ever fail to load because of a stale credential, the app now repairs itself automatically (once per session per failure) and the Materials tab offers "Fix cloud connection" as a manual override. No manual localStorage clearing needed.
+
+### Known limitations
+- The self-heal cannot recover from a genuinely wrong project URL/key typed into Settings (it only restores what the origin deploys); use Settings → Cloud connection for that.
+- `process-document` / `gemini-live-token` Edge Functions remain undeployed (unchanged from v1.4.1).
+
+---
+
 ## v1.4.2 — Password sign-in (sync was dead because nobody could sign in)
 
 **Date:** 2026-09-18 20:30 ET

@@ -6,6 +6,8 @@
 import { 
   getSupabase, 
   isSupabaseConfigured, 
+  isAuthError,
+  resetSupabaseAuthState,
   saveSupabaseConfig, 
   fetchCoursesWithMaterials 
 } from './supabase.js';
@@ -542,7 +544,46 @@ let aiHistoryUnsubscribe = null;
 /* =========================================================================
    DATA SYNC WITH SUPABASE
    ========================================================================= */
-export async function syncDataFromSupabase() {
+
+/** Enumerate a course folder in the public course-materials Storage bucket
+ * and turn every file into a viewable material row. Storage is an
+ * independent source of truth for uploaded files: when the materials table
+ * or its module relationship fails (bad key, RLS, PostgREST hiccup), the
+ * files themselves can still populate the course library. */
+async function listCourseMaterialsFromStorage(sb, dbCourse, dbModule) {
+  try {
+    const { data: objects, error } = await sb.storage
+      .from('course-materials')
+      .list(dbCourse.code, {
+        limit: 1000,
+        offset: 0,
+        sortBy: { column: 'name', order: 'asc' }
+      });
+    if (error || !objects?.length) return [];
+    return objects
+      .filter(obj => obj?.name && !obj.name.endsWith('/'))
+      .map(obj => {
+        const filePath = dbCourse.code + '/' + obj.name;
+        const { data: urlData } = sb.storage.from('course-materials').getPublicUrl(filePath);
+        return {
+          id: 'storage-' + dbCourse.code + '-' + (obj.id || obj.name),
+          module_id: dbModule?.id || null,
+          moduleTitle: dbModule?.title || 'Course Materials & Readings',
+          title: obj.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' '),
+          type: /assignment|submission|homework|lab|project|worksheet|tutorial/i.test(obj.name) ? 'assignment' : 'other',
+          file_path: filePath,
+          file_url: urlData?.publicUrl || '',
+          content_json: {},
+          status: 'completed',
+          source: 'storage-fallback'
+        };
+      });
+  } catch (_) {
+    return [];
+  }
+}
+
+async function runSupabaseCourseSync() {
   if (!isSupabaseConfigured()) return false;
 
   const sb = getSupabase();
@@ -584,42 +625,23 @@ export async function syncDataFromSupabase() {
       } catch (_) {}
     }
 
-    // Last-resort browser recovery: enumerate the public course-materials
-    // Storage bucket. This keeps existing files visible even if PostgREST
-    // returns a transient error or the material relationship cache is stale.
+    // Course/Module queries succeeded. For each course, if the database
+    // relationship yielded no material rows for it, fall back to the actual
+    // Storage objects for that course. Per-course, not gated on the whole
+    // materials table being empty: one course with an orphaned module or a
+    // bad row must not blank its neighbours, and Storage is an independent
+    // source of truth for uploaded files.
     const storageMaterialsByCourse = new Map();
-    if (!dbMaterials.length) {
-      await Promise.all(dbCourses.map(async dbC => {
-        try {
-          const { data: objects, error } = await sb.storage
-            .from('course-materials')
-            .list(dbC.code, {
-              limit: 1000,
-              offset: 0,
-              sortBy: { column: 'name', order: 'asc' }
-            });
-          if (error || !objects?.length) return;
-          const module = dbModules.find(m => m.course_id === dbC.id) || null;
-          const rows = objects
-            .filter(obj => obj?.name && !obj.name.endsWith('/'))
-            .map(obj => {
-              const filePath = dbC.code + '/' + obj.name;
-              const { data: urlData } = sb.storage.from('course-materials').getPublicUrl(filePath);
-              return {
-                id: 'storage-' + dbC.code + '-' + (obj.id || obj.name),
-                module_id: module?.id || null,
-                moduleTitle: module?.title || 'Course Materials & Readings',
-                title: obj.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' '),
-                type: /assignment|submission|homework|lab|project|worksheet|tutorial/i.test(obj.name) ? 'assignment' : 'other',
-                file_path: filePath,
-                file_url: urlData?.publicUrl || '',
-                content_json: {},
-                status: 'completed',
-                source: 'storage-fallback'
-              };
-            });
-          storageMaterialsByCourse.set(dbC.id, rows);
-        } catch (_) {}
+    {
+      const orphanedCourses = dbCourses.filter(dbC => {
+        const courseModules = dbModules.filter(m => m.course_id === dbC.id);
+        if (!courseModules.length) return true;
+        return !dbMaterials.some(m => courseModules.some(mod => mod.id === m.module_id));
+      });
+      await Promise.all(orphanedCourses.map(async dbC => {
+        const module = dbModules.find(m => m.course_id === dbC.id) || null;
+        const rows = await listCourseMaterialsFromStorage(sb, dbC, module);
+        if (rows.length) storageMaterialsByCourse.set(dbC.id, rows);
       }));
     }
 
@@ -657,6 +679,20 @@ export async function syncDataFromSupabase() {
         });
       });
 
+      // Merge in the per-course Storage fallback rows. Additive: DB rows and
+      // Storage files can coexist; dedupe by file_path/URL so an uploaded
+      // file never renders twice.
+      const seenMaterialKeys = new Set(
+        flattenedMaterials.map(m => String(m.file_path || m.file_url || m.id))
+      );
+      (storageMaterialsByCourse.get(dbC.id) || []).forEach(material => {
+        const key = String(material.file_path || material.file_url || material.id);
+        if (!seenMaterialKeys.has(key)) {
+          seenMaterialKeys.add(key);
+          flattenedMaterials.push({ ...material });
+        }
+      });
+
       // If the defensive nested fallback was used, preserve those rows too.
       if (!flattenedMaterials.length) {
         dbMaterials
@@ -665,14 +701,6 @@ export async function syncDataFromSupabase() {
             return nestedCourse && cleanCourseCode(nestedCourse) === dbKey;
           })
           .forEach(material => flattenedMaterials.push({ ...material }));
-      }
-
-      // If the database relationship still yielded no rows, use the actual
-      // Storage objects as the final visible-library fallback.
-      if (!flattenedMaterials.length) {
-        (storageMaterialsByCourse.get(dbC.id) || []).forEach(material => {
-          flattenedMaterials.push({ ...material });
-        });
       }
 
       if (match) {
@@ -713,10 +741,6 @@ export async function syncDataFromSupabase() {
     // Hydration succeeded. Clear any previous failure so the course view
     // never keeps showing a stale "materials could not be loaded" banner.
     state.materialsSyncError = null;
-
-    // Always repaint after hydration. This is important when the user is
-    // already inside a course and the background request finishes later.
-    render();
     return true;
   } catch (err) {
     console.error('Failed to sync courses/materials from Supabase:', err);
@@ -728,6 +752,35 @@ export async function syncDataFromSupabase() {
       : 'Could not reach Supabase. Check your connection and try again.';
     return false;
   }
+}
+
+/** Public hydration entry point with self-healing. If the sync failed with an
+ * auth/config error (rotated Supabase key saved in localStorage, expired or
+ * malformed JWT, 401 from PostgREST), reset the client and stored cloud
+ * session state once and try again — instead of leaving the app stuck until
+ * the user manually clears site data. Also repaints after success so a
+ * course that is already open updates in place. */
+let syncHealAttempted = false;
+export async function syncDataFromSupabase() {
+  const ok = await runSupabaseCourseSync();
+  if (ok || !isAuthError(state.materialsSyncError)) {
+    if (ok) syncHealAttempted = false;
+    return ok;
+  }
+  if (syncHealAttempted) {
+    console.warn('Materials sync still failing after self-heal attempt; not retrying again this session.');
+    return false;
+  }
+  syncHealAttempted = true;
+  console.warn('Supabase auth error detected during materials sync — self-healing cloud configuration and retrying once.');
+  await resetSupabaseAuthState({ purgeStoredConfig: true });
+  const healed = await runSupabaseCourseSync();
+  console.warn(`[self-heal] retry after config reset: ${healed ? 'SUCCESS' : 'still failing'}`);
+  if (healed) {
+    state.materialsSyncError = null;
+    render();
+  }
+  return healed;
 }
 
 /* =========================================================================
@@ -1149,11 +1202,13 @@ function renderCourseDetailView(c) {
       <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
         ${state.materialsSyncError
           ? `<p style="color:var(--accent-3);font-weight:600;">Course materials could not be loaded.</p>
-             <p style="font-size:0.82rem;margin-top:4px;">${escapeHtml(state.materialsSyncError)}</p>`
+             <p style="font-size:0.82rem;margin-top:4px;">${escapeHtml(state.materialsSyncError)}</p>
+             ${isAuthError(state.materialsSyncError) ? '<p style="font-size:0.78rem;margin-top:4px;color:var(--muted);">This looks like a saved cloud-credential problem on this device. Use “Fix cloud connection” below to repair it automatically.</p>' : ''}`
           : `<p>No document files uploaded for ${escapeHtml(c.code)} yet.</p>`}
         <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
           <button class="btn-primary" id="trigger-upload-modal">Upload Course Material</button>
           <button class="btn-ghost" id="retry-materials-btn">Retry loading materials</button>
+          ${state.materialsSyncError && isAuthError(state.materialsSyncError) ? '<button class="btn-ghost" id="reset-cloud-config-btn">Fix cloud connection</button>' : ''}
         </div>
       </div>
     `;
@@ -2654,12 +2709,17 @@ function attachEventHandlers() {
   });
 
   const saveCloud = document.getElementById('save-cloud-settings-btn');
-  if (saveCloud) saveCloud.addEventListener('click', () => {
+  if (saveCloud) saveCloud.addEventListener('click', async () => {
     const url = document.getElementById('supabase-url-field')?.value.trim() || '';
     const key = document.getElementById('supabase-key-field')?.value.trim() || '';
     if (!url || !key) { showToast('Enter both Supabase fields first.'); return; }
     saveSupabaseConfig(url, key);
+    // A config change invalidates any cached session from the old project —
+    // clear it so the rebuilt client starts authenticated-free instead of
+    // immediately failing every query with a foreign-token 401.
+    await resetSupabaseAuthState({ purgeStoredConfig: false });
     showToast('Cloud configuration saved.');
+    await syncDataFromSupabase();
     render();
   });
 
@@ -2983,11 +3043,27 @@ function attachEventHandlers() {
     e.stopPropagation();
     showToast('Reloading course materials…');
     try {
-      await syncDataFromSupabase();
-      if (state.materialsSyncError) showToast('Materials still unavailable. See the course page for details.');
-      else showToast('Course materials loaded ✓');
+      // Re-arm the self-heal so an explicit user retry always gets one more
+      // config-reset + retry cycle, even if boot already used it.
+      syncHealAttempted = false;
+      const ok = await syncDataFromSupabase();
+      if (ok) showToast('Course materials loaded ✓');
+      else if (state.materialsSyncError) showToast('Materials still unavailable. See the course page for details.');
     } catch (err) {
       showToast(`Retry failed: ${err?.message || 'Unknown error'}`);
+    }
+  });
+
+  const resetCloudConfigBtn = document.getElementById('reset-cloud-config-btn');
+  if (resetCloudConfigBtn) resetCloudConfigBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    showToast('Resetting cloud connection…');
+    try {
+      await resetSupabaseAuthState({ purgeStoredConfig: true });
+      const ok = await syncDataFromSupabase();
+      showToast(ok ? 'Cloud connection repaired ✓' : 'Still failing — check the course page for the error.');
+    } catch (err) {
+      showToast(`Reset failed: ${err?.message || 'Unknown error'}`);
     }
   });
 

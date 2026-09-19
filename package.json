@@ -1,6 +1,6 @@
 {
   "name": "school-center",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Dynamic Full-Stack School Center Platform with Supabase and Gemini AI",
   "type": "module",
   "scripts": {
