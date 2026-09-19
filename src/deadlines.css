@@ -7,3 +7,6 @@
 .deadline-row b{font-size:.88rem}
 .deadline-state{padding:12px 0;color:var(--muted-dim);font-size:.84rem}
 .deadline-error{color:var(--accent-3);display:flex;gap:10px;align-items:center}
+.deadline-dot{background:var(--accent-3)}
+.month-cell.selected .deadline-dot{background:#0B0F2E !important}
+.outline-deadline-item{border-left:3px solid var(--accent-3)}

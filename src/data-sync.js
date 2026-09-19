@@ -149,8 +149,15 @@ async function fetchRows(table) {
 
 async function upsertActiveRows(table, idField, type, items) {
   if (!items.length) return;
+  // deadlines.course_id is a UUID FK. Outline seeds start with the stable
+  // local course key and gain courseDbId after cloud course hydration; do not
+  // send an invalid local key to PostgREST during the first sync pass.
+  const eligibleItems = type === 'deadline'
+    ? items.filter(item => item.courseDbId || /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(item.courseId || '')))
+    : items;
+  if (!eligibleItems.length) return;
   const { sb, user } = await requireCloudIdentity();
-  const rows = items.map(item => {
+  const rows = eligibleItems.map(item => {
     const base = {
       user_id: user.id,
       [idField]: item.id,
@@ -158,7 +165,7 @@ async function upsertActiveRows(table, idField, type, items) {
       deleted_at: null
     };
     if (type === 'deadline') {
-      return { ...base, course_id: item.courseId, title: item.title, type: item.type || 'other', due_at: item.dueAt, weight: item.weight, status: item.status || 'upcoming' };
+      return { ...base, course_id: item.courseDbId || item.courseId, title: item.title, type: item.type || 'other', due_at: item.dueAt, weight: item.weight, status: item.status || 'upcoming' };
     }
     return { ...base, data: item };
   });

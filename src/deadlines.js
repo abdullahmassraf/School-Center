@@ -1,5 +1,77 @@
 // Local deadline state used by the dashboard and the bidirectional sync engine.
 const STORAGE_KEY = 'schoolcenter_deadlines_v1';
+const OUTLINE_DEADLINE_PREFIX = 'outline_deadline_';
+
+const MONTHS = new Map([
+  ['jan', 0], ['january', 0], ['feb', 1], ['february', 1], ['mar', 2], ['march', 2],
+  ['apr', 3], ['april', 3], ['may', 4], ['jun', 5], ['june', 5], ['jul', 6],
+  ['july', 6], ['aug', 7], ['august', 7], ['sep', 8], ['sept', 8], ['september', 8],
+  ['oct', 9], ['october', 9], ['nov', 10], ['november', 10], ['dec', 11], ['december', 11]
+]);
+
+function cleanKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function parseOutlineDate(value) {
+  const match = String(value || '').trim().match(/^([A-Za-z]+)\s+(\d{1,2})(?:,\s*(\d{4}))?$/);
+  if (!match) return null;
+  const month = MONTHS.get(match[1].toLowerCase());
+  if (month == null) return null;
+  const year = Number(match[3] || new Date().getFullYear());
+  const date = new Date(year, month, Number(match[2]), 23, 59, 0, 0);
+  return date.getMonth() === month ? date.toISOString() : null;
+}
+
+function assessmentType(title) {
+  const value = String(title || '').toLowerCase();
+  if (value.includes('final') || value.includes('midterm') || value === 'exam' || value.includes('exam')) return 'exam';
+  if (value.includes('quiz')) return 'quiz';
+  if (value.includes('lab')) return 'lab';
+  if (value.includes('assignment') || value.includes('homework') || value.includes('project')) return 'assignment';
+  return 'other';
+}
+
+function extractWeight(title) {
+  const match = String(title || '').match(/\((\d+(?:\.\d+)?)\s*%\)/);
+  return match ? Number(match[1]) : null;
+}
+
+function assessmentTitle(rawTitle, topics) {
+  const title = String(rawTitle || '').trim();
+  const context = String(topics || '').split('—')[0].trim();
+  return context && /^review quiz$/i.test(title) ? `${title} — ${context}` : title;
+}
+
+/** Convert dated syllabus/classwork rows into stable, syncable deadlines. */
+export function extractCourseOutlineDeadlines(courses = []) {
+  const result = [];
+  courses.forEach(course => {
+    (course?.syllabus || []).forEach(row => {
+      const [week, dateLabel, topics, classwork] = Array.isArray(row) ? row : [];
+      const dueAt = parseOutlineDate(dateLabel);
+      if (!dueAt || !classwork) return;
+      String(classwork).split(/\s*[·|]\s*/).forEach(rawTitle => {
+        const title = assessmentTitle(rawTitle, topics);
+        if (!/(assignment|quiz|midterm|final|exam|lab|project)/i.test(title)) return;
+        const id = `${OUTLINE_DEADLINE_PREFIX}${cleanKey(course.code || course.id)}_${cleanKey(week || dateLabel)}_${cleanKey(title)}`;
+        result.push({
+          id,
+          title,
+          courseId: course.id,
+          courseDbId: course.dbId || null,
+          courseCode: course.code || course.id,
+          type: assessmentType(title),
+          dueAt,
+          weight: extractWeight(title),
+          source: 'course-outline',
+          generated: true
+        });
+      });
+    });
+  });
+  return result;
+}
 
 class DeadlinesManager {
   constructor() {
@@ -33,6 +105,36 @@ class DeadlinesManager {
   getById(id) { return this.deadlines.find(item => item.id === id) || null; }
   getByCourse(courseId) { return this.deadlines.filter(item => item.courseId === courseId); }
 
+  /** Seed/update outline-derived rows without creating duplicates or undoing user actions. */
+  syncCourseOutlineDeadlines(courses = []) {
+    const generated = extractCourseOutlineDeadlines(courses);
+    let changed = false;
+    generated.forEach(candidate => {
+      const existing = this.getById(candidate.id);
+      if (!existing) {
+        this.deadlines.unshift({
+          ...candidate,
+          status: 'upcoming',
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        changed = true;
+        return;
+      }
+      // Keep status, completion, and user-edited fields intact. Refresh only
+      // source facts when the outline changes and the user has not edited it.
+      if (!existing.userEdited) {
+        const next = { ...existing, ...candidate, status: existing.status || 'upcoming' };
+        if (JSON.stringify(next) !== JSON.stringify(existing)) {
+          Object.assign(existing, next, { updatedAt: existing.updatedAt || Date.now() });
+          changed = true;
+        }
+      }
+    });
+    if (changed) this.notify({ type: 'seed-outline' });
+    return generated;
+  }
+
   createDeadline(data = {}) {
     const now = Date.now();
     const deadline = {
@@ -44,7 +146,9 @@ class DeadlinesManager {
       weight: data.weight == null || data.weight === '' ? null : Number(data.weight),
       status: ['upcoming', 'done', 'missed'].includes(data.status) ? data.status : 'upcoming',
       createdAt: data.createdAt || now,
-      updatedAt: data.updatedAt || now
+      updatedAt: data.updatedAt || now,
+      source: data.source || 'user',
+      generated: Boolean(data.generated)
     };
     this.deadlines = [deadline, ...this.deadlines.filter(item => item.id !== deadline.id)];
     this.notify({ type: 'create', id: deadline.id, updatedAt: deadline.updatedAt });
@@ -54,7 +158,7 @@ class DeadlinesManager {
   updateDeadline(id, updates = {}) {
     const deadline = this.getById(id);
     if (!deadline) return null;
-    Object.assign(deadline, updates, { updatedAt: Date.now() });
+    Object.assign(deadline, updates, { updatedAt: Date.now(), userEdited: true });
     this.notify({ type: 'update', id, updatedAt: deadline.updatedAt });
     return deadline;
   }
@@ -76,7 +180,16 @@ class DeadlinesManager {
         this.deadlines.unshift({ ...record.data, id: record.id, updatedAt: record.updatedAt });
         changed = true;
       } else if ((record.updatedAt || 0) > (existing.updatedAt || 0)) {
-        Object.assign(existing, record.data, { id: record.id, updatedAt: record.updatedAt });
+        const data = { ...record.data };
+        // The cloud schema stores course_id as a UUID, while the UI uses the
+        // stable local course key. Keep the local key for filtering/rendering
+        // and retain the UUID separately for the next cloud write.
+        if (existing.generated || String(existing.id).startsWith(OUTLINE_DEADLINE_PREFIX)) {
+          data.courseDbId = data.courseId || existing.courseDbId || null;
+          data.courseId = existing.courseId;
+          data.courseCode = existing.courseCode || data.courseCode;
+        }
+        Object.assign(existing, data, { id: record.id, updatedAt: record.updatedAt });
         changed = true;
       }
     }

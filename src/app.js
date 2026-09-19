@@ -326,6 +326,9 @@ function persistCourseMaterials() {
 }
 
 restoreCachedCourseMaterials();
+// Seed dated assessments from the embedded course outlines immediately, then
+// refresh the same stable IDs after cloud course hydration.
+deadlinesManager.syncCourseOutlineDeadlines(COURSES);
 
 export function cleanCourseCode(code) {
   return (code || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -850,6 +853,9 @@ async function runSupabaseCourseSync() {
       return true;
     });
 
+    // Course rows may arrive from Supabase after the static outline seed.
+    // Reconcile again so newly hydrated course objects contribute deadlines.
+    deadlinesManager.syncCourseOutlineDeadlines(COURSES);
     // Hydration succeeded. Cache the last known-good material snapshot so an
     // email-link redirect, temporary RLS/session gap, or signed-out reload can
     // continue showing the user's latest course library immediately.
