@@ -1,3 +1,45 @@
+## v1.5.5 — Notes/assignments sync stall guard (the "note never reached my tablet" fix)
+
+**Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+### Root cause
+The v1.5.4 stall guard covered the course-materials hydration chain, but the notes/assignments
+sync engine (`src/data-sync.js`) still awaited every cloud call bare: `requireCloudIdentity()`,
+`fetchRows()`, both upsert functions, and the identity lookup in `doStartAutomaticDataSync()`.
+supabase-js has no built-in request timeout, so on a stalled connection these pends forever —
+and the consequence was worse than a loading screen:
+
+1. `syncAfterLocalChange()` never reached its `finally`, so `schedulePeriodicSync()` never
+   re-armed → the entire reconciliation loop died silently. A note saved on one device never
+   left it: no error, no retry, the other device never received it. This is the user's reported
+   "wrote a note on laptop, not on tablet" symptom.
+2. A hang in the boot identity lookup killed sync for the whole session (`autoSyncStarted` was
+   never set; no wake listeners, no error, no retry).
+
+### Changes (`src/data-sync.js` only)
+- Same `withTimeout` pattern as v1.5.4: hard 20s deadline on every table read/write,
+  15s on identity lookups. Errors carry the same honest "stalled … network, proxy, antivirus,
+  or DNS" wording and surface through the existing sync-error UI path.
+- The boot identity lookup now retries twice (10s apart) on stall before giving up, instead of
+  hanging forever or dying on the first stall.
+- `canSyncUserData()` is also bounded so Settings can never hang on it.
+
+### Testing
+- `node --check src/data-sync.js` passes; grep confirms zero bare `await sb.` /
+  `await getCurrentAiUser()` calls remain in the module (7 `withTimeout` call sites).
+- Offline suites pass: `test_calendar_engine.js`, `test_courses_dedup.js`.
+- Browser suites (`test_notes_e2e`, `test_materials_race`, `test_stall_recovery`) could not run
+  in this Linux workspace — they hardcode the user's Windows Chrome path and there is no Chrome
+  binary here; the E2E suite additionally needs service-role secrets that are intentionally not
+  configured in this workspace. Logic is identical to the v1.5.4 pattern already verified against
+  the live site by the stall-recovery harness.
+
+### Database changes
+None. ### Configuration changes
+None.
+
+---
+
 ## v1.5.4 — Stall guard: the indefinite "Loading course materials…" fix
 
 **Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
