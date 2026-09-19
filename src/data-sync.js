@@ -6,6 +6,7 @@ import { getSupabase } from './supabase.js';
 import { getCurrentAiUser } from './ai-history.js';
 import { notesManager } from './notes.js';
 import { assignmentsManager } from './assignments.js';
+import { deadlinesManager } from './deadlines.js';
 
 /*
  * v1.3.0 — why cross-device sync stopped working
@@ -67,12 +68,14 @@ function withTimeout(promise, label = 'Cloud request', ms = SYNC_HTTP_TIMEOUT_MS
 
 let notesChannel = null;
 let assignmentsChannel = null;
+let deadlinesChannel = null;
 let autoSyncStarted = false;
 let localSyncTimer = null;
 let periodicSyncTimer = null;
 let applyingRemoteChange = false;
 let unsubscribeNotes = null;
 let unsubscribeAssignments = null;
+let unsubscribeDeadlines = null;
 let wakeCleanup = null;
 let syncGeneration = 0;
 let localWatchersStarted = false;
@@ -147,13 +150,18 @@ async function fetchRows(table) {
 async function upsertActiveRows(table, idField, type, items) {
   if (!items.length) return;
   const { sb, user } = await requireCloudIdentity();
-  const rows = items.map(item => ({
-    user_id: user.id,
-    [idField]: item.id,
-    data: item,
-    updated_at: new Date(item.updatedAt || Date.now()).toISOString(),
-    deleted_at: null
-  }));
+  const rows = items.map(item => {
+    const base = {
+      user_id: user.id,
+      [idField]: item.id,
+      updated_at: new Date(item.updatedAt || Date.now()).toISOString(),
+      deleted_at: null
+    };
+    if (type === 'deadline') {
+      return { ...base, course_id: item.courseId, title: item.title, type: item.type || 'other', due_at: item.dueAt, weight: item.weight, status: item.status || 'upcoming' };
+    }
+    return { ...base, data: item };
+  });
 
   const { error } = await withTimeout(
     sb.from(table).upsert(rows, { onConflict: `user_id,${idField}` }),
@@ -170,13 +178,18 @@ async function upsertDeletionRows(table, idField, type) {
     .filter(([key]) => key.startsWith(`${type}:`))
     .map(([key, timestamp]) => {
       const deletedAt = new Date(Number(timestamp) || Date.now()).toISOString();
-      return {
+      const row = {
         user_id: user.id,
         [idField]: key.slice(type.length + 1),
-        data: {},
         updated_at: deletedAt,
         deleted_at: deletedAt
       };
+      if (type === 'deadline') {
+        row.course_id = 'unknown'; row.title = 'Deleted deadline'; row.type = 'other'; row.due_at = deletedAt; row.status = 'upcoming';
+      } else {
+        row.data = {};
+      }
+      return row;
     });
   if (!rows.length) return;
   const { error } = await withTimeout(
@@ -200,15 +213,16 @@ function localTime(item) {
 
 function removeLocal(type, id) {
   if (type === 'note') notesManager.deleteNote(id, { silent: true });
-  else assignmentsManager.deleteAssignment(id, { silent: true });
+  else if (type === 'assignment') assignmentsManager.deleteAssignment(id, { silent: true });
+  else deadlinesManager.deleteDeadline(id, { silent: true });
 }
 
 function mergeCloud(type, rows) {
-  const manager = type === 'note' ? notesManager : assignmentsManager;
+  const manager = type === 'note' ? notesManager : type === 'assignment' ? assignmentsManager : deadlinesManager;
   const liveRecords = [];
 
   for (const row of rows) {
-    const id = type === 'note' ? row.note_id : row.assignment_id;
+    const id = type === 'note' ? row.note_id : type === 'assignment' ? row.assignment_id : row.deadline_id;
     const cloudTime = new Date(row.deleted_at || row.updated_at || 0).getTime() || 0;
 
     if (row.deleted_at) {
@@ -222,7 +236,11 @@ function mergeCloud(type, rows) {
     }
 
     if (getTombstone(type, id) > cloudTime) continue;
-    liveRecords.push({ id, data: row.data, updatedAt: cloudTime });
+    liveRecords.push({
+      id,
+      data: row.data || { title: row.title, courseId: row.course_id, type: row.type, dueAt: row.due_at, weight: row.weight, status: row.status },
+      updatedAt: cloudTime
+    });
   }
 
   if (type === 'note') notesManager.mergeCloudRecords(liveRecords);
@@ -237,12 +255,12 @@ function mergeCloud(type, rows) {
 async function handleRealtime(type, payload) {
   if (!payload || applyingRemoteChange) return;
   const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-  const id = type === 'note' ? row?.note_id : row?.assignment_id;
+  const id = type === 'note' ? row?.note_id : type === 'assignment' ? row?.assignment_id : row?.deadline_id;
   if (!id) return;
 
   applyingRemoteChange = true;
   try {
-    const manager = type === 'note' ? notesManager : assignmentsManager;
+    const manager = type === 'note' ? notesManager : type === 'assignment' ? assignmentsManager : deadlinesManager;
     const remoteTime = new Date(row.deleted_at || row.updated_at || Date.now()).getTime();
 
     if (payload.eventType === 'DELETE' || row.deleted_at) {
@@ -260,7 +278,11 @@ async function handleRealtime(type, payload) {
 
     const existing = manager.getById(id);
     if (!existing || remoteTime > localTime(existing)) {
-      manager.mergeCloudRecords([{ id, data: row.data, updatedAt: remoteTime }]);
+      manager.mergeCloudRecords([{
+        id,
+        data: row.data || { title: row.title, courseId: row.course_id, type: row.type, dueAt: row.due_at, weight: row.weight, status: row.status },
+        updatedAt: remoteTime
+      }]);
       clearTombstone(type, id);
       notifyUiOfSync('upsert');
     }
@@ -272,22 +294,27 @@ async function handleRealtime(type, payload) {
 export async function pushLocalDataToCloud() {
   const notes = notesManager.getAll();
   const assignments = assignmentsManager.getAll();
+  const deadlines = deadlinesManager.getAll();
   await upsertActiveRows('user_notes', 'note_id', 'note', notes);
   await upsertActiveRows('user_assignments', 'assignment_id', 'assignment', assignments);
+  await upsertActiveRows('deadlines', 'deadline_id', 'deadline', deadlines);
   await upsertDeletionRows('user_notes', 'note_id', 'note');
   await upsertDeletionRows('user_assignments', 'assignment_id', 'assignment');
+  await upsertDeletionRows('deadlines', 'deadline_id', 'deadline');
 }
 
 export async function pullCloudDataToLocal() {
-  const [noteRows, assignmentRows] = await Promise.all([
+  const [noteRows, assignmentRows, deadlineRows] = await Promise.all([
     fetchRows('user_notes'),
-    fetchRows('user_assignments')
+    fetchRows('user_assignments'),
+    fetchRows('deadlines')
   ]);
 
   applyingRemoteChange = true;
   try {
     mergeCloud('note', noteRows);
     mergeCloud('assignment', assignmentRows);
+    mergeCloud('deadline', deadlineRows);
   } finally {
     applyingRemoteChange = false;
   }
@@ -309,6 +336,10 @@ function ensureLocalMutationWatchers() {
   });
   unsubscribeAssignments = assignmentsManager.subscribe((_assignments, event = {}) => {
     if (event.type === 'delete' && event.id) rememberDeletion('assignment', event.id, event.updatedAt || Date.now());
+    scheduleLocalSync();
+  });
+  unsubscribeDeadlines = deadlinesManager.subscribe((_deadlines, event = {}) => {
+    if (event.type === 'delete' && event.id) rememberDeletion('deadline', event.id, event.updatedAt || Date.now());
     scheduleLocalSync();
   });
 }
@@ -374,7 +405,7 @@ function teardownChannels() {
   // The previous implementation removed every topic containing
   // "school-center-", which also destroyed the independent theme-settings
   // and course-material realtime channels created by app.js/upload.js.
-  for (const ch of [notesChannel, assignmentsChannel]) {
+  for (const ch of [notesChannel, assignmentsChannel, deadlinesChannel]) {
     if (ch) {
       try { sb.removeChannel(ch); } catch (_) {}
     }
@@ -382,6 +413,7 @@ function teardownChannels() {
 
   notesChannel = null;
   assignmentsChannel = null;
+  deadlinesChannel = null;
 }
 function onChannelStatus(status, error) {
   if (status === 'SUBSCRIBED') {
@@ -413,6 +445,12 @@ function attachRealtime(userId) {
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'user_assignments', filter: `user_id=eq.${userId}`
       }, payload => handleRealtime('assignment', payload).catch(() => {}))
+      .subscribe(onChannelStatus);
+
+    deadlinesChannel = sb.channel(`school-center-deadlines-${userId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'deadlines', filter: `user_id=eq.${userId}`
+      }, payload => handleRealtime('deadline', payload).catch(() => {}))
       .subscribe(onChannelStatus);
   } catch (error) {
     realtimeStatus = 'degraded';
