@@ -28,7 +28,7 @@ import { routeCourseContent } from './course-data.js';
 import { FocusMode } from './focus.js';
 import { performUniversalSearch } from './search.js';
 import { prepareGeminiFileParts, GeminiLiveTranscriber, GEMINI_FILE_ACCEPT } from './ai-workspace.js';
-import { loadAiChatHistory, persistAiMessage, getCurrentAiUser, sendAiMagicLink, signInAiWithPassword, signOutAiCloud, getEphemeralLiveToken, subscribeToAiChatHistory, deleteAiMessage, updateAiMessageText, clearAiConversation } from './ai-history.js';
+import { loadAiChatHistory, persistAiMessage, getCurrentAiUser, signInWithAccountPassword, signOutAiCloud, getEphemeralLiveToken, subscribeToAiChatHistory, deleteAiMessage, updateAiMessageText, clearAiConversation } from './ai-history.js';
 import { pushLocalDataToCloud, pullCloudDataToLocal, fullTwoWaySync, startAutomaticDataSync, stopAutomaticDataSync, getDataSyncStatus } from './data-sync.js';
 
 /* =========================================================================
@@ -167,6 +167,34 @@ export function getClassesForDate(dateInput) {
     });
   });
   return events;
+}
+
+/** All outline-generated deadlines due on the given date (any status except
+ * done — done rows have already been removed by auto-expiry in practice). */
+export function getDeadlinesForDate(dateInput) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (Number.isNaN(d.getTime())) return [];
+  const key = d.toDateString();
+  return deadlinesManager.getAll()
+    .filter(item => item.status !== 'done' && new Date(item.dueAt).toDateString() === key)
+    .sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt));
+}
+
+/** Agenda rows for deadline items (used by the calendar and month views). */
+function renderDeadlineAgendaItems(deadlines) {
+  return (deadlines || []).map(deadline => {
+    const course = courseById(deadline.courseId);
+    return `
+      <div class="agenda-item" style="--item-color:var(--accent-3);">
+        <div class="agenda-time">Due Date</div>
+        <div class="agenda-main">
+          <div class="agenda-course">${escapeHtml(course ? course.code : (deadline.courseCode || 'General'))}</div>
+          <div class="agenda-title">📅 ${escapeHtml(deadline.title)}</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">${escapeHtml(deadline.type)}${deadline.weight ? ` · ${deadline.weight}%` : ''}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 const STATIC_COURSES = [
@@ -1190,6 +1218,7 @@ function renderCalendarView() {
     const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
     const hasClasses = getClassesForDate(d).length > 0;
     const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
+    const hasDeadline = deadlinesManager.getAll().some(item => item.status !== 'done' && new Date(item.dueAt).toDateString() === key);
 
     return `
       <div class="date-strip-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-daykey="${key}">
@@ -1209,6 +1238,11 @@ function renderCalendarView() {
   const dayAssignments = assignmentsManager.getAll().filter(a => {
     return new Date(a.dueDate).toDateString() === state.selectedCalendarDay;
   });
+  const dayDeadlines = getDeadlinesForDate(selectedDate);
+  const upcomingDeadlines = deadlinesManager.getAll()
+    .filter(item => item.status !== 'done')
+    .sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt))
+    .slice(0, 8);
 
   const calendarSelectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   return `
@@ -1251,12 +1285,35 @@ function renderCalendarView() {
           `;
         }).join('')}
 
-        ${!dayClasses.length && !dayAssignments.length ? `
+        ${renderDeadlineAgendaItems(dayDeadlines)}
+
+        ${!dayClasses.length && !dayAssignments.length && !dayDeadlines.length ? `
           <div style="color:var(--muted-dim);text-align:center;padding:24px 10px;font-size:0.88rem;">
             No campus lectures or assignment deadlines on this date.
           </div>
         ` : ''}
       </div>
+    </div>
+
+    <div class="panel" style="padding:16px 14px;">
+      <h2 style="margin:0 0 4px;font-size:1rem;">Upcoming Deadlines</h2>
+      <div style="font-size:0.75rem;color:var(--muted);margin:0 0 12px;">Assessments and due dates extracted from course outlines &middot; past due dates are removed automatically</div>
+      ${upcomingDeadlines.length ? upcomingDeadlines.map(item => {
+        const dCourse = courseById(item.courseId);
+        return `
+          <div class="surface-content" style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+            <div>
+              <div style="font-weight:600;font-size:0.9rem;">${escapeHtml(item.title)}</div>
+              <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">${dCourse ? dCourse.code : escapeHtml(item.courseCode || 'General')} &middot; ${escapeHtml(item.type)}${item.weight ? ` &middot; ${item.weight}%` : ''} &middot; due ${new Date(item.dueAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+            </div>
+            <button class="btn-ghost" data-deadline-done="${escapeHtml(item.id)}" type="button" style="min-height:0;">Done</button>
+          </div>
+        `;
+      }).join('') : `
+        <div style="text-align:center;padding:20px 10px;color:var(--muted-dim);border:1px dashed var(--hairline);border-radius:var(--radius-md);font-size:0.86rem;">
+          No upcoming deadlines &mdash; dated assessments from course outlines will appear here.
+        </div>
+      `}
     </div>
   `;
 }
@@ -1302,6 +1359,7 @@ function renderCourseDetailView(c) {
     { id: 'overview', label: 'Overview' },
     { id: 'materials', label: 'Materials' },
     { id: 'assignments', label: 'Assignments' },
+    { id: 'deadlines', label: 'Deadlines' },
     { id: 'notes', label: 'Notes' }
   ];
 
@@ -1472,6 +1530,29 @@ function renderCourseDetailView(c) {
       ` : `
         <div style="text-align:center;padding:32px 14px;color:var(--muted-dim);border:1px dashed var(--hairline);border-radius:var(--radius-md);">
           No assignments recorded yet for this course.
+        </div>
+      `}
+    `;
+  } else if (state.courseTab === 'deadlines') {
+    const courseDeadlines = deadlinesManager.getByCourse(c.id)
+      .filter(d => d.status !== 'done')
+      .sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt));
+    bodyHtml = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:0.9rem;font-weight:600;">Assessments &amp; Due Dates</span>
+        <span style="font-size:0.72rem;color:var(--muted);">From the course outline &middot; past dates auto-removed</span>
+      </div>
+      ${courseDeadlines.length ? courseDeadlines.map(d => `
+        <div class="surface-content" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+          <div>
+            <div style="font-weight:600;">${escapeHtml(d.title)}</div>
+            <div style="font-size:0.78rem;color:var(--muted);margin-top:2px;">${escapeHtml(d.type)}${d.weight ? ` &middot; ${d.weight}% of final grade` : ''} &middot; due ${new Date(d.dueAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+          </div>
+          <button class="btn-ghost" data-deadline-done="${escapeHtml(d.id)}" type="button" style="min-height:0;">Done</button>
+        </div>
+      `).join('') : `
+        <div style="text-align:center;padding:28px 14px;color:var(--muted-dim);border:1px dashed var(--hairline);border-radius:var(--radius-md);">
+          No dated assessments found in this course outline yet.
         </div>
       `}
     `;
@@ -1749,13 +1830,12 @@ function renderSettingsView() {
 
       <div class="panel settings-card">
         <h3 class="headfont">Account &amp; cross-device sync</h3>
-        <div class="section-sub">Sign in once with the same email on every device. This is what makes Notes, Assignments, and your AI conversation history follow you between phone, laptop, or any other device — without it, everything stays local to each device.</div>
+        <div class="section-sub">This app uses a single shared account. Sign in with the account password below — this device then syncs notes, assignments, deadlines, and AI history with the cloud and every other signed-in device. Everything stays saved on this device even while signed out.</div>
         ${authEmail ? `
           <div class="settings-account-row"><div><b>${escapeHtml(authEmail)}</b><div class="settings-account-state"><span class="ai-connection-dot ready"></span> Signed in — Notes, Assignments, and AI history sync automatically</div></div><button class="btn-ghost" id="ai-signout-btn" type="button">Sign out</button></div>
         ` : `
-          <div class="settings-auth-row"><input type="email" id="ai-signin-email" class="search-input" placeholder="you@example.com" autocomplete="email"><input type="password" id="ai-signin-password" class="search-input" placeholder="Password (min 6 characters)" autocomplete="current-password"><button class="btn-primary" id="ai-signin-password-btn" type="button">Sign in</button></div>
-          <div class="settings-account-help">Use the <b>same email and password on every device</b>. First time here? Signing in with a new email creates your account instantly — no email confirmation required. After that, your notes, assignments, and theme follow you to every device signed in with these credentials.</div>
-          <div style="margin-top:10px;"><button class="btn-ghost" id="ai-signin-btn" type="button">Prefer email only? Email me a sign-in link instead</button></div>
+          <div class="settings-auth-row"><input type="password" id="ai-signin-password" class="search-input" placeholder="Account password" autocomplete="current-password"><button class="btn-primary" id="ai-signin-password-btn" type="button">Sign in</button></div>
+          <div class="settings-account-help">Enter the account password to enable cloud sync on this device. No email or username is needed — the account already exists.</div>
         `}
       </div>
 
@@ -2111,6 +2191,7 @@ function renderMonthCalendarModal() {
     const classes = getClassesForDate(c.date);
     const hasClasses = classes.length > 0;
     const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
+    const hasDeadline = deadlinesManager.getAll().some(item => item.status !== 'done' && new Date(item.dueAt).toDateString() === key);
 
     return `
       <div class="month-cell ${c.isAdjacent ? 'adjacent' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-cal-day="${key}">
@@ -2118,6 +2199,7 @@ function renderMonthCalendarModal() {
         <div class="month-cell-dots">
           ${hasClasses ? '<span class="cell-dot class-dot"></span>' : ''}
           ${hasAsg ? '<span class="cell-dot asg-dot"></span>' : ''}
+          ${hasDeadline ? '<span class="cell-dot deadline-dot"></span>' : ''}
         </div>
       </div>
     `;
@@ -2128,6 +2210,7 @@ function renderMonthCalendarModal() {
   const selectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const selectedClasses = getClassesForDate(selectedDate);
   const selectedAssignments = assignmentsManager.getAll().filter(a => new Date(a.dueDate).toDateString() === state.selectedCalendarDay);
+  const selectedDeadlines = getDeadlinesForDate(selectedDate);
 
   return `
     <div class="modal-overlay open" id="month-cal-modal-overlay">
@@ -2174,7 +2257,9 @@ function renderMonthCalendarModal() {
               `;
             }).join('')}
 
-            ${!selectedClasses.length && !selectedAssignments.length ? `
+            ${renderDeadlineAgendaItems(selectedDeadlines)}
+
+            ${!selectedClasses.length && !selectedAssignments.length && !selectedDeadlines.length ? `
               <div style="color:var(--muted-dim);text-align:center;padding:12px;font-size:0.84rem;">
                 No scheduled sessions or deadlines on this date.
               </div>
@@ -2983,7 +3068,7 @@ function attachEventHandlers() {
         const assignmentId = searchHit.getAttribute('data-assignment');
         if (courseId) {
           state.courseId = courseId;
-          state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : tab === 'materials' ? 'materials' : 'overview';
+          state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : tab === 'materials' ? 'materials' : tab === 'deadlines' ? 'deadlines' : 'overview';
           state.view = 'courses';
         } else if (assignmentId) {
           state.assignmentDetailId = assignmentId;
@@ -3197,6 +3282,11 @@ function attachEventHandlers() {
   const addAsgBtn = document.getElementById('add-assignment-btn');
   if (addAsgBtn) addAsgBtn.addEventListener('click', () => { state.assignmentModalOpen = true; state.assignmentModalPreset = { courseId: state.courseId }; render(); });
   document.querySelectorAll('[data-open-asg-id]').forEach(el => el.addEventListener('click', e => { if (e.target.matches('input') || e.target.closest('input')) return; state.assignmentDetailId = el.getAttribute('data-open-asg-id'); render(); }));
+  document.querySelectorAll('[data-deadline-done]').forEach(el => el.addEventListener('click', () => {
+    deadlinesManager.updateDeadline(el.getAttribute('data-deadline-done'), { status: 'done' });
+    showToast('Deadline completed ✓');
+    render();
+  }));
   document.querySelectorAll('[data-asg-check]').forEach(el => el.addEventListener('change', () => {
     const assignment = assignmentsManager.getById(el.getAttribute('data-asg-check')); const check = assignment?.requirementsChecklist?.find(c => c.id === el.getAttribute('data-check-id')); if (assignment && check) { check.done = !check.done; assignmentsManager.updateAssignment(assignment.id, assignment); }
   }));
@@ -3351,27 +3441,19 @@ function attachEventHandlers() {
 
   const aiPasswordSignin = document.getElementById('ai-signin-password-btn');
   if (aiPasswordSignin) aiPasswordSignin.addEventListener('click', async () => {
-    const email = document.getElementById('ai-signin-email')?.value.trim();
     const password = document.getElementById('ai-signin-password')?.value || '';
-    if (!email) { showToast('Enter your email first.'); return; }
-    if (!password) { showToast('Enter a password (min 6 characters).'); return; }
+    if (!password) { showToast('Enter the account password.'); return; }
     aiPasswordSignin.disabled = true;
     aiPasswordSignin.textContent = 'Signing in…';
     try {
-      await signInAiWithPassword(email, password);
-      showToast('Signed in ✓');
+      await signInWithAccountPassword(password);
+      showToast('Signed in ✓ — cloud sync active');
     } catch (e) {
       showToast(`Sign-in failed: ${e.message}`);
     } finally {
       aiPasswordSignin.disabled = false;
       aiPasswordSignin.textContent = 'Sign in';
     }
-  });
-  const aiSignin = document.getElementById('ai-signin-btn');
-  if (aiSignin) aiSignin.addEventListener('click', async () => {
-    const email = document.getElementById('ai-signin-email')?.value.trim();
-    if (!email) { showToast('Enter your email first.'); return; }
-    try { await sendAiMagicLink(email); showToast('Check your email for the sign-in link.'); } catch (e) { showToast(`Sign-in failed: ${e.message}`); }
   });
   const aiSignout = document.getElementById('ai-signout-btn');
   if (aiSignout) aiSignout.addEventListener('click', async () => { try { await signOutAiCloud(); await stopThemeCloudSync(); stopAutomaticDataSync(); if (aiHistoryUnsubscribe) { aiHistoryUnsubscribe(); aiHistoryUnsubscribe = null; } state.aiCloudUser=null; state.aiCloudConnected=false; render(); showToast('Signed out.'); } catch (e) { showToast(e.message); } });

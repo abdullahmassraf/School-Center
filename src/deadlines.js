@@ -9,6 +9,12 @@ const MONTHS = new Map([
   ['oct', 9], ['october', 9], ['nov', 10], ['november', 10], ['dec', 11], ['december', 11]
 ]);
 
+// ONLY these assessment kinds become deadlines. The outline is the single
+// source of truth: a row without an explicit date is skipped entirely, so the
+// app can never invent ("hallucinate") a due date the syllabus does not state.
+const ASSESSMENT_PATTERN = /(assignment|homework|quiz|midterm|final\s*exam|exam)/i;
+const NON_ASSESSMENT_PATTERN = /(discussion|review session|reading week|diagnostic|homework\s*\d+\s*$)/i;
+
 function cleanKey(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
@@ -25,22 +31,14 @@ function parseOutlineDate(value) {
 
 function assessmentType(title) {
   const value = String(title || '').toLowerCase();
-  if (value.includes('final') || value.includes('midterm') || value === 'exam' || value.includes('exam')) return 'exam';
+  if (value.includes('final') || value.includes('midterm') || value.includes('exam')) return 'exam';
   if (value.includes('quiz')) return 'quiz';
-  if (value.includes('lab')) return 'lab';
-  if (value.includes('assignment') || value.includes('homework') || value.includes('project')) return 'assignment';
-  return 'other';
+  return 'assignment';
 }
 
 function extractWeight(title) {
   const match = String(title || '').match(/\((\d+(?:\.\d+)?)\s*%\)/);
   return match ? Number(match[1]) : null;
-}
-
-function assessmentTitle(rawTitle, topics) {
-  const title = String(rawTitle || '').trim();
-  const context = String(topics || '').split('—')[0].trim();
-  return context && /^review quiz$/i.test(title) ? `${title} — ${context}` : title;
 }
 
 /** Convert dated syllabus/classwork rows into stable, syncable deadlines. */
@@ -52,8 +50,8 @@ export function extractCourseOutlineDeadlines(courses = []) {
       const dueAt = parseOutlineDate(dateLabel);
       if (!dueAt || !classwork) return;
       String(classwork).split(/\s*[·|]\s*/).forEach(rawTitle => {
-        const title = assessmentTitle(rawTitle, topics);
-        if (!/(assignment|quiz|midterm|final|exam|lab|project)/i.test(title)) return;
+        const title = String(rawTitle || '').trim();
+        if (!title || !ASSESSMENT_PATTERN.test(title) || NON_ASSESSMENT_PATTERN.test(title)) return;
         const id = `${OUTLINE_DEADLINE_PREFIX}${cleanKey(course.code || course.id)}_${cleanKey(week || dateLabel)}_${cleanKey(title)}`;
         result.push({
           id,
@@ -78,6 +76,10 @@ class DeadlinesManager {
     this.deadlines = [];
     this.listeners = new Set();
     this.load();
+    this.pruneExpiredDeadlines();
+    // Assessments keep their syllabus dates; anything past due disappears
+    // permanently instead of piling up. Re-checked every 10 minutes.
+    setInterval(() => this.pruneExpiredDeadlines(), 600000);
   }
 
   load() {
@@ -105,9 +107,27 @@ class DeadlinesManager {
   getById(id) { return this.deadlines.find(item => item.id === id) || null; }
   getByCourse(courseId) { return this.deadlines.filter(item => item.courseId === courseId); }
 
-  /** Seed/update outline-derived rows without creating duplicates or undoing user actions. */
+  /** Permanently remove every deadline whose due date/time has passed. */
+  pruneExpiredDeadlines() {
+    const now = Date.now();
+    const expired = this.deadlines.filter(item => {
+      const due = new Date(item.dueAt).getTime();
+      return Number.isFinite(due) && due < now;
+    });
+    if (!expired.length) return [];
+    const expiredIds = new Set(expired.map(item => item.id));
+    this.deadlines = this.deadlines.filter(item => !expiredIds.has(item.id));
+    this.notify({ type: 'prune-expired', ids: [...expiredIds], updatedAt: now });
+    return expired.map(item => item.id);
+  }
+
+  /** Seed/update outline-derived rows without creating duplicates or undoing user actions.
+   * Past-due outline rows are never seeded: once a deadline passes, the
+   * pruner removes it permanently and it must not reappear on reload. */
   syncCourseOutlineDeadlines(courses = []) {
-    const generated = extractCourseOutlineDeadlines(courses);
+    const now = Date.now();
+    const generated = extractCourseOutlineDeadlines(courses)
+      .filter(candidate => new Date(candidate.dueAt).getTime() >= now);
     let changed = false;
     generated.forEach(candidate => {
       const existing = this.getById(candidate.id);
@@ -121,8 +141,6 @@ class DeadlinesManager {
         changed = true;
         return;
       }
-      // Keep status, completion, and user-edited fields intact. Refresh only
-      // source facts when the outline changes and the user has not edited it.
       if (!existing.userEdited) {
         const next = { ...existing, ...candidate, status: existing.status || 'upcoming' };
         if (JSON.stringify(next) !== JSON.stringify(existing)) {
@@ -175,6 +193,9 @@ class DeadlinesManager {
   mergeCloudRecords(records = []) {
     let changed = false;
     for (const record of records) {
+      // Never resurrect a deadline the local pruner already expired.
+      const due = new Date(record.data?.dueAt || 0).getTime();
+      if (Number.isFinite(due) && due < Date.now()) continue;
       const existing = this.getById(record.id);
       if (!existing) {
         this.deadlines.unshift({ ...record.data, id: record.id, updatedAt: record.updatedAt });

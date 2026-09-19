@@ -4,6 +4,11 @@
 
 import { getSupabase, isSupabaseConfigured } from './supabase.js';
 
+/** The single shared app account. The sign-in UI asks only for a password:
+ * this email is fixed client-side and the account is provisioned with the
+ * matching password, so users never type an email or username. */
+const OWNER_ACCOUNT_EMAIL = 'abdullah2001massraf@gmail.com';
+
 const LOCAL_HISTORY_KEY = 'schoolcenter_ai_chat_local_v2';
 const MEDIA_BUCKET = 'ai-chat-media';
 const CONVERSATION_KIND = 'school-center-default';
@@ -163,6 +168,50 @@ export async function signInAiWithPassword(email, password) {
     throw new Error('Account created, but this project requires email confirmation before first sign-in. Open the confirmation email on this device once. To skip this requirement on every future device, turn OFF "Confirm email" in Supabase Dashboard → Authentication → Providers → Email.');
   }
   return signUpData.session;
+}
+
+/**
+ * Password-only sign-in for the app's single shared account. The account
+ * (pre-provisioned server-side with a fixed email) is already set up, so the
+ * user only ever types the account password — no email or username. Signing
+ * in attaches this device to the cloud session that powers cross-device
+ * sync. Wrong passwords fail with Supabase's standard invalid-credentials
+ * error.
+ */
+export async function signInWithAccountPassword(password) {
+  const sb = getSupabase();
+  if (!sb) throw new Error('Connect Supabase in Settings first.');
+  const cleanPassword = String(password || '');
+  if (!cleanPassword) throw new Error('Enter the account password.');
+
+  const { data, error } = await sb.auth.signInWithPassword({
+    email: OWNER_ACCOUNT_EMAIL,
+    password: cleanPassword
+  });
+  if (error) {
+    const raw = String(error.message || '');
+    if (/invalid login credentials/i.test(raw) || error.code === 'user_not_found') {
+      // Supabase returns the same error for a wrong password AND for a
+      // passwordless (magic-link-created) account. Disambiguate locally with
+      // a harmless signup probe: an existing account returns the obfuscated
+      // user record (identities: []) instead of an error, and never receives
+      // a second confirmation email (the probe is rejected before sending).
+      const probe = await sb.auth.signUp({
+        email: OWNER_ACCOUNT_EMAIL,
+        password: cleanPassword
+      });
+      const probeIsExistingAccount = !!probe?.data?.user?.id && (probe?.data?.user?.identities?.length === 0);
+      if (probeIsExistingAccount) {
+        throw new Error('This account has no password set yet (it was created with a sign-in link). One-time fix: in Supabase Dashboard → Authentication → Users, reset the password for this account, then sign in here.');
+      }
+      throw new Error('Incorrect account password.');
+    }
+    if (/email not confirmed/i.test(raw)) {
+      throw new Error('The account email is not confirmed yet. Try again shortly.');
+    }
+    throw error;
+  }
+  return data?.session || null;
 }
 
 export async function signOutAiCloud() {

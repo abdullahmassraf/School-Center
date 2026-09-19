@@ -364,6 +364,10 @@ function ensureLocalMutationWatchers() {
   });
   unsubscribeDeadlines = deadlinesManager.subscribe((_deadlines, event = {}) => {
     if (event.type === 'delete' && event.id) rememberDeletion('deadline', event.id, event.updatedAt || Date.now());
+    // Auto-expiry permanently removes past-due rows everywhere, not just locally.
+    if (event.type === 'prune-expired' && Array.isArray(event.ids)) {
+      event.ids.forEach(id => rememberDeletion('deadline', id, event.updatedAt || Date.now()));
+    }
     scheduleLocalSync();
   });
 }
