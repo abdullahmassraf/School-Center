@@ -291,23 +291,40 @@ async function handleRealtime(type, payload) {
   }
 }
 
+function isMissingDeadlinesTable(error) {
+  const text = `${error?.code || ''} ${error?.message || error || ''}`;
+  return /42P01|PGRST205|deadlines.*(not found|does not exist)|relation .*deadlines/i.test(text);
+}
+
 export async function pushLocalDataToCloud() {
   const notes = notesManager.getAll();
   const assignments = assignmentsManager.getAll();
   const deadlines = deadlinesManager.getAll();
   await upsertActiveRows('user_notes', 'note_id', 'note', notes);
   await upsertActiveRows('user_assignments', 'assignment_id', 'assignment', assignments);
-  await upsertActiveRows('deadlines', 'deadline_id', 'deadline', deadlines);
+  try {
+    await upsertActiveRows('deadlines', 'deadline_id', 'deadline', deadlines);
+  } catch (error) {
+    if (!isMissingDeadlinesTable(error)) throw error;
+    notifyUiOfSync('realtime', 'Deadlines migration is not installed yet; notes and assignments continue syncing.');
+  }
   await upsertDeletionRows('user_notes', 'note_id', 'note');
   await upsertDeletionRows('user_assignments', 'assignment_id', 'assignment');
-  await upsertDeletionRows('deadlines', 'deadline_id', 'deadline');
+  try {
+    await upsertDeletionRows('deadlines', 'deadline_id', 'deadline');
+  } catch (error) {
+    if (!isMissingDeadlinesTable(error)) throw error;
+  }
 }
 
 export async function pullCloudDataToLocal() {
   const [noteRows, assignmentRows, deadlineRows] = await Promise.all([
     fetchRows('user_notes'),
     fetchRows('user_assignments'),
-    fetchRows('deadlines')
+    fetchRows('deadlines').catch(error => {
+      if (!isMissingDeadlinesTable(error)) throw error;
+      return [];
+    })
   ]);
 
   applyingRemoteChange = true;
