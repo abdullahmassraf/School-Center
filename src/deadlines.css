@@ -1,0 +1,9 @@
+.deadlines-ui-panel{padding:16px 18px;margin:0 0 18px;border-color:rgba(var(--accent-rgb),.24)}
+.deadline-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.deadline-panel-head h2{margin:0;font-size:1rem}
+.deadline-panel-head small,.deadline-row small{display:block;color:var(--muted);font-size:.75rem;margin-top:3px}
+.deadline-list{display:grid;gap:7px}
+.deadline-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-left:3px solid var(--accent);border-radius:0 10px 10px 0;background:rgba(255,255,255,.045)}
+.deadline-row b{font-size:.88rem}
+.deadline-state{padding:12px 0;color:var(--muted-dim);font-size:.84rem}
+.deadline-error{color:var(--accent-3);display:flex;gap:10px;align-items:center}

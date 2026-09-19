@@ -23,6 +23,7 @@ import { detectCourseFromContent } from './course-detector.js';
 import { assignmentsManager } from './assignments.js';
 import { renderCampusMapWidget, renderShowLocationButton, attachCampusMapHandlers, highlightBuilding } from './campus-map.js';
 import { notesManager } from './notes.js';
+import { deadlinesManager } from './deadlines.js';
 import { routeCourseContent } from './course-data.js';
 import { FocusMode } from './focus.js';
 import { performUniversalSearch } from './search.js';
@@ -535,7 +536,9 @@ let state = {
   dataSyncLastOkAt: null,
   syncBannerDismissed: false,
   materialsSyncError: null, // set by syncDataFromSupabase() when course/material fetch fails
-  materialsHydrated: false // true once at least one successful course sync has completed
+  materialsHydrated: false, // true once at least one successful course sync has completed
+  deadlinesHydrated: false,
+  deadlinesSyncError: null
 };
 
 let aiLiveTranscriber = null;
