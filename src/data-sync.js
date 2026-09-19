@@ -40,6 +40,31 @@ const PERIODIC_SYNC_MS = 30000;
 const FALLBACK_POLL_MS = 15000;   // used when realtime is not healthy
 const MAX_BACKOFF_MS = 300000;    // 5 min ceiling after repeated failures
 
+/* v1.5.5 STALL GUARD (same defect class as the v1.5.4 materials fix):
+ * supabase-js requests have NO built-in timeout. On a stalled connection an
+ * awaited query pends FOREVER — which here had a worse consequence than a
+ * loading screen: syncAfterLocalChange() never reached its finally, so
+ * schedulePeriodicSync() never re-armed and the reconciliation loop DIED
+ * silently. A note saved on one device then never left it: no error, no
+ * retry, and the other device never received it. Every awaited cloud call
+ * in this module is therefore raced against a hard deadline so the loop
+ * always settles, reports, and retries with backoff. */
+const SYNC_HTTP_TIMEOUT_MS = 20000;
+const IDENTITY_TIMEOUT_MS = 15000;
+class SyncHttpTimeoutError extends Error {
+  constructor(label, ms) {
+    super(`${label} stalled with no response for ${Math.round(ms / 1000)}s and was aborted. Usually a network, proxy, antivirus, or DNS problem on this device.`);
+    this.name = 'SyncHttpTimeoutError';
+  }
+}
+function withTimeout(promise, label = 'Cloud request', ms = SYNC_HTTP_TIMEOUT_MS) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new SyncHttpTimeoutError(label, ms)), ms);
+  });
+  return Promise.race([Promise.resolve(promise), deadline]).finally(() => clearTimeout(timer));
+}
+
 let notesChannel = null;
 let assignmentsChannel = null;
 let autoSyncStarted = false;
@@ -102,14 +127,19 @@ function getTombstone(type, id) {
 
 async function requireCloudIdentity() {
   const sb = getSupabase();
-  const user = await getCurrentAiUser();
+  // getSession()/token refresh can hang on a stalled network; bound it so
+  // every read and write below always settles (v1.5.5).
+  const user = await withTimeout(getCurrentAiUser(), 'Identity lookup', IDENTITY_TIMEOUT_MS);
   if (!sb || !user) throw new Error('Not signed in. Open Settings → Account & cross-device sync and sign in with the same email on every device.');
   return { sb, user };
 }
 
 async function fetchRows(table) {
   const { sb, user } = await requireCloudIdentity();
-  const { data, error } = await sb.from(table).select('*').eq('user_id', user.id);
+  const { data, error } = await withTimeout(
+    sb.from(table).select('*').eq('user_id', user.id),
+    `${table} read`
+  );
   if (error) throw error;
   return data || [];
 }
@@ -125,7 +155,10 @@ async function upsertActiveRows(table, idField, type, items) {
     deleted_at: null
   }));
 
-  const { error } = await sb.from(table).upsert(rows, { onConflict: `user_id,${idField}` });
+  const { error } = await withTimeout(
+    sb.from(table).upsert(rows, { onConflict: `user_id,${idField}` }),
+    `${table} write`
+  );
   if (error) throw error;
   items.forEach(item => clearTombstone(type, item.id));
 }
@@ -146,7 +179,10 @@ async function upsertDeletionRows(table, idField, type) {
       };
     });
   if (!rows.length) return;
-  const { error } = await sb.from(table).upsert(rows, { onConflict: `user_id,${idField}` });
+  const { error } = await withTimeout(
+    sb.from(table).upsert(rows, { onConflict: `user_id,${idField}` }),
+    `${table} deletion write`
+  );
   if (error) throw error;
 }
 
@@ -424,7 +460,18 @@ async function doStartAutomaticDataSync() {
   stopAutomaticDataSync();
   const generation = ++syncGeneration;
   const sb = getSupabase();
-  const user = await getCurrentAiUser();
+  // v1.5.5: a hang here previously killed sync for the ENTIRE session —
+  // autoSyncStarted was never set, no wake listeners were installed, no error
+  // was shown. Bound the lookup and retry brief stalls instead of giving up.
+  let user = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      user = await withTimeout(getCurrentAiUser(), 'Identity lookup', IDENTITY_TIMEOUT_MS);
+      break; // settled: null simply means signed out — no retry needed
+    } catch (_) {
+      if (attempt < 2) await new Promise(r => setTimeout(r, 10000));
+    }
+  }
   if (!sb || !user) return false;
   if (generation !== syncGeneration) return false;
 
@@ -466,6 +513,10 @@ async function doStartAutomaticDataSync() {
 export async function canSyncUserData() {
   const sb = getSupabase();
   if (!sb) return false;
-  const user = await getCurrentAiUser();
-  return Boolean(user);
+  try {
+    const user = await withTimeout(getCurrentAiUser(), 'Identity lookup', IDENTITY_TIMEOUT_MS);
+    return Boolean(user);
+  } catch (_) {
+    return false;
+  }
 }
