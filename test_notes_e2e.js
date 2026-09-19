@@ -9,7 +9,7 @@
 // (local test administration only; the key is never printed or transmitted).
 // ============================================================================
 import 'dotenv/config';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +26,13 @@ const TEST_PASS = 'SC-e2e-Sync!92741';
 const NOTE_TITLE = `E2E SYNC NOTE ${Date.now()}`;
 const EDIT_SUFFIX = ' [edited on device B]';
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME_PATH || ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find(candidate => {
+  try { execFileSync('which', [candidate], { stdio: 'ignore' }); return true; } catch (_) { return false; }
+});
+if (!CHROME) {
+  console.error('FATAL: no Chrome/Chromium executable found; set CHROME_PATH or install chromium/google-chrome');
+  process.exit(2);
+}
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
 const server = http.createServer((req, res) => {
@@ -61,7 +67,7 @@ console.log(`TEST USER: ${TEST_EMAIL} (id ${user.id})`);
 function launchDevice(name, cdpPort) {
   const userData = path.join(process.env.TEMP || '/tmp', `sc-e2e-${name}-${Date.now()}`);
   const proc = spawn(CHROME, [
-    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${userData}`, '--window-size=1280,900', 'about:blank'
   ], { stdio: 'ignore' });
   return { name, proc, userData, cdpPort };
