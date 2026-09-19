@@ -570,7 +570,7 @@ let state = {
   flashcardsModalOpen: false,
   flashcardIndex: 0,
   // Phase 2 New Modals
-  monthCalendarOpen: false,
+  calendarViewMode: 'week', // 'week' | 'month'
   monthCalendarYear: new Date().getFullYear(),
   monthCalendarMonth: new Date().getMonth(),
   spotlightSearchOpen: false,
@@ -1021,7 +1021,6 @@ function render() {
       ${renderAssignmentModal()}
       ${renderNoteModal()}
       ${renderAssignmentDetailModal()}
-      ${renderMonthCalendarModal()}
       ${renderSyncDrawer()}
     `;
 
@@ -1202,6 +1201,7 @@ function renderCalendarView() {
   const today = new Date();
   const selectedDate = new Date(state.selectedCalendarDay);
   const currentMonthYear = selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const monthTitle = `${['January','February','March','April','May','June','July','August','September','October','November','December'][state.monthCalendarMonth]} ${state.monthCalendarYear}`;
   
   // Generate 14-day horizontal strip (7 past, 7 future)
   const days = [];
@@ -1245,14 +1245,58 @@ function renderCalendarView() {
     .slice(0, 8);
 
   const calendarSelectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  // Inline month grid — same cell design as the weekly strip, just more days.
+  let monthCellsHtml = '';
+  if (state.calendarViewMode === 'month') {
+    const mYear = state.monthCalendarYear;
+    const mMonth = state.monthCalendarMonth;
+    const firstDow = new Date(mYear, mMonth, 1).getDay();
+    const daysInMonth = new Date(mYear, mMonth + 1, 0).getDate();
+    const daysInPrev = new Date(mYear, mMonth, 0).getDate();
+    const cells = [];
+    for (let i = firstDow - 1; i >= 0; i--) cells.push({ n: daysInPrev - i, d: new Date(mYear, mMonth - 1, daysInPrev - i, 12), adj: true });
+    for (let d = 1; d <= daysInMonth; d++) cells.push({ n: d, d: new Date(mYear, mMonth, d, 12), adj: false });
+    const trail = 7 - (cells.length % 7);
+    if (trail < 7) for (let d = 1; d <= trail; d++) cells.push({ n: d, d: new Date(mYear, mMonth + 1, d, 12), adj: true });
+    const todayKey = new Date().toDateString();
+    monthCellsHtml = cells.map(c => {
+      const key = c.d.toDateString();
+      const hasDl = deadlinesManager.getAll().some(item => item.status !== 'done' && new Date(item.dueAt).toDateString() === key);
+      const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
+      const hasCls = getClassesForDate(c.d).length > 0;
+      return `
+        <div class="date-strip-cell cal-month-cell ${c.adj ? 'adjacent' : ''} ${key === todayKey ? 'today' : ''} ${key === state.selectedCalendarDay ? 'selected' : ''}" data-cal-day="${key}">
+          <span class="dow">${['S','M','T','W','T','F','S'][c.d.getDay()]}</span>
+          <span class="num">${c.n}</span>
+          <div class="month-cell-dots">
+            ${hasCls ? '<span class="cell-dot class-dot"></span>' : ''}
+            ${hasAsg ? '<span class="cell-dot asg-dot"></span>' : ''}
+            ${hasDl ? '<span class="cell-dot deadline-dot"></span>' : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   return `
     <div class="panel" style="padding:16px 14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 4px;">
-        <h2 style="margin:0;font-size:1.15rem;">${currentMonthYear}</h2>
-        <button class="btn-ghost" id="open-month-cal-btn" style="font-size:0.75rem;padding:4px 10px;min-height:30px;">View 30 Days →</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 4px;gap:8px;flex-wrap:wrap;">
+        <h2 style="margin:0;font-size:1.15rem;">${state.calendarViewMode === 'month' ? monthTitle : currentMonthYear}</h2>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${state.calendarViewMode === 'month' ? `
+            <button class="btn-ghost" id="month-cal-prev" type="button" style="min-height:30px;font-size:0.75rem;padding:0 10px;">←</button>
+            <button class="btn-ghost" id="month-cal-today" type="button" style="min-height:30px;font-size:0.75rem;padding:0 10px;">Today</button>
+            <button class="btn-ghost" id="month-cal-next" type="button" style="min-height:30px;font-size:0.75rem;padding:0 10px;">→</button>
+          ` : ''}
+          <button class="btn-primary" id="cal-view-toggle-btn" type="button" style="min-height:30px;font-size:0.75rem;padding:0 12px;">${state.calendarViewMode === 'week' ? 'Month View' : 'Week View'}</button>
+        </div>
       </div>
-      
-      <div class="date-strip">${stripHtml}</div>
+
+      ${state.calendarViewMode === 'week'
+        ? `<div class="date-strip">${stripHtml}</div>`
+        : `<div class="month-grid-weekdays"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+      <div class="month-grid-cells">${monthCellsHtml}</div>`}
 
       <div class="dim-divider" style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
         <span style="font-weight:600;font-size:0.88rem;">${calendarSelectedDateStr}</span>
@@ -2135,135 +2179,6 @@ function renderFlashcardsModal() {
           <div style="display:flex;justify-content:center;gap:12px;">
             <button class="btn-ghost" id="fc-prev-btn" style="min-height:38px;padding:0 18px;" ${idx === 0 ? 'disabled' : ''}>← Prev</button>
             <button class="btn-ghost" id="fc-next-btn" style="min-height:38px;padding:0 18px;" ${idx >= allCards.length - 1 ? 'disabled' : ''}>Next →</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/* =========================================================================
-   MODAL: 30-DAY MONTH CALENDAR (Full-Screen Dedicated Experience)
-   ========================================================================= */
-
-function renderMonthCalendarModal() {
-  if (!state.monthCalendarOpen) return '';
-
-  const year = state.monthCalendarYear;
-  const month = state.monthCalendarMonth; // 0..11
-  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const monthTitle = `${monthNames[month]} ${year}`;
-
-  const firstDayOfWeek = new Date(year, month, 1).getDay(); // 0..6
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells = [];
-
-  // Trailing days from previous month
-  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
-    const dayNum = daysInPrevMonth - i;
-    const d = new Date(year, month - 1, dayNum, 12, 0, 0);
-    cells.push({ num: dayNum, date: d, isAdjacent: true });
-  }
-
-  // Current month days
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateObj = new Date(year, month, d, 12, 0, 0);
-    cells.push({ num: d, date: dateObj, isAdjacent: false });
-  }
-
-  // Leading days into next month to complete rows of 7
-  const remaining = 7 - (cells.length % 7);
-  if (remaining < 7) {
-    for (let d = 1; d <= remaining; d++) {
-      const dateObj = new Date(year, month + 1, d, 12, 0, 0);
-      cells.push({ num: d, date: dateObj, isAdjacent: true });
-    }
-  }
-
-  const todayStr = new Date().toDateString();
-
-  const cellsHtml = cells.map(c => {
-    const key = c.date.toDateString();
-    const isToday = key === todayStr;
-    const isSelected = key === state.selectedCalendarDay;
-    const classes = getClassesForDate(c.date);
-    const hasClasses = classes.length > 0;
-    const hasAsg = assignmentsManager.getAll().some(a => new Date(a.dueDate).toDateString() === key);
-    const hasDeadline = deadlinesManager.getAll().some(item => item.status !== 'done' && new Date(item.dueAt).toDateString() === key);
-
-    return `
-      <div class="month-cell ${c.isAdjacent ? 'adjacent' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-cal-day="${key}">
-        <span>${c.num}</span>
-        <div class="month-cell-dots">
-          ${hasClasses ? '<span class="cell-dot class-dot"></span>' : ''}
-          ${hasAsg ? '<span class="cell-dot asg-dot"></span>' : ''}
-          ${hasDeadline ? '<span class="cell-dot deadline-dot"></span>' : ''}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  // Selected Day's Agenda
-  const selectedDate = new Date(state.selectedCalendarDay);
-  const selectedDateStr = selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  const selectedClasses = getClassesForDate(selectedDate);
-  const selectedAssignments = assignmentsManager.getAll().filter(a => new Date(a.dueDate).toDateString() === state.selectedCalendarDay);
-  const selectedDeadlines = getDeadlinesForDate(selectedDate);
-
-  return `
-    <div class="modal-overlay open" id="month-cal-modal-overlay">
-      <div class="modal-box month-cal-container">
-        <div class="month-cal-header">
-          <div class="month-nav-group">
-            <button class="month-nav-btn" id="month-cal-prev">&larr;</button>
-            <button class="month-nav-btn" id="month-cal-today">Today</button>
-            <button class="month-nav-btn" id="month-cal-next">&rarr;</button>
-          </div>
-          <h3 class="month-cal-title">${monthTitle}</h3>
-          <div class="icon-btn sm" id="close-month-cal-modal">${icon('close')}</div>
-        </div>
-
-        <div class="month-grid-weekdays">
-          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
-        </div>
-        <div class="month-grid-cells">${cellsHtml}</div>
-
-        <div class="month-cal-agenda">
-          <div style="font-size:0.82rem;font-weight:700;color:var(--ink);margin-bottom:8px;">${selectedDateStr}</div>
-          <div class="agenda-list">
-            ${selectedClasses.map(c => `
-              <div class="agenda-item" style="--item-color:${c.course.accent};">
-                <div class="agenda-time">${c.schedule.start}${c.schedule.end ? '<br><span style="color:var(--muted-dim);font-size:0.7rem;">' + c.schedule.end + '</span>' : ''}</div>
-                <div class="agenda-main">
-                  <div class="agenda-course">${c.course.code}</div>
-                  <div class="agenda-title">${c.course.name} · ${c.schedule.type}</div>
-                  <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Room ${c.schedule.room || 'Campus'}${c.schedule.instructor ? ' · ' + c.schedule.instructor : ''}</div>
-                </div>
-              </div>
-            `).join('')}
-
-            ${selectedAssignments.map(a => {
-              const course = courseById(a.courseId);
-              return `
-                <div class="agenda-item" style="--item-color:${course?course.accent:'var(--accent-3)'};">
-                  <div class="agenda-time">Due Date</div>
-                  <div class="agenda-main">
-                    <div class="agenda-course">${course?course.code:a.courseId.toUpperCase()}</div>
-                    <div class="agenda-title">📋 ${a.title}</div>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-
-            ${renderDeadlineAgendaItems(selectedDeadlines)}
-
-            ${!selectedClasses.length && !selectedAssignments.length && !selectedDeadlines.length ? `
-              <div style="color:var(--muted-dim);text-align:center;padding:12px;font-size:0.84rem;">
-                No scheduled sessions or deadlines on this date.
-              </div>
-            ` : ''}
           </div>
         </div>
       </div>
@@ -3198,15 +3113,20 @@ function attachEventHandlers() {
   const aiMicBtn = document.getElementById('ai-mic-btn');
   if (aiMicBtn) aiMicBtn.addEventListener('click', toggleAiLiveTranscription);
 
-  const openMonthCalBtn = document.getElementById('open-month-cal-btn');
-  if (openMonthCalBtn) openMonthCalBtn.addEventListener('click', () => {
-    const sel = new Date(state.selectedCalendarDay);
-    state.monthCalendarYear = sel.getFullYear(); state.monthCalendarMonth = sel.getMonth(); state.monthCalendarOpen = true; render();
+  const calViewToggle = document.getElementById('cal-view-toggle-btn');
+  if (calViewToggle) calViewToggle.addEventListener('click', () => {
+    const goingMonth = state.calendarViewMode !== 'month';
+    state.calendarViewMode = goingMonth ? 'month' : 'week';
+    if (goingMonth) {
+      const sel = new Date(state.selectedCalendarDay);
+      state.monthCalendarYear = sel.getFullYear();
+      state.monthCalendarMonth = sel.getMonth();
+    } else {
+      // Returning to the weekly strip: center it near the selected day.
+      state.selectedCalendarDay = new Date(state.selectedCalendarDay).toDateString();
+    }
+    render();
   });
-  const closeMonthCalBtn = document.getElementById('close-month-cal-modal');
-  if (closeMonthCalBtn) closeMonthCalBtn.addEventListener('click', () => { state.monthCalendarOpen = false; render(); });
-  const monthCalOverlay = document.getElementById('month-cal-modal-overlay');
-  if (monthCalOverlay) monthCalOverlay.addEventListener('click', e => { if (e.target === monthCalOverlay) { state.monthCalendarOpen = false; render(); } });
   const monthPrev = document.getElementById('month-cal-prev');
   if (monthPrev) monthPrev.addEventListener('click', () => { if (state.monthCalendarMonth === 0) { state.monthCalendarMonth = 11; state.monthCalendarYear--; } else state.monthCalendarMonth--; render(); });
   const monthNext = document.getElementById('month-cal-next');
@@ -3447,7 +3367,7 @@ function attachEventHandlers() {
     aiPasswordSignin.textContent = 'Signing in…';
     try {
       await signInWithAccountPassword(password);
-      showToast('Signed in ✓ — cloud sync active');
+      showToast('Signed in ✓ — sync started');
     } catch (e) {
       showToast(`Sign-in failed: ${e.message}`);
     } finally {
@@ -3471,7 +3391,7 @@ function attachEventHandlers() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); state.spotlightSearchOpen = true; state.spotlightQuery = ''; render(); setTimeout(() => document.getElementById('spotlight-search-input')?.focus(), 50); return; }
       if (e.key === 'Escape') {
         if (state.aiAssistantOpen) { stopAiLiveTranscription(); state.aiAssistantOpen = false; }
-        state.spotlightSearchOpen = false; state.monthCalendarOpen = false; state.syncDrawerOpen = false; state.assignmentModalOpen = false; state.noteModalOpen = false; state.flashcardsModalOpen = false; state.assignmentDetailId = null;
+        state.spotlightSearchOpen = false; state.syncDrawerOpen = false; state.assignmentModalOpen = false; state.noteModalOpen = false; state.flashcardsModalOpen = false; state.assignmentDetailId = null;
         render();
       }
     });

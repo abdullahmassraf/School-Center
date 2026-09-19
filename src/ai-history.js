@@ -190,21 +190,12 @@ export async function signInWithAccountPassword(password) {
   });
   if (error) {
     const raw = String(error.message || '');
+    // Never call auth.signUp() here as a probe: against a passwordless
+    // account it can trigger a confirmation/recovery email, which users
+    // experience as a mysterious "link sent". The failure message below
+    // states the exact one-time dashboard fix instead.
     if (/invalid login credentials/i.test(raw) || error.code === 'user_not_found') {
-      // Supabase returns the same error for a wrong password AND for a
-      // passwordless (magic-link-created) account. Disambiguate locally with
-      // a harmless signup probe: an existing account returns the obfuscated
-      // user record (identities: []) instead of an error, and never receives
-      // a second confirmation email (the probe is rejected before sending).
-      const probe = await sb.auth.signUp({
-        email: OWNER_ACCOUNT_EMAIL,
-        password: cleanPassword
-      });
-      const probeIsExistingAccount = !!probe?.data?.user?.id && (probe?.data?.user?.identities?.length === 0);
-      if (probeIsExistingAccount) {
-        throw new Error('This account has no password set yet (it was created with a sign-in link). One-time fix: in Supabase Dashboard → Authentication → Users, reset the password for this account, then sign in here.');
-      }
-      throw new Error('Incorrect account password.');
+      throw new Error('Password does not match. If you have never set this password on the cloud account: Supabase Dashboard → Authentication → Users → this account → Reset password, set it once, then sign in here. No emails are involved after that.');
     }
     if (/email not confirmed/i.test(raw)) {
       throw new Error('The account email is not confirmed yet. Try again shortly.');

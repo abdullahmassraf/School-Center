@@ -37,3 +37,66 @@
   border: 1px solid rgba(255,255,255,.14) !important;
   box-shadow: 0 12px 28px rgba(2,4,16,.22) !important;
 }
+
+/* =========================================================================
+   INLINE MONTH GRID — same visual language as the weekly date strip.
+   The month view is not a popup: it renders in the same panel, replacing
+   the 14-day strip, so the weekly and monthly views feel like one design.
+   ========================================================================= */
+#app .month-grid-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  text-align: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 2px;
+  margin-bottom: 6px;
+}
+
+#app .month-grid-cells {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+/* A month cell IS a date-strip cell: identical radius, borders, hover,
+   today and selected treatments — only the width is fluid (1fr columns). */
+#app .cal-month-cell {
+  flex: none;
+  width: auto;
+  aspect-ratio: 1 / 1;
+  padding: 6px 2px;
+}
+
+#app .cal-month-cell .dow {
+  font-size: 0.62rem;
+}
+
+#app .cal-month-cell .num {
+  font-size: 0.95rem;
+}
+
+#app .cal-month-cell .month-cell-dots {
+  position: static;
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+#app .cal-month-cell.adjacent {
+  opacity: 0.32;
+}
+
+@media (max-width: 480px) {
+  #app .cal-month-cell .dow {
+    display: none; /* compact days on phones: number + dots only */
+  }
+}
+
+/* Legacy popup-modal month styles are intentionally unused now. */
