@@ -52,7 +52,9 @@ function ensurePanel() {
     host = document.createElement('section');
     host.className = 'panel deadlines-ui-panel';
     host.dataset.deadlinesUi = 'true';
-    anchor.prepend(host);
+    const courseTabs = anchor.querySelector('.course-tabs');
+    if (courseTabs) courseTabs.after(host);
+    else anchor.prepend(host);
   }
   renderPanel(host);
 }
