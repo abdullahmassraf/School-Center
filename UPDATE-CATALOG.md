@@ -1,3 +1,70 @@
+## v1.5.0 — Sheridan archive gap audit, unique-path constraint, gap-fill seeder
+
+**Date:** 2026-09-18 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+> **Paste this section at the TOP of UPDATE-CATALOG.md**, above the v1.4.3 entry.
+> Version numbers in this catalog have drifted from package.json (noted in v1.4.1);
+> this entry follows the catalog's own sequence. Adjust the number if you prefer.
+
+### Problem
+The archive was believed to be integrated. A live audit shows it is only partly ingested.
+
+### Findings (all verified against production, not assumed)
+- Storage (139 objects) and `materials` (139 rows) agree exactly. No orphans in either
+  direction. Every row is `completed` with a URL and a distinct `file_path`.
+- Sheridan.zip contains 205 files → 187 unique flat names → **194 distinct paths**
+  (7 extra because `config_xml.js` ×7 and `techsmith-smart-player.min.css` ×2 share names
+  but have different content). Production holds 137 of those; **57 were never ingested**.
+- Coverage: MATH15325D 6/6 · ENGR43301D 4/4 (+2 user uploads) · ENGL17889GD 64/67 ·
+  ANTH17028GD 51/74 · **ENGR36035D 12/43 — all 18 lecture .pptx and 7 .xlsx are absent.**
+- Every missing file has an extension in `.pptx .xlsx .xlsm .doc .mlx .epw .ddy .stat
+  .css .js .gif .jpeg`. The `course-materials` bucket has `allowed_mime_types = null` and
+  `file_size_limit = null`, so this was a client-side ingest filter, not a Storage rule.
+- Production paths are FLAT (`COURSE/filename`); the archive's folder hierarchy was
+  discarded. `modules` has exactly one row per course.
+
+### Changes
+- **NEW** `supabase/migrations/004_materials_unique_file_path.sql` — partial unique index
+  `uq_materials_file_path` on `materials(file_path)`. **Already applied to production.**
+  Pre-flight: 0 duplicates, 0 NULLs. Proven to reject a duplicate insert (rolled back,
+  0 rows leaked, count stayed 139).
+- **NEW** `scripts/seed-sheridan-gap.mjs` — idempotent gap-fill. Dry-run by default.
+
+### Files
+FILES TO REPLACE: none.
+NEW files: `scripts/seed-sheridan-gap.mjs`, `supabase/migrations/004_materials_unique_file_path.sql`.
+
+### Database changes
+`004_materials_unique_file_path` (applied). No data was inserted, updated, or deleted.
+
+### Storage changes
+None. **No files were uploaded** (see limitations).
+
+### Verification performed
+- Seeder run in dry-run against the real archive with a client stubbed from the live
+  inventory: plans 57 files (ANTH 23, ENGL 3, ENGR36035D 31).
+- Idempotency: after simulated apply, rerun plans 0.  Determinism: two runs give identical
+  paths.  Overlap with existing rows: 0.  Duplicates within plan: 0.
+- 139 existing + 57 planned = 196 = 194 distinct archive paths + 2 user uploads. ✔
+
+### NOT verified / remaining limitations
+- **The 57 files are NOT yet ingested.** This environment cannot upload to Storage (network
+  egress disabled; no upload tool). Run the seeder yourself (see steps below).
+- **`src/app.js`, `src/upload.js`, `scripts/seed-sheridan.js` were NOT inspected** — no GitHub
+  connector was available and repo pages are robots-blocked. The root cause of the
+  extension filter is therefore unconfirmed; it is likely in the original seed script or
+  upload validator. Until fixed, in-app uploads of these types may fail too.
+- **Security (not changed, needs your decision):** `materials` RLS grants `INSERT`, `UPDATE`
+  and `DELETE` to role `public` with `using=true`. Anyone with the anon key embedded in the
+  public site can delete every material. Tightening it will break unauthenticated in-app
+  upload, so it needs a deliberate design choice.
+- Browser verification (boot, mobile/desktop, refresh state) was not performed.
+
+### Deployment steps
+1. Add the two NEW files at the exact paths above.  2. Locally, from the repo root:
+   `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/seed-sheridan-gap.mjs`
+   Review the plan, then add `--apply`.  3. Hard-refresh the app and open ENGR36035D → Materials.
+
 ## v1.4.3 — Course materials self-healing: surviving a rotated Supabase key on already-visited devices
 
 **Date:** 2026-09-18 22:30 ET
