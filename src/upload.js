@@ -10,6 +10,7 @@ import {
   triggerDocumentProcessing,
   subscribeToMaterials 
 } from './supabase.js';
+import { getCurrentAiUser } from './ai-history.js';
 
 let activeSubscription = null;
 
@@ -77,6 +78,14 @@ export async function uploadAndProcessFile({ file, course, onProgress, onLog }) 
   }
 
   const sb = getSupabase();
+
+  // v1.5.2 RLS: course-content writes require a signed-in session. Without
+  // this check an anonymous visitor gets a raw Storage 403; with it they get
+  // an actionable message pointing at the sign-in that actually unblocks them.
+  const currentUser = await getCurrentAiUser();
+  if (!currentUser) {
+    throw new Error('Uploading course files requires signing in first (Settings → Account & cross-device sync). This keeps the course library writable only by its owner.');  }
+
   onLog(`Uploading "${file.name}" to Cloud Storage...`);
   onProgress({ status: 'uploading', text: 'Uploading to Storage...' });
 

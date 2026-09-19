@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = 8931;
+// SC_TARGET_URL lets the harness point at the deployed GitHub Pages site so the
+// live deployment itself can be verified end-to-end (not just local files).
+const TARGET_URL = process.env.SC_TARGET_URL || `http://127.0.0.1:${PORT}/index.html`;
+const IS_LOCAL = !process.env.SC_TARGET_URL;
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const USER_DATA = path.join(process.env.TEMP || '/tmp', 'sc-debug-profile-' + Date.now());
 const DEBUG_PORT = 9223;
@@ -17,6 +21,7 @@ const DEBUG_PORT = 9223;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
 const server = http.createServer((req, res) => {
+  if (!IS_LOCAL) return res.end('remote mode: local server unused');
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.resolve(path.join(ROOT, urlPath));
@@ -31,8 +36,10 @@ const server = http.createServer((req, res) => {
 await new Promise(r => server.listen(PORT, r));
 
 // Self-test: confirm the server actually serves index.html content
-const selfTest = await fetch(`http://127.0.0.1:${PORT}/index.html`).then(r => r.text());
-console.log('SELF-TEST: index.html length =', selfTest.length, '| has script tag:', selfTest.includes('src/app.js'));
+if (IS_LOCAL) {
+  const selfTest = await fetch(`http://127.0.0.1:${PORT}/index.html`).then(r => r.text());
+  console.log('SELF-TEST: index.html length =', selfTest.length, '| has script tag:', selfTest.includes('src/app.js'));
+}
 
 const proc = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -118,7 +125,8 @@ if (process.env.SC_STALE === '1') {
   console.log('STALE MODE: DOM meta tag will be rewritten to retired key (simulates cached old index.html)');
 }
 
-await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/index.html` });
+console.log('TARGET:', TARGET_URL);
+await send('Page.navigate', { url: TARGET_URL });
 // Poll until the app has rendered, up to 25s
 for (let i = 0; i < 50; i++) {
   await new Promise(r => setTimeout(r, 500));

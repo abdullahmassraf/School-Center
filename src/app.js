@@ -533,7 +533,8 @@ let state = {
   dataSyncLastError: null,
   dataSyncLastOkAt: null,
   syncBannerDismissed: false,
-  materialsSyncError: null // set by syncDataFromSupabase() when course/material fetch fails
+  materialsSyncError: null, // set by syncDataFromSupabase() when course/material fetch fails
+  materialsHydrated: false // true once at least one successful course sync has completed
 };
 
 let aiLiveTranscriber = null;
@@ -549,7 +550,10 @@ let aiHistoryUnsubscribe = null;
  * and turn every file into a viewable material row. Storage is an
  * independent source of truth for uploaded files: when the materials table
  * or its module relationship fails (bad key, RLS, PostgREST hiccup), the
- * files themselves can still populate the course library. */
+ * files themselves can still populate the course library.
+ * Returns { rows, error } so a failed listing can be distinguished from a
+ * genuinely empty folder — a swallowed storage error must never masquerade
+ * as "this course has no files". */
 async function listCourseMaterialsFromStorage(sb, dbCourse, dbModule) {
   try {
     const { data: objects, error } = await sb.storage
@@ -559,8 +563,12 @@ async function listCourseMaterialsFromStorage(sb, dbCourse, dbModule) {
         offset: 0,
         sortBy: { column: 'name', order: 'asc' }
       });
-    if (error || !objects?.length) return [];
-    return objects
+    if (error) {
+      console.warn(`Storage listing failed for ${dbCourse.code}:`, error.message || error);
+      return { rows: [], error };
+    }
+    if (!objects?.length) return { rows: [], error: null };
+    const rows = objects
       .filter(obj => obj?.name && !obj.name.endsWith('/'))
       .map(obj => {
         const filePath = dbCourse.code + '/' + obj.name;
@@ -578,8 +586,10 @@ async function listCourseMaterialsFromStorage(sb, dbCourse, dbModule) {
           source: 'storage-fallback'
         };
       });
-  } catch (_) {
-    return [];
+    return { rows, error: null };
+  } catch (err) {
+    console.warn(`Storage listing threw for ${dbCourse.code}:`, err?.message || err);
+    return { rows: [], error: err };
   }
 }
 
@@ -606,7 +616,10 @@ async function runSupabaseCourseSync() {
     const dbModules = moduleRes.data || [];
     // Do not fail the entire course library because the materials table is
     // temporarily unavailable. Storage is the source of truth for uploaded
-    // files and gives us a second independent recovery path.
+    // files and gives us a second independent recovery path. The error is
+    // recorded (not swallowed) so that if no recovery path yields materials,
+    // the failure surfaces instead of rendering a false empty state.
+    const materialsTableError = materialRes.error || null;
     let dbMaterials = materialRes.error ? [] : (materialRes.data || []);
 
     // Primary fallback: nested PostgREST relationship.
@@ -638,11 +651,29 @@ async function runSupabaseCourseSync() {
         if (!courseModules.length) return true;
         return !dbMaterials.some(m => courseModules.some(mod => mod.id === m.module_id));
       });
+      const storageFailures = [];
       await Promise.all(orphanedCourses.map(async dbC => {
         const module = dbModules.find(m => m.course_id === dbC.id) || null;
-        const rows = await listCourseMaterialsFromStorage(sb, dbC, module);
+        const { rows, error } = await listCourseMaterialsFromStorage(sb, dbC, module);
         if (rows.length) storageMaterialsByCourse.set(dbC.id, rows);
+        else if (error) storageFailures.push(`${dbC.code}: ${error.message || error}`);
       }));
+      // Honest-failure contract: if the materials table query failed AND no
+      // recovery path produced any rows, this is an infrastructure failure
+      // (network / RLS / PostgREST), NOT an empty library. Throw so the
+      // Materials tab shows the error banner instead of "No document files
+      // uploaded".
+      if (materialsTableError && !dbMaterials.length && !storageMaterialsByCourse.size) {
+        throw materialsTableError;
+      }
+      // Table failed but Storage covered some courses: keep the partial data
+      // visible, but do not pretend everything is fine.
+      if (materialsTableError) {
+        console.warn('materials table query failed; serving Storage fallback rows where available:', materialsTableError.message || materialsTableError);
+      }
+      if (storageFailures.length) {
+        console.warn('Some course folders could not be listed in Storage:', storageFailures.join(' | '));
+      }
     }
 
     const modulesByCourse = new Map();
@@ -741,6 +772,16 @@ async function runSupabaseCourseSync() {
     // Hydration succeeded. Clear any previous failure so the course view
     // never keeps showing a stale "materials could not be loaded" banner.
     state.materialsSyncError = null;
+    state.materialsHydrated = true;
+    // v1.5.2 ROOT-CAUSE FIX (false "No document files uploaded"): the user can
+    // open Course → Materials BEFORE this background sync finishes (slow
+    // network, cold start). The panel rendered at that moment shows the empty
+    // state, and until now nothing repainted it when hydration completed —
+    // the materials existed in the cloud but the screen never updated. If the
+    // user is currently looking at a Materials tab, repaint it now.
+    if (state.view === 'courses' && state.courseTab === 'materials') {
+      render();
+    }
     return true;
   } catch (err) {
     console.error('Failed to sync courses/materials from Supabase:', err);
@@ -750,6 +791,11 @@ async function runSupabaseCourseSync() {
     state.materialsSyncError = err?.message
       ? `Cloud error: ${err.message}`
       : 'Could not reach Supabase. Check your connection and try again.';
+    // Same repaint contract as the success path: a Materials tab that is
+    // already on screen must show the failure, not keep a stale empty state.
+    if (state.view === 'courses' && state.courseTab === 'materials') {
+      render();
+    }
     return false;
   }
 }
@@ -1157,7 +1203,43 @@ function renderCourseDetailView(c) {
   } else if (state.courseTab === 'materials') {
     const routed = routeCourseContent(c);
     const mats = routed.materials;
-    bodyHtml = mats.length ? `
+    // v1.5.2 honest-state contract: the empty-state message is ONLY shown
+    // when hydration has completed AND no cloud/infra error is active.
+    // Otherwise the user sees "Loading…" (hydration still in flight) or the
+    // explicit failure banner — never a false "No document files uploaded".
+    if (!mats.length && !state.materialsSyncError && !state.materialsHydrated) {
+      bodyHtml = `
+        <div style="text-align:center;padding:36px 14px;color:var(--muted);">
+          <p style="font-weight:600;">Loading course materials…</p>
+          <p style="font-size:0.82rem;margin-top:4px;">Checking the cloud library for ${escapeHtml(c.code)}.</p>
+        </div>
+      `;
+    } else if (!mats.length && state.materialsSyncError) {
+      bodyHtml = `
+      <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
+        <p style="color:var(--accent-3);font-weight:600;">Course materials could not be loaded.</p>
+        <p style="font-size:0.82rem;margin-top:4px;">${escapeHtml(state.materialsSyncError)}</p>
+        ${isAuthError(state.materialsSyncError) ? '<p style="font-size:0.78rem;margin-top:4px;color:var(--muted);">This looks like a saved cloud-credential problem on this device. Use “Fix cloud connection” below to repair it automatically.</p>' : ''}
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn-ghost" id="retry-materials-btn">Retry loading materials</button>
+          ${state.materialsSyncError && isAuthError(state.materialsSyncError) ? '<button class="btn-ghost" id="reset-cloud-config-btn">Fix cloud connection</button>' : ''}
+        </div>
+      </div>
+    `;
+    } else if (!mats.length) {
+      // Genuinely empty: hydration completed, no error, zero materials.
+      // This is the ONLY path allowed to say the course has no files.
+      bodyHtml = `
+      <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
+        <p>No document files uploaded for ${escapeHtml(c.code)} yet.</p>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn-primary" id="trigger-upload-modal">Upload Course Material</button>
+          <button class="btn-ghost" id="retry-materials-btn">Retry loading materials</button>
+        </div>
+      </div>
+    `;
+    } else {
+      bodyHtml = `
       <div class="course-materials-stack">
         <div class="section-sub" style="margin-bottom:2px;">${mats.length} material${mats.length === 1 ? '' : 's'} available in the course cloud.</div>
         <div style="display:flex;flex-direction:column;gap:14px;">
@@ -1198,20 +1280,8 @@ function renderCourseDetailView(c) {
         }).join('')}
         </div>
       </div>
-    ` : `
-      <div style="text-align:center;padding:36px 14px;color:var(--muted-dim);">
-        ${state.materialsSyncError
-          ? `<p style="color:var(--accent-3);font-weight:600;">Course materials could not be loaded.</p>
-             <p style="font-size:0.82rem;margin-top:4px;">${escapeHtml(state.materialsSyncError)}</p>
-             ${isAuthError(state.materialsSyncError) ? '<p style="font-size:0.78rem;margin-top:4px;color:var(--muted);">This looks like a saved cloud-credential problem on this device. Use “Fix cloud connection” below to repair it automatically.</p>' : ''}`
-          : `<p>No document files uploaded for ${escapeHtml(c.code)} yet.</p>`}
-        <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
-          <button class="btn-primary" id="trigger-upload-modal">Upload Course Material</button>
-          <button class="btn-ghost" id="retry-materials-btn">Retry loading materials</button>
-          ${state.materialsSyncError && isAuthError(state.materialsSyncError) ? '<button class="btn-ghost" id="reset-cloud-config-btn">Fix cloud connection</button>' : ''}
-        </div>
-      </div>
     `;
+    }
   } else if (state.courseTab === 'assignments') {
     const courseAsgs = assignmentsManager.getByCourse(c.id);
     const routed = routeCourseContent(c);

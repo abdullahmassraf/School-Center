@@ -1,3 +1,88 @@
+## v1.5.2 — Materials false-empty root cause fixed + real cross-device sync proof + RLS hardening
+
+**Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
+
+### Root cause of the "No document files uploaded for MATH 15325D yet." screenshot (confirmed by reproduction)
+The database, Storage, RLS and deployment were all healthy (verified directly against production:
+6 MATH15325D rows, public file URLs 200, live HTML/JS byte-identical to local). The bug was a
+**frontend race**: opening Course → Materials renders the panel *before* the background course sync
+finishes, and `syncDataFromSupabase()` never re-rendered the panel when it completed. On a slow
+connection the user lands on a permanently-stale false empty state even though hydration succeeds
+milliseconds later. A second defect swallowed `materials`-table query errors when `courses`/`modules`
+succeeded, producing the same false empty state for an infrastructure failure.
+
+Reproduced deterministically with a throttled-network headless-Chrome run
+(`test_materials_race.js`): `falseEmptySeen=true` before the fix, `materialsVisible=true ... falseEmptySeen=false` after.
+
+### Changes
+- `src/app.js`
+  - success path of the course sync now re-renders when the user is on a Materials tab;
+  - failure path re-renders too, so the error banner replaces the stale empty state;
+  - Materials tab has an honest three-state contract: **Loading…** (hydration not finished) /
+    **error banner** (cloud failure — never phrased as an empty course) / **genuine empty**
+    (hydration completed, no error, zero materials — the only path allowed to say
+    "No document files uploaded");
+  - a failed `materials`-table query now throws when no Storage fallback yields rows, so
+    network/RLS/PostgREST failures surface instead of masquerading as an empty library;
+  - `listCourseMaterialsFromStorage` returns `{ rows, error }` — storage errors are logged and
+    distinguishable from genuinely empty folders.
+- `src/upload.js` — anonymous upload attempts now raise an actionable
+  "sign in first" error instead of a raw 403 (see RLS below).
+- `test_browser_debug.js` — supports `SC_TARGET_URL` so the **live deployed site** can be verified
+  end-to-end in headless Chrome, not just local files.
+- NEW `test_materials_race.js` — regression test for the exact screenshot bug (slow network +
+  early Materials click). Fails if a course with materials ever shows the false empty state.
+- NEW `test_notes_e2e.js` — true two-device sync verification: two headless Chrome profiles, one real
+  Supabase account, A creates → B sees, B edits → A sees, exactly one cloud row (no duplicates),
+  test user deleted afterwards. Replaces the previous static-analysis-only "sync test".
+- NEW `scripts/rls-audit.mjs` — empirical RLS capability probe (sacrificial rows, always cleaned up).
+- NEW `scripts/run-sql.mjs` — apply SQL migrations via management API (PAT or service key).
+- NEW `supabase/migrations/005_rls_tighten_course_content.sql` — minimum secure RLS model.
+
+### Cross-device sync verification (real, not static)
+`node test_notes_e2e.js` (two browser contexts, production Supabase):
+- Device A create → cloud row → Device B sees it ✅ (realtime `subscribed` on both)
+- Device B edit → Device A sees the update ✅
+- Exactly 1 `user_notes` row per note id — no duplicates ✅
+- Identity is `auth.uid()` (Supabase Auth), never a device/localStorage id; deletions sync via
+  `deleted_at` tombstones; last-write-wins on `updatedAt`; pull-before-push; 15s reconciliation
+  poll covers realtime outages. localStorage remains a cache only.
+
+### Security/RLS (empirical audit → migration 005)
+The probe **proved** an anonymous visitor could INSERT/UPDATE/DELETE all course materials and upload
+files into any course folder (policy `USING (true)` for role `public`; Storage likewise open).
+Migration 005 (idempotent) enforces: public SELECT on courses/modules/materials and Storage objects
+(public study site), all writes authenticated-only, `user_notes`/`user_assignments` untouched
+(already `auth.uid()`-scoped). Seeding/admin scripts are unaffected (service-role bypasses RLS).
+
+### ⚠️ Database changes — PENDING ONE MANUAL STEP
+This environment's credentials cannot execute DDL (management API needs a personal access token;
+service-role is refused with 401 — verified, not assumed). Therefore **005 is NOT yet applied**.
+Either:
+1. put `SUPABASE_ACCESS_TOKEN=<personal access token>` in `.env` yourself (never in chat), then run
+   `node scripts/run-sql.mjs supabase/migrations/005_rls_tighten_course_content.sql`, or
+2. Supabase Dashboard → SQL Editor → paste `supabase/migrations/005_rls_tighten_course_content.sql` → Run.
+Afterwards re-run `node scripts/rls-audit.mjs` — it must end with ✅.
+Note: until 005 is applied, in-app uploads work anonymously exactly as before (no behavior change);
+after 005, uploading requires signing in (the app now explains this in the UI).
+
+### Files
+FILES TO REPLACE: `src/app.js`, `src/upload.js`, `test_browser_debug.js`.
+NEW files: `test_materials_race.js`, `test_notes_e2e.js`, `scripts/rls-audit.mjs`,
+`scripts/run-sql.mjs`, `scripts/probe-sql-endpoints.mjs`,
+`supabase/migrations/005_rls_tighten_course_content.sql`.
+
+### Tests run
+- `node --check` on all `src/*.js` ✅
+- `test_materials_race.js` (the screenshot-bug regression) ✅ after fix (failed before)
+- `test_browser_debug.js` clean / SC_POISON / SC_STALE — all load 6/6 MATH materials ✅
+- `SC_TARGET_URL=<live site> test_browser_debug.js` — **live site verified: 6/6 MATH materials render** ✅
+- `test_notes_e2e.js` two-device sync ✅
+- `test_courses_dedup.js`, `test_calendar_engine.js` ✅
+- `scripts/rls-audit.mjs` — documents the 4 pre-005 anonymous-write holes (expected ❌ until 005 is applied)
+
+---
+
 ## v1.5.1 — Root-cause fix: extension whitelist that caused the v1.5.0 gap
 
 **Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
