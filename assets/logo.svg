@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="School Center logo">
+  <!-- Official School Center mark: ringed "S" ribbon crossed by a circuit arrow. -->
+  <circle cx="50" cy="50" r="49" fill="#05060E"/>
+  <g fill="none" stroke="#F4F6FD" stroke-linecap="round" stroke-linejoin="round">
+    <!-- outer ring -->
+    <circle cx="50" cy="50" r="44" stroke-width="3.4"/>
+    <!-- S ribbon body -->
+    <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke-width="8"/>
+    <!-- ribbon groove (creates the double-line look; falls back to the coin color) -->
+    <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke="var(--sc-logo-groove, #0B0F2E)" stroke-width="3"/>
+    <!-- circuit arrow through the S -->
+    <path d="M35 76 L64 27" stroke-width="2.6"/>
+    <path d="M64 27 l-9 -1.5 M64 27 l-3.5 8.5" stroke-width="2.4"/>
+    <path d="M36 73 l6 5" stroke-width="2.2"/>
+    <!-- circuit nodes -->
+    <circle cx="66.5" cy="24.5" r="3" stroke-width="2.2"/>
+    <circle cx="57" cy="31" r="2" fill="#F4F6FD" stroke="none"/>
+    <circle cx="63" cy="38" r="2.4" fill="#F4F6FD" stroke="none"/>
+    <circle cx="52" cy="27" r="1.8" fill="#F4F6FD" stroke="none"/>
+    <circle cx="45" cy="66" r="2" fill="#F4F6FD" stroke="none"/>
+    <circle cx="50" cy="71.5" r="2.4" fill="#F4F6FD" stroke="none"/>
+  </g>
+</svg>
