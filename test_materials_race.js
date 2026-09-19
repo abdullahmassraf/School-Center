@@ -2,7 +2,7 @@
 // Simulates a slow-network device: user opens a course and clicks Materials
 // BEFORE the background course sync has finished. Asserts the panel eventually
 // shows the materials (and never shows a false "No document files uploaded").
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +12,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = 8933;
 const TARGET_URL = process.env.SC_TARGET_URL || `http://127.0.0.1:${PORT}/index.html`;
 const IS_LOCAL = !process.env.SC_TARGET_URL;
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME_PATH || ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find(candidate => {
+  try { execFileSync('which', [candidate], { stdio: 'ignore' }); return true; } catch (_) { return false; }
+});
+if (!CHROME) {
+  console.error('FATAL: no Chrome/Chromium executable found; set CHROME_PATH or install chromium/google-chrome');
+  process.exit(2);
+}
 const USER_DATA = path.join(process.env.TEMP || '/tmp', 'sc-race-profile-' + Date.now());
 const DEBUG_PORT = 9225;
 
@@ -29,7 +35,7 @@ const server = http.createServer((req, res) => {
 await new Promise(r => server.listen(PORT, r));
 
 const proc = spawn(CHROME, [
-  '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+  '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
   `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${USER_DATA}`,
   '--window-size=1280,900', 'about:blank'
 ], { stdio: 'ignore' });

@@ -2,18 +2,24 @@
 // Materials flow. Records every request related to supabase/rest/materials,
 // its status, and how long it took; pairs it with console output; then walks
 // Courses → MATH 15325D → Materials and reports the exact request timeline.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const TARGET_URL = process.env.SC_TARGET_URL || 'https://abdullahmassraf.github.io/School-Center/';
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME_PATH || ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find(candidate => {
+  try { execFileSync('which', [candidate], { stdio: 'ignore' }); return true; } catch (_) { return false; }
+});
+if (!CHROME) {
+  console.error('FATAL: no Chrome/Chromium executable found; set CHROME_PATH or install chromium/google-chrome');
+  process.exit(2);
+}
 const USER_DATA = path.join(process.env.TEMP || '/tmp', 'sc-nettrace-' + Date.now());
 const DEBUG_PORT = 9233;
 
-const proc = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+const proc = spawn(CHROME, ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
   `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${USER_DATA}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
 
 let target = null;
