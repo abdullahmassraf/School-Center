@@ -314,9 +314,29 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   }))()`);
   if (!focusBtn.segments || focusBtn.btnHidden !== false) throw new Error(`Focus did not show route + toggle button: ${JSON.stringify(focusBtn)}`);
   console.log(`ROUTE VISIBILITY: hidden at overview, shown on focus (${focusBtn.segments} segment, button visible)`);
+
   const ringVisible = await evaluate(`!!window.__SC_CAMPUS_MAP_3D__?.focusRing?.visible`);
   if (!ringVisible) throw new Error('Focus targeting ring did not appear on selection');
   if (!focus.status || /Overview\. Tap a building/i.test(focus.status)) throw new Error(`Focus status line not updated: "${focus.status}"`);
+
+  /* Quick-select chips: clicking one must focus that building and show its
+   * route — the no-hunting path into the map. Re-focuses to C; the toggle
+   * and reset steps below are building-agnostic. */
+  const chip = await evaluate(`(async () => {
+    const btn = document.querySelector('[data-map-chip="C"]');
+    if (!btn) return null;
+    btn.click();
+    await new Promise((r) => setTimeout(r, 1600));
+    const mount = document.querySelector('#cm3d-mount');
+    return {
+      exists: true,
+      focusBuilding: mount?.dataset.focusBuilding || '',
+      segments: Number(mount?.dataset.pathSegments || 0)
+    };
+  })()`);
+  if (!chip?.exists) throw new Error('Quick-select chips missing from the map widget');
+  if (chip.focusBuilding !== 'C' || !chip.segments) throw new Error(`Chip selection failed: ${JSON.stringify(chip)}`);
+  console.log(`CHIPS: quick-select C -> focus + route (${chip.segments} segment)`);
 
   const pathToggle = await evaluate(`(() => {
     const button = document.querySelector('.cm3d-path-toggle');

@@ -3864,6 +3864,10 @@ main#view-host,
 .cm3d-hud button svg{width:17px;height:17px}
 .cm3d-hud button.is-off{opacity:.45}
 .cm3d-hud button.is-hidden{display:none}
+.cm-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 12px}
+.cm-chip{min-width:40px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:var(--ink);font:700 .78rem/1 var(--font-body,inherit);cursor:pointer;transition:background .16s ease,border-color .16s ease,transform .16s ease}
+.cm-chip:hover{background:rgba(var(--accent-rgb,124,140,255),.18);border-color:rgba(var(--accent-rgb,124,140,255),.45);transform:translateY(-1px)}
+.cm-chip:active{transform:translateY(0)}
 /* No-WebGL fallback message (the legacy 2D plan no longer exists) */
 .cm3d-unavailable{display:grid;justify-items:center;gap:6px;min-height:280px;place-content:center;text-align:center;padding:26px 30px;color:var(--muted)}
 .cm3d-unavailable svg{width:34px;height:34px;color:#8a70ed;opacity:.8}

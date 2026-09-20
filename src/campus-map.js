@@ -105,7 +105,15 @@ export function renderCampusMapWidget() {
         </div>
       </div>`;
 
-  return head + stage3d + `</div>`;
+  /* Quick building selectors (mock-up parity): one tap focuses a building
+   * and shows its bus-stop route — no hunting through the 3D scene. */
+  const chips = `
+      <div class="cm-chip-row" role="group" aria-label="Quick building selection">
+        ${Object.entries(CAMPUS_BUILDINGS).map(([id, b]) =>
+          `<button class="cm-chip" data-map-chip="${id}" type="button" title="Focus ${b.label}">${id}</button>`).join('')}
+      </div>`;
+
+  return head + chips + stage3d + `</div>`;
 }
 
 export function highlightBuilding(buildingId) {

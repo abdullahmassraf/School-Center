@@ -1541,7 +1541,7 @@ export class CampusMap3DManager {
      * button) belong to a focused building only. */
     this._clearPaths();
     this._updatePathToggleVisibility();
-    this._status('Overview. Tap a building to focus.');
+    this._status('Overview. Tap a building to focus — the route from the Bus Stop appears with it.');
   }
 
   /* The wayfinding toggle only makes sense while a route exists. */
@@ -1721,6 +1721,13 @@ export class CampusMap3DManager {
             m.material.emissiveIntensity = m.userData.buildingId === this.focusId ? 0.55 : hovered ? 0.3 : 0.08;
           }
           this.renderer.domElement.style.cursor = id ? 'pointer' : 'grab';
+          /* Announce what's under the cursor (screen readers + glanceability).
+           * Skip while dragging so the status line isn't thrashing. */
+          if (e.buttons === 0) {
+            if (id) this._status(`${this.meshById.get(id)?.userData.label || id} — tap to focus.`);
+            else if (this.focusId) this._status(`${this.meshById.get(this.focusId)?.userData.label || this.focusId} — wayfinding from Bus Stop shown.`);
+            else this._status('Overview. Tap a building to focus — the route from the Bus Stop appears with it.');
+          }
         }
       };
       el.addEventListener('pointermove', onHover);

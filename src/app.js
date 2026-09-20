@@ -3353,6 +3353,12 @@ function attachEventHandlers() {
   });
 
   initCampusMap3d();
+  document.querySelectorAll('[data-map-chip]').forEach((chip) => {
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      highlightBuilding(chip.dataset.mapChip);
+    });
+  });
   document.querySelectorAll('[data-show-location]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
