@@ -150,7 +150,7 @@ const ENTRANCES = {
  * the calculation is clock-based, not hour-table-based). */
 const CAMPUS_COORDS = { lat: 43.7230, lon: -79.7130 };
 
-function solarPosition(date = new Date(), lat = CAMPUS_COORDS.lat, lon = CAMPUS_COORDS.lon) {
+export function solarPosition(date = new Date(), lat = CAMPUS_COORDS.lat, lon = CAMPUS_COORDS.lon) {
   const rad = Math.PI / 180;
   const J1970 = 2440588, J2000 = 2451545;
   const d = date.valueOf() / 86400000 - 0.5 + J1970 - J2000;
@@ -160,10 +160,15 @@ function solarPosition(date = new Date(), lat = CAMPUS_COORDS.lat, lon = CAMPUS_
   const e = rad * 23.4397;
   const dec = Math.asin(Math.sin(e) * Math.sin(L));
   const RA = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
-  const st = rad * (280.16 + 360.9856235 * d) - rad * lon;
+  /* Local sidereal time: GMST + EAST longitude (the minus sign here once
+   * inverted day and night — sun below the horizon at local noon). */
+  const st = rad * (280.16 + 360.9856235 * d) + rad * lon;
   const latR = rad * lat;
-  const el = Math.asin(Math.sin(latR) * Math.sin(dec) + Math.cos(latR) * Math.cos(dec) * Math.cos(RA - st));
-  const az = Math.atan2(Math.sin(RA - st), Math.cos(RA - st) * Math.sin(latR) - Math.tan(dec) * Math.cos(latR));
+  /* Hour angle H = st - RA (positive = afternoon/west). Using RA - st here
+   * mirrors the azimuth east-west (sun rising in the west) while leaving
+   * elevation untouched. */
+  const el = Math.asin(Math.sin(latR) * Math.sin(dec) + Math.cos(latR) * Math.cos(dec) * Math.cos(st - RA));
+  const az = Math.atan2(Math.sin(st - RA), Math.cos(st - RA) * Math.sin(latR) - Math.tan(dec) * Math.cos(latR));
   return { elevationDeg: el / rad, azimuthDeg: (az / rad + 180) % 360 };
 }
 
@@ -306,7 +311,9 @@ export class CampusMap3DManager {
     this.info = null;
     this._flash = 0;
     this._quality = this.isMobile ? 0.6 : 1;      // particle density scaling
-    this._shadowSize = this.isMobile ? 1024 : 2048;
+    /* Software rasterizers pay full price for every depth texel — keep the
+     * live-shadow map at 1024 there; real GPUs get crisp 2048. */
+    this._shadowSize = this.softwareGpu ? 768 : this.isMobile ? 1024 : 2048;
     this._bloomBase = this.isMobile ? 0.32 : 0.42;
     this.hoverId = null;
     this.weather = null;
@@ -398,10 +405,12 @@ export class CampusMap3DManager {
     this.sun.shadow.camera.far = 1900;
     this.sun.shadow.bias = -0.00045;          // z-fighting guard per spec
     this.sun.shadow.normalBias = 0.6;
-    /* The sun only moves on time-of-day changes and buildings only rescale
-     * on focus, so render the shadow map on demand instead of every frame —
-     * a full extra scene pass saved per frame. */
-    this.sun.shadow.autoUpdate = false;
+    /* Live shadows: real GPUs re-render the shadow map every frame so sun
+     * angle/intensity changes show immediately. Software tier: on-demand
+     * updates flagged whenever lighting actually changes (_applyTimeOfDay /
+     * weather) — the sun's per-frame motion is imperceptible, so this is
+     * visually identical while skipping a full depth pass per frame. */
+    this.sun.shadow.autoUpdate = !this.softwareGpu;
     this.sun.shadow.needsUpdate = true;
     this.scene.add(this.sun);
 
@@ -417,7 +426,7 @@ export class CampusMap3DManager {
       map: this._spriteTex, color: 0xffedc8, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false
     }));
-    this.sunSprite.scale.set(360, 360, 1);
+    this.sunSprite.scale.set(300, 300, 1);
     this.scene.add(this.sunSprite);
     this._track(null, this.sunSprite.material);
 
@@ -499,89 +508,101 @@ export class CampusMap3DManager {
    * up at dusk/night, giving the twin its "city lights" read. */
   _buildWindowGlow() {
     const THREE = this.THREE;
-    this.windowMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0, side: THREE.DoubleSide });
-    this._track(null, this.windowMat);
-    /* Warm light pools on the ground under each building: this is what makes
-     * a night city read from a high camera — panels alone are 2-3px specks
-     * at overview distance, pools carry the glow. */
-    this.poolMat = new THREE.MeshBasicMaterial({
-      map: null, color: 0xffc27a, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false
-    });
-    this._track(null, this.poolMat);
     this.windowGlow = [];
     this.lightPools = [];
     this._nightWindows = [];
-    /* Per-building window variety: each building gets its own size, spacing
-     * and lit-probability (deterministic per id), so the skyline doesn't
-     * repeat one texture. */
-    const VARIETY = {
-      J: { w: 11, h: 5, cols: 5, rows: 6, lit: 0.72 },
-      H: { w: 6, h: 9, cols: 7, rows: 4, lit: 0.6 },
-      M: { w: 14, h: 6, cols: 3, rows: 3, lit: 0.5 },
-      B: { w: 5, h: 5, cols: 8, rows: 5, lit: 0.65 },
-      C: { w: 8, h: 12, cols: 4, rows: 2, lit: 0.45 },
-      A: { w: 7, h: 4, cols: 6, rows: 7, lit: 0.75 }
-    };
+    /* Warm light pools on the ground under each building: this is what makes
+     * a night city read from a high camera — panels alone are 2-3px specks
+     * at overview distance, pools carry the glow. */
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+    this.poolMat = new THREE.MeshBasicMaterial({
+      map: this._spriteTex, color: 0xffc27a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    this._track(null, this.poolMat);
+
     for (const mesh of this.buildingMeshes) {
       const id = mesh.userData.buildingId || 'X';
-      const v = VARIETY[id] || { w: 9, h: 6.5, cols: 6, rows: 5, lit: 0.6 };
       const box = new THREE.Box3().setFromObject(mesh);
-      const cx = (box.min.x + box.max.x) / 2;
-      /* Attach to the wall itself (+0.15 clearance, not floating off it). */
-      const cz = box.max.z + 0.15;
-      const wallBottom = box.min.y + 7;
-      const wallTop = box.max.y - 3;
-      const ROW_H = 11;
-      /* Clamp rows to the actual wall height — no floating rows above the
-       * roof — then center the block vertically on the facade. */
-      const rows = Math.max(1, Math.min(v.rows, Math.floor((wallTop - wallBottom) / ROW_H)));
-      const y0 = wallBottom + Math.max(0, (wallTop - wallBottom - (rows - 1) * ROW_H) / 2 - 2);
-      const span = Math.min(box.max.x - box.min.x - 12, 96);
-      if (span < 24) continue;
+      /* Deterministic per-building rhythm: column pitch, lit probability and
+       * brightness jitter all derive from the id, so every building has its
+       * own window character. */
+      const seedOf = (n) => { const x = Math.sin(n * 127.1 + id.charCodeAt(0) * 311.7) * 43758.5453; return x - Math.floor(x); };
+      const colPitch = 10 + seedOf(1) * 6;             // 10-16u between windows
+      const winW = colPitch * 0.52;
+      const winH = 4.5 + seedOf(2) * 3.5;              // 4.5-8u tall
+      const litP = 0.5 + seedOf(3) * 0.3;              // 50-80% lit at night
+      const y0 = box.min.y + 8, y1 = box.max.y - 4;
+      const rows = Math.max(1, Math.floor((y1 - y0) / (winH * 2.2)));
+      const rowPitch = (y1 - y0) / rows;
+
+      /* Facades: extrusion maps SVG +X->world +X, +Y->world −Z, so the wall
+       * planes are z = box.min.z (back) and z = box.max.z (front). We grid
+       * ONLY these real wall faces with exact in-wall bounds — windows can
+       * never float in mid-air, even on L-shaped footprints. */
+      const faces = [
+        { z: box.max.z + 0.35, flip: 1 },
+        { z: box.min.z - 0.35, flip: -1 }
+      ];
       const cells = [];
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < v.cols; c++) {
-          const seed = (r * 13 + c * 7 + id.charCodeAt(0) * 5) % 9;
-          if (seed === 0) continue; // structural gap, per-building rhythm
-          const lit = ((seed * 31 + r * 7 + c * 3) % 100) / 100 < v.lit;
-          /* Two warm tints + a cool tint for variety. */
-          const tint = seed % 3 === 0 ? 0xd6e4ff : seed % 3 === 1 ? 0xffd9a0 : 0xffc98a;
-          cells.push({ x: cx - span / 2 + (c + 0.5) * (span / v.cols), y: y0 + r * ROW_H, tint, on: lit });
+      for (const face of faces) {
+        for (let r = 0; r < rows; r++) {
+          /* Per-window brightness variation (seeded): night skyline doesn't
+           * repeat one intensity — AAA city-light read. */
+          for (let c = 0; ; c++) {
+            const wx = box.min.x + 6 + (c + 0.5) * colPitch;
+            if (wx > box.max.x - 6) break;
+            const rnd = seedOf(r * 57 + c * 13 + (face.flip > 0 ? 0 : 91));
+            if (rnd < 0.14) continue;                    // structural gap
+            cells.push({
+              x: wx, y: y0 + (r + 0.5) * rowPitch, z: face.z,
+              on: rnd < litP,
+              tint: rnd * 9 % 1 < 0.33 ? 0xd6e4ff : rnd * 9 % 1 < 0.66 ? 0xffd9a0 : 0xffc98a,
+              bright: 0.72 + seedOf(r * 31 + c * 7 + 5) * 0.55   // 0.72-1.27
+            });
+          }
         }
       }
-      /* One InstancedMesh per building: every window is an instance with its
-       * own color (lit warm / off dark) — the whole facade costs 1 draw. */
-      if (cells.length) {
-        const wg = new THREE.PlaneGeometry(v.w, v.h);
-        const wm = new THREE.MeshBasicMaterial({
-          color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
-        });
-        const inst = new THREE.InstancedMesh(wg, wm, cells.length);
-        const m4 = new THREE.Matrix4();
-        const col = new THREE.Color();
-        cells.forEach((cell, i) => {
-          m4.makeTranslation(cell.x, cell.y, cz + 0.5);
-          inst.setMatrixAt(i, m4);
-          inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x10141f));
-        });
-        inst.raycast = () => {};
-        this.scene.add(inst);
-        this._track(wg, wm);
-        this._owned.push(inst);
-        this.windowGlow.push(inst);
-        this._nightWindows.push({
-          inst, wm, cells, colors: cells.map((c2) => col.setHex(c2.on ? c2.tint : 0x10141f).clone()),
-          timers: cells.map((c) => (c.on ? -1 : 8 + Math.random() * 30))
-        });
-      }
+      if (!cells.length) continue;
+
+      /* One InstancedMesh per building (1 draw call). Real emissive material:
+       * lit windows push past the bloom threshold at night, so they glow,
+       * cast halo rays through the post chain and pick up ACES rolloff. */
+      const wg = new THREE.PlaneGeometry(winW, winH);
+      /* Real GPUs: emissive standard material so windows bloom as light
+       * sources. Software tier: unlit basic material with the same instance
+       * colors — identical read, no per-fragment lighting cost. */
+      const wm = this.softwareGpu
+        ? new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false })
+        : new THREE.MeshStandardMaterial({
+            color: 0x0c1120, roughness: 0.35, metalness: 0.1,
+            emissive: 0xffffff, emissiveIntensity: 0,
+            transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false
+          });
+      const inst = new THREE.InstancedMesh(wg, wm, cells.length);
+      const m4 = new THREE.Matrix4();
+      const col = new THREE.Color();
+      cells.forEach((cell, i) => {
+        m4.makeTranslation(cell.x, cell.y, cell.z);
+        inst.setMatrixAt(i, m4);
+        inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x05070d).multiplyScalar(cell.bright));
+      });
+      inst.raycast = () => {};
+      this.scene.add(inst);
+      this._track(wg, wm);
+      this._owned.push(inst);
+      this.windowGlow.push(inst);
+      this._nightWindows.push({
+        inst, wm, cells,
+        timers: cells.map((c) => (c.on ? -1 : 8 + Math.random() * 30))
+      });
+
       /* One soft pool hugging the building's projected footprint. */
-      if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
-      this.poolMat.map = this._spriteTex;
+      const span = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
       const pg = new THREE.PlaneGeometry(span * 1.9, span * 1.9);
       const pool = new THREE.Mesh(pg, this.poolMat);
       pool.rotation.x = -Math.PI / 2;
-      pool.position.set(cx, 1.6, cz + 6);
+      pool.position.set((box.min.x + box.max.x) / 2, 1.6, (box.min.z + box.max.z) / 2 + 6);
       pool.renderOrder = 2;
       pool.raycast = () => {};
       this.scene.add(pool);
@@ -611,7 +632,9 @@ export class CampusMap3DManager {
   _buildGround() {
     const THREE = this.THREE;
     const g = new THREE.CircleGeometry(468, 72);
-    const m = new THREE.MeshStandardMaterial({ color: PALETTE.ground, roughness: 0.95, metalness: 0.05 });
+    /* Lifted, semi-glossy surface: catches sky/sun so it reads as a lit
+     * plaza instead of a black void, and carries real-time sun shadows. */
+    const m = new THREE.MeshStandardMaterial({ color: 0x2b3766, roughness: 0.58, metalness: 0.28 });
     this.groundMat = m;
     this.ground = new THREE.Mesh(g, m);
     this.ground.rotation.x = -Math.PI / 2;
@@ -619,6 +642,15 @@ export class CampusMap3DManager {
     this.ground.receiveShadow = true;
     this.scene.add(this.ground);
     this._track(g, m);
+
+    /* Minimal blueprint grid: barely-there lines over the plaza surface. */
+    const grid = new THREE.GridHelper(936, 52, 0x55679f, 0x3c4c85);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.22;
+    grid.position.set(WORLD.w / 2, -0.25, WORLD.h / 2);
+    this.scene.add(grid);
+    this.grid = grid;
+    this._owned.push(grid);
 
     const ringG = new THREE.RingGeometry(462, 468, 96);
     const ringM = new THREE.MeshBasicMaterial({ color: PALETTE.groundRing, side: THREE.DoubleSide });
@@ -1262,11 +1294,11 @@ export class CampusMap3DManager {
     this.sun.intensity = this._todSunI;
 
     /* Ambient + hemisphere fill follow daylight. */
-    this._todAmbientI = 0.3 + 0.38 * dayF;
+    this._todAmbientI = 0.36 + 0.5 * dayF;
     this.ambient.intensity = this._todAmbientI;
     this.ambient.color.copy(lerpC(0x44508f, 0xcdd6ff, dayF));
     if (this.hemi) {
-      this.hemi.intensity = 0.12 + 0.42 * dayF;
+      this.hemi.intensity = 0.22 + 0.58 * dayF;
       this.hemi.color.copy(lerpC(0x27305e, 0x9db8ff, dayF));
     }
 
@@ -1298,9 +1330,9 @@ export class CampusMap3DManager {
     /* Ground light pools + window materials follow real darkness: invisible
      * in daylight, full glow at night (the daylight-glow bug fix). */
     if (this.poolMat && !this.disposed) this.poolMat.opacity = 0.45 * this._nightF;
-    if (this.windowMat && !this.disposed) this.windowMat.opacity = 0.92 * this._nightF;
 
-    if (this.sun.shadow) this.sun.shadow.needsUpdate = true;
+    /* Flag the on-demand (software-tier) shadow map: lighting just changed. */
+    if (this.sun?.shadow && !this.sun.shadow.autoUpdate) this.sun.shadow.needsUpdate = true;
     this._pendingShadowRefresh = true;
   }
 
@@ -1424,7 +1456,7 @@ export class CampusMap3DManager {
   /* --- Camera rig + GSAP state machine ------------------------------------ */
   _buildCameraRig() {
     const THREE = this.THREE;
-    this.camera = new THREE.PerspectiveCamera(38, 1, 5, 4200);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 5, 9000);
     this.camTarget = new THREE.Vector3(WORLD.w / 2, 0, WORLD.h / 2);
     this._applyOverview(0);
     /* Cinematic arrival: descend from high above into the overview framing. */
@@ -1536,8 +1568,10 @@ export class CampusMap3DManager {
   _showFocusRing(mesh) {
     const THREE = this.THREE;
     if (!this.focusRing) {
-      const g = new THREE.RingGeometry(0.97, 1.03, 56);
-      const m = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+      /* Minimal sonar: one hairline ring in the live accent — no thick
+       * donut, no additive glow stack. */
+      const g = new THREE.RingGeometry(0.988, 1.0, 72);
+      const m = new THREE.MeshBasicMaterial({ color: this.accentHex || PALETTE.path, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
       this.focusRing = new THREE.Mesh(g, m);
       this.focusRing.rotation.x = -Math.PI / 2;
       this.focusRing.raycast = () => {};
@@ -1806,13 +1840,12 @@ export class CampusMap3DManager {
       }
       /* Pulsing transit halo. */
       if (this.busRing) {
-        const s = 1 + 0.14 * Math.sin(this.clockUniform.value * 2.4);
+        const s = 1 + 0.05 * Math.sin(this.clockUniform.value * 1.6);
         this.busRing.scale.setScalar(s);
       }
-      /* Focused-building ring: slow spin + heartbeat pulse. */
+      /* Focused-building ring: a slow, calm sonar sweep. */
       if (this.focusRing?.visible) {
-        this.focusRing.rotation.z += dt * 0.5;
-        this.focusRing.material.opacity = 0.65 + 0.25 * Math.sin(this.clockUniform.value * 3);
+        this.focusRing.material.opacity = 0.42 + 0.16 * Math.sin(this.clockUniform.value * 1.4);
       }
       /* Low clouds drift with the wind. */
       if (this.clouds?.length && this.cloudMat.opacity > 0.01) {
@@ -1861,11 +1894,16 @@ export class CampusMap3DManager {
       if (this._nightWindows?.length) {
         /* Window intensity tracks real darkness (_nightF): off in daylight,
          * smooth ramp through twilight, full glow at night. */
-        const base = 0.95 * (this._nightF ?? 0);
+        /* Day: only a faint glass hint (no emission). Night: full emissive
+         * blast per window — bloom picks it up as halos. */
+        const nf = this._nightF ?? 0;
+        const base = 0.12 + 0.88 * nf;
+        const emissiveI = 0.05 + 1.55 * nf;
         const t = this.clockUniform.value;
         const col = this._nightCol || (this._nightCol = new this.THREE.Color());
         for (const b of this._nightWindows) {
-          if (base > 0) {
+          b.wm.emissiveIntensity = emissiveI;
+          if (nf > 0.02) {
             let dirty = false;
             b.timers.forEach((timer, i) => {
               if (t > Math.abs(timer)) {
