@@ -255,6 +255,9 @@ export class CampusMap3DManager {
     this._buildGround();
     this._buildInfrastructure();
     this._buildBuildings();
+    /* Snap glass to the live theme accent (a saved non-default theme must
+     * apply from the first frame, without waiting for a theme change). */
+    this.refreshAccent();
     this._buildGraph();
     this._buildCameraRig();
     this._buildWindowGlow();
@@ -769,13 +772,16 @@ export class CampusMap3DManager {
       geo.translate(0, 0, -(style.height + 3));
       /* Glass skyscraper look: accent-tinted translucent body. Per-mesh
        * material (windows/u-vary read from userData in the shader). */
+      /* Translucent glass tinted by the live theme accent (never a fixed
+       * purple): body lerps slightly toward white for readability. */
       const mat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(style.color).lerp(this.accentHex || new THREE.Color(this.accentColor), 0.35),
+        color: new THREE.Color(this.accentColor).lerp(new THREE.Color(0xffffff), 0.18),
         transparent: true,
         opacity: 0.55,
         roughness: 0.22,
         metalness: 0.35,
-        emissive: new THREE.Color(style.color).multiplyScalar(0.06),
+        emissive: new THREE.Color(this.accentColor),
+        emissiveIntensity: 0.05,
         side: THREE.DoubleSide,
         depthWrite: false
       });
@@ -1223,7 +1229,9 @@ export class CampusMap3DManager {
     this._todFogColor = this._todFogColor || new THREE.Color();
     this._overcastTint = this._overcastTint || new THREE.Color(0x8a94a8);
     this._tmpFog = this._tmpFog || new THREE.Color();
-    const sp = solarPosition(new Date());
+    /* _solarOverride lets the harness (or a future time-scrub control) force
+     * a sun elevation/azimuth to exercise true daylight & night states. */
+    const sp = this._solarOverride || solarPosition(new Date());
     const el = sp.elevationDeg;              // sun elevation, degrees
     const az = sp.azimuthDeg;                // azimuth from north, clockwise
     this._solarElevation = el;
@@ -1233,6 +1241,10 @@ export class CampusMap3DManager {
     this._todKeys = phaseKey;
 
     const dayF = this._smooth01(el, -8, 10);          // 0 night -> 1 day
+    /* Continuous darkness factor: drives window/pool glow so they follow
+     * real light levels, not phase labels (windows must be off in daylight
+     * even while the phase is still 'dusk' or 'dawn'). */
+    this._nightF = Math.pow(1 - dayF, 1.2);
     const horizonF = Math.max(0, 1 - Math.abs(el) / 16); // sunrise/sunset warmth
     const lerpC = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t);
 
@@ -1282,6 +1294,11 @@ export class CampusMap3DManager {
       this.skyUniforms.uHorizonF.value = horizonF * (el > -8 ? 1 : 0);
       this.skyUniforms.uOvercast.value = { clear: 0, cloudy: 0.25, overcast: 0.75, fog: 0.6, rain: 0.6, snow: 0.5, thunder: 0.85 }[this.weatherCondition] ?? 0;
     }
+
+    /* Ground light pools + window materials follow real darkness: invisible
+     * in daylight, full glow at night (the daylight-glow bug fix). */
+    if (this.poolMat && !this.disposed) this.poolMat.opacity = 0.45 * this._nightF;
+    if (this.windowMat && !this.disposed) this.windowMat.opacity = 0.92 * this._nightF;
 
     if (this.sun.shadow) this.sun.shadow.needsUpdate = true;
     this._pendingShadowRefresh = true;
@@ -1500,7 +1517,7 @@ export class CampusMap3DManager {
       } else {
         mat.opacity = 0.18;
         mat.depthWrite = false;
-        mat.emissive.set(m.userData.baseColor || 0x7c8cff);
+        mat.emissive.set(this.accentHex || 0x7c8cff);
         mat.emissiveIntensity = 0.05;
       }
     }
@@ -1510,7 +1527,7 @@ export class CampusMap3DManager {
     for (const m of this.buildingMeshes) {
       m.material.opacity = 0.55;
       m.material.depthWrite = false;
-      m.material.emissive.set(m.userData.baseColor || 0x7c8cff);
+      m.material.emissive.set(this.accentHex || 0x7c8cff);
       m.material.emissiveIntensity = 0.05;
     }
   }
@@ -1842,7 +1859,9 @@ export class CampusMap3DManager {
        * windows of one building share one InstancedMesh (1 draw call), so a
        * toggle is just an instance-color write. */
       if (this._nightWindows?.length) {
-        const base = this._todKeys === 'night' ? 0.95 : this._todKeys === 'dusk' || this._todKeys === 'dawn' ? 0.6 : 0;
+        /* Window intensity tracks real darkness (_nightF): off in daylight,
+         * smooth ramp through twilight, full glow at night. */
+        const base = 0.95 * (this._nightF ?? 0);
         const t = this.clockUniform.value;
         const col = this._nightCol || (this._nightCol = new this.THREE.Color());
         for (const b of this._nightWindows) {
@@ -1864,7 +1883,7 @@ export class CampusMap3DManager {
             }
           }
           if (Math.abs(b.wm.opacity - base) > 0.01) {
-            b.wm.opacity += (base - b.wm.opacity) * Math.min(1, dt * 3);
+            b.wm.opacity += (base - b.wm.opacity) * Math.min(1, dt * 4);
           }
         }
       }
@@ -1920,6 +1939,33 @@ export class CampusMap3DManager {
     this._mats = this._mats || [];
     if (geo) this._geos.push(geo);
     if (mat) this._mats.push(mat);
+  }
+
+  /* --- Live theme support ---------------------------------------------------
+   * Re-read --accent and re-tint every accent-derived color: glass bodies,
+   * selection emissive, sky accent, light pools. */
+  refreshAccent() {
+    if (this.disposed || !this.THREE) return;
+    const css = (typeof getComputedStyle === 'function')
+      ? getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+      : '';
+    const hex = css || this.opts.accentColor || '#7c8cff';
+    this.accentColor = hex;
+    this.accentHex = new this.THREE.Color(hex);
+    /* Re-tint every glass body to the live accent, then restore the exact
+     * focus-state treatment (solid selected / translucent 0.18 others /
+     * default 0.55 glass) so a theme switch never disturbs selection. */
+    for (const m of this.buildingMeshes) {
+      m.material.color.set(this.accentHex).lerp(new this.THREE.Color(0xffffff), 0.18);
+      m.material.emissive.set(this.accentHex);
+      m.userData.baseColor = this.accentHex.getHex();
+    }
+    const focused = this.focusId ? this.meshById.get(this.focusId) : null;
+    if (focused) this._setFocusMaterial(focused);
+    else this._resetMaterials();
+    if (this.skyUniforms) this.skyUniforms.uAccent.value.copy(this.accentHex);
+    if (this.poolMat) this.poolMat.color.set(this.accentHex).lerp(new this.THREE.Color(0xffc27a), 0.5);
+    if (this.focusRing) this.focusRing.material.color.set(this.accentHex);
   }
 
   /* --- Public API ---------------------------------------------------------- */

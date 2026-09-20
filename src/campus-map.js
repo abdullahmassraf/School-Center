@@ -165,7 +165,7 @@ export async function initCampusMap3d() {
     /* Publish the instance before awaiting CDN imports so a second render
      * cannot start a duplicate renderer while the first one is booting. */
     manager = new CampusMap3DManager(mount, {
-      accentColor: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c8cff',
+      accentColor: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c8cff',  // eslint-disable-line
       getBuildings: () => CAMPUS_BUILDINGS,
       /* Real traced site data: lots and the shuttle stop come from the same
        * source of truth as the building footprints. */
@@ -233,6 +233,13 @@ function show3dUnavailable(stage) {
 
 /* Building requested via Show location before the 3D scene finished booting. */
 let pendingFocus3d = null;
+
+/* Theme changed: re-tint the live 3D scene from the new --accent. */
+export function refreshCampusMapAccent() {
+  if (campus3dManager?.ready) {
+    try { campus3dManager.refreshAccent(); } catch (_) { /* non-fatal */ }
+  }
+}
 
 export function disposeCampusMap3d() {
   if (campus3dManager) {

@@ -21,7 +21,7 @@ import {
 import { jobsManager } from './jobs.js';
 import { detectCourseFromContent } from './course-detector.js';
 import { assignmentsManager } from './assignments.js';
-import { renderCampusMapWidget, renderShowLocationButton, highlightBuilding, initCampusMap3d } from './campus-map.js';
+import { renderCampusMapWidget, renderShowLocationButton, highlightBuilding, initCampusMap3d, refreshCampusMapAccent } from './campus-map.js';
 import { notesManager } from './notes.js';
 import { deadlinesManager } from './deadlines.js';
 import { routeCourseContent } from './course-data.js';
@@ -432,6 +432,7 @@ function applyTheme(t, persist=true){
   r.setProperty('--accent-2', t.accent2);
   r.setProperty('--accent-3', t.accent3);
   r.setProperty('--accent-rgb', hexToRgb(t.accent));
+  refreshCampusMapAccent();
   r.setProperty('--bg-1', t.bg1);
   r.setProperty('--bg-2', t.bg2);
   r.setProperty('--bg-3', t.bg3);
