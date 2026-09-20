@@ -74,13 +74,13 @@ try {
     if ((await evaluate(`document.querySelector('#app')?.innerHTML.length || 0`)) > 100) break;
   }
   await evaluate(`document.querySelector('[data-nav="today"]')?.click()`);
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     if (await evaluate(`!!document.querySelector('.cm3d-canvas')`)) break;
   }
   /* Wait for full init (THREE module import + building extrusion), not just
    * canvas presence — a fixed sleep races SwiftShader/CDN timing. */
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const ready = await evaluate(`!!window.__SC_CAMPUS_MAP_3D__?.ready && (window.__SC_CAMPUS_MAP_3D__?.meshById?.size || 0) > 0`);
     if (ready) break;
