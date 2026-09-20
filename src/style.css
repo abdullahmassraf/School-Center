@@ -3992,3 +3992,28 @@ main#view-host,
 /* v1.4.1 — materials load-failure state (course Materials tab) */
 .materials-error-banner{border:1px solid rgba(240,96,138,.35);background:rgba(240,96,138,.08);border-radius:12px;padding:14px 16px;color:var(--ink)}
 .materials-error-banner p{margin:0 0 4px}
+
+
+/* CAMPUS MAP 3D — v1.8.0 --------------------------------------------------- */
+.cm-mode-toggle{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.10);flex-shrink:0}
+.cm-mode-btn{min-width:46px;min-height:30px;padding:4px 12px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);font:600 .74rem/1 var(--font-body,inherit);cursor:pointer;transition:background .16s ease,color .16s ease,border-color .16s ease}
+.cm-mode-btn:hover{color:var(--ink);background:rgba(255,255,255,.07)}
+.cm-mode-3d-active,.cm-mode-2d-active{color:var(--ink);background:rgba(var(--accent-rgb,124,140,255),.16);border-color:rgba(var(--accent-rgb,124,140,255),.35)}
+.cm-stage-3d{position:relative;width:100%;max-width:700px;margin:0 auto;border-radius:20px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,rgba(138,112,237,.18),transparent 58%),linear-gradient(145deg,#121524,#0a0c14 72%);border:1px solid rgba(138,112,237,.24);box-shadow:0 24px 55px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.08)}
+.cm3d-mount:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(6,182,212,.06),transparent 42%),linear-gradient(180deg,rgba(255,255,255,.035),transparent 24%);z-index:1}
+.cm3d-mount{position:relative;width:100%;aspect-ratio:930/640;min-height:320px;max-height:560px;cursor:grab;touch-action:none}
+.cm3d-mount:active{cursor:grabbing}
+.cm3d-canvas{display:block;width:100%!important;height:100%!important}
+.cm3d-loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:.85rem;background:rgba(16,23,53,.5);pointer-events:none}
+.cm3d-info{position:absolute;top:14px;left:14px;z-index:4;width:min(290px,calc(100% - 92px));display:grid;gap:6px;padding:14px 15px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(18,21,36,.78);backdrop-filter:blur(14px);box-shadow:0 12px 28px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.1);pointer-events:none}
+.cm3d-info-tag{display:flex;align-items:center;gap:7px;color:#a99dfc;font-size:.62rem;font-weight:800;letter-spacing:.14em}
+.cm3d-pulse{width:7px;height:7px;border-radius:50%;background:#8a70ed;box-shadow:0 0 0 4px rgba(138,112,237,.14),0 0 12px rgba(138,112,237,.8)}
+.cm3d-info-title{color:#f1f5f9;font-size:1rem;line-height:1.2;letter-spacing:-.01em}
+.cm3d-info-copy{color:#c0c7da;font-size:.72rem;line-height:1.45}
+.cm3d-info-route{padding-top:7px;border-top:1px solid rgba(255,255,255,.09);color:#67e8f9;font-size:.66rem;font-weight:650;line-height:1.3}
+.cm3d-hud{position:absolute;top:14px;right:14px;display:flex;gap:8px;z-index:4}
+.cm3d-hud button{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;border:1px solid rgba(255,255,255,.14);background:rgba(16,23,53,.72);color:var(--ink);cursor:pointer;backdrop-filter:blur(6px);transition:background .16s ease,transform .16s ease}
+.cm3d-hud button:hover{background:rgba(16,23,53,.9);transform:translateY(-1px)}
+.cm3d-hud button svg{width:17px;height:17px}
+.cm3d-hud button.is-off{opacity:.45}
+@media(max-width:720px){.cm3d-mount{min-height:260px}.cm3d-hud button{width:34px;height:34px}.cm3d-info{top:10px;left:10px;width:min(240px,calc(100% - 84px));padding:11px 12px}.cm3d-info-copy{font-size:.66rem}.cm3d-info-route{font-size:.6rem}}

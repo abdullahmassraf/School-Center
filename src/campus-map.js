@@ -18,6 +18,13 @@
 
 export const CAMPUS_VIEWBOX = { w: 930, h: 1000 };
 
+/* 3D mode preference survives renders; defaults ON, auto-falls back to the
+ * SVG plan when WebGL or the Three.js CDN is unavailable. */
+let campusMode3d = true;
+let campus3dManager = null; // active CampusMap3DManager, if any
+let campus3dBootPromise = null;
+export function isCampus3dActive() { return campusMode3d; }
+
 /* Circular cutout: everything outside this circle is clipped away. */
 const CUTOUT = { cx: 465, cy: 500, r: 462 };
 
@@ -128,17 +135,30 @@ function buildingNode(id, b) {
 export function renderCampusMapWidget() {
   const lots = PARKING_LOTS.map(lotNode).join('');
   const buildings = Object.entries(CAMPUS_BUILDINGS).map(([id, b]) => buildingNode(id, b)).join('');
+  const modeToggle = `
+    <div class="cm-mode-toggle" role="group" aria-label="Map display mode">
+      <button class="cm-mode-btn ${campusMode3d ? 'cm-mode-3d-active' : ''}" id="cm-mode-3d" type="button" aria-pressed="${campusMode3d}" title="Interactive 3D map">3D</button>
+      <button class="cm-mode-btn ${campusMode3d ? '' : 'cm-mode-2d-active'}" id="cm-mode-2d" type="button" aria-pressed="${!campusMode3d}" title="Flat plan view">Plan</button>
+    </div>`;
 
-  return `
+  const stage3d = `
+      <div class="cm-stage cm-stage-3d" id="cm-stage-3d" style="${campusMode3d ? '' : 'display:none;'}">
+        <div class="cm3d-mount" id="cm3d-mount" aria-label="Interactive 3D map of Davis Campus"></div>
+        <div class="cm3d-loading" id="cm3d-loading">Loading 3D campus…</div>
+      </div>`;
+
+  const head = `
     <div class="panel campus-map-card" id="campus-map-card">
       <div class="cm-head">
         <div class="cm-head-copy">
           <h3 class="headfont">Campus Map</h3>
           <p class="cm-status" id="cm-status-text">Davis Campus. Select a building, or use Show location on a class.</p>
         </div>
-      </div>
+        ${modeToggle}
+      </div>`;
 
-      <div class="cm-stage">
+  const stageSvg = `
+      <div class="cm-stage" id="cm-stage-svg" style="${campusMode3d ? 'display:none;' : ''}">
         <svg viewBox="0 0 ${CAMPUS_VIEWBOX.w} ${CAMPUS_VIEWBOX.h}" class="campus-map-svg" id="campus-map-svg" role="img" aria-label="Davis Campus map">
           <defs>
             <clipPath id="cm-cutout"><circle cx="${CUTOUT.cx}" cy="${CUTOUT.cy}" r="${CUTOUT.r}"/></clipPath>
@@ -207,17 +227,36 @@ export function renderCampusMapWidget() {
         </svg>
       </div>
 
+      ${stage3d}
+
     </div>
   `;
+
+  return head + stageSvg;
 }
 
 export function highlightBuilding(buildingId) {
   const card = document.getElementById('campus-map-card');
-  const svg = document.getElementById('campus-map-svg');
   const target = CAMPUS_BUILDINGS[buildingId];
-  if (!card || !svg || !target) return;
+  if (!card || !target) return;
 
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  /* Active 3D scene takes precedence: camera flies to the building and the
+   * wayfinding path animates in; the SVG pin/dim logic is skipped. */
+  if (campusMode3d && campus3dManager && campus3dManager.ready) {
+    campus3dManager.focus(buildingId);
+    const s = document.getElementById('cm-status-text');
+    if (s) s.textContent = `Showing ${target.label}.`;
+    return;
+  }
+  if (campusMode3d && !campus3dManager) {
+    /* 3D still booting: remember the request and show the plan meanwhile. */
+    pendingFocus3d = buildingId;
+  }
+
+  const svg = document.getElementById('campus-map-svg');
+  if (!svg) return;
 
   svg.querySelectorAll('.cm-building').forEach((el) => {
     const isTarget = el.dataset.building === buildingId;
@@ -237,6 +276,7 @@ export function highlightBuilding(buildingId) {
 }
 
 export function clearCampusHighlight() {
+  if (campusMode3d && campus3dManager) campus3dManager.reset();
   const svg = document.getElementById('campus-map-svg');
   if (svg) {
     svg.querySelectorAll('.cm-building, .cm-lot, .cm-shuttle, .cm-minor')
@@ -248,10 +288,108 @@ export function clearCampusHighlight() {
   if (statusText) statusText.textContent = 'Davis Campus. Select a building, or use Show location on a class.';
 }
 
-/** Wires clicks inside the map. Clicking a building focuses it; clicking the
- *  map background clears the focus and restores every building. Safe to call
- *  on every render. [data-show-location] buttons are wired in app.js instead,
- *  because they may need to switch views before highlighting. */
+/** Boot the 3D manager inside the current widget (if 3D mode is on).
+ *  Safe to call on every render: skips when absent/off, tears down any stale
+ *  instance whose mount point disappeared, and falls back to the SVG plan
+ *  when WebGL/CDN is unavailable. */
+export async function initCampusMap3d() {
+  const card = document.getElementById('campus-map-card');
+  if (!card) {
+    /* Widget left the DOM (navigated away) — stop the render loop. */
+    disposeCampusMap3d();
+    return;
+  }
+  const stage = document.getElementById('cm-stage-3d');
+  const mount = document.getElementById('cm3d-mount');
+  if (!stage || !mount) return;
+
+  /* A previous render's manager is stale (its mount was replaced) — dispose. */
+  if (campus3dManager && campus3dManager.mount !== mount) {
+    campus3dManager.dispose();
+    campus3dManager = null;
+  }
+
+  /* Wire mode toggle buttons (also functional when 3D failed and we fell back). */
+  const btn3d = document.getElementById('cm-mode-3d');
+  const btn2d = document.getElementById('cm-mode-2d');
+  const setMode = (want3d) => {
+    campusMode3d = want3d;
+    if (stage) stage.style.display = want3d ? '' : 'none';
+    const svgStage = document.getElementById('cm-stage-svg');
+    if (svgStage) svgStage.style.display = want3d ? 'none' : '';
+    btn3d?.classList.toggle('cm-mode-3d-active', want3d);
+    btn2d?.classList.toggle('cm-mode-2d-active', !want3d);
+    btn3d?.setAttribute('aria-pressed', String(want3d));
+    btn2d?.setAttribute('aria-pressed', String(!want3d));
+    if (want3d) {
+      initCampusMap3d();
+    } else if (campus3dManager) {
+      campus3dManager.dispose();
+      campus3dManager = null;
+    }
+  };
+  if (btn3d && !btn3d.dataset.cmWired) {
+    btn3d.dataset.cmWired = '1';
+    btn3d.addEventListener('click', () => setMode(true));
+    btn2d?.addEventListener('click', () => setMode(false));
+  }
+
+  if (!campusMode3d || campus3dManager) return;
+
+  const loading = document.getElementById('cm3d-loading');
+  let manager = null;
+  try {
+    const { CampusMap3DManager } = await import('./campus-map-3d.js');
+    if (!mount.isConnected) return;
+    /* Publish the instance before awaiting CDN imports so a second render
+     * cannot start a duplicate renderer while the first one is booting. */
+    manager = new CampusMap3DManager(mount, {
+      getBuildings: () => CAMPUS_BUILDINGS,
+      onStatus: (msg) => {
+        const s = document.getElementById('cm-status-text');
+        if (s) s.textContent = msg;
+      }
+    });
+    campus3dManager = manager;
+    const ok = await manager.init();
+    if (loading) loading.remove();
+    if (ok && campus3dManager === manager) {
+      manager.resize();
+      /* Re-apply any pending Show-location focus through the 3D scene. */
+      if (pendingFocus3d) {
+        manager.focus(pendingFocus3d);
+        pendingFocus3d = null;
+      }
+    } else if (campus3dManager === manager && mount.isConnected) {
+      throw new Error('3D init failed');
+    }
+  } catch (err) {
+    /* A stale manager can finish after a reactive render replaced its mount.
+     * It must not disable the current 3D instance or alter the new UI. */
+    if (campus3dManager !== manager || !mount.isConnected) {
+      manager?.dispose();
+      return;
+    }
+    console.warn('[campus-3d] unavailable, using flat plan:', err && (err.stack || err.message));
+    campus3dManager = null;
+    manager?.dispose();
+    campusMode3d = false;
+    setMode(false);
+    const s = document.getElementById('cm-status-text');
+    if (s) s.textContent = '3D view unavailable here — showing flat plan.';
+  }
+}
+
+/* Building requested via Show location before the 3D scene finished booting. */
+let pendingFocus3d = null;
+
+export function disposeCampusMap3d() {
+  if (campus3dManager) {
+    campus3dManager.dispose();
+    campus3dManager = null;
+  }
+}
+
 export function attachCampusMapHandlers() {
   const svg = document.getElementById('campus-map-svg');
   if (svg) {
