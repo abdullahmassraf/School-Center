@@ -1048,14 +1048,17 @@ export class CampusMap3DManager {
         uniform float uReveal; uniform float uTotal;
         varying float vDist;
         void main() {
-          float dash = 26.0;
-          float flow = fract((vDist - uTime * 90.0) / dash);
-          float arrow = smoothstep(0.0, 0.35, flow) * (1.0 - smoothstep(0.55, 1.0, flow));
-          float alpha = uOpacity * (0.35 + 0.65 * arrow);
-          alpha *= mix(1.0, 1.15, uFocus);
-          alpha *= smoothstep(0.0, 90.0, uReveal - vDist);
-          alpha *= 1.0 - smoothstep(uTotal - 55.0, uTotal, vDist);
-          gl_FragColor = vec4(uColor, alpha);
+          /* A faint always-legible guide line + soft travelling light
+           * pulses (no hard dashes): reads as energy flowing to the target. */
+          float pulse = smoothstep(0.0, 0.45, fract((vDist - uTime * 80.0) / 240.0))
+                      * (1.0 - smoothstep(0.45, 0.95, fract((vDist - uTime * 80.0) / 240.0)));
+          float alpha = uOpacity * (0.30 + 0.62 * pulse);
+          alpha *= mix(1.0, 1.12, uFocus);
+          /* Self-painting reveal with an eased head, soft tail landing. */
+          alpha *= smoothstep(0.0, 130.0, uReveal - vDist);
+          alpha *= 1.0 - smoothstep(uTotal - 70.0, uTotal - 6.0, vDist);
+          vec3 col = mix(uColor, vec3(1.0), pulse * 0.35);
+          gl_FragColor = vec4(col, alpha);
         }`
     });
     /* Attach cumulative distance attribute for the flow shader. */
@@ -1097,41 +1100,98 @@ export class CampusMap3DManager {
     );
     this.routeCurve = curve;
     if (!this._arrowGeo) {
-      this._arrowGeo = new THREE.ConeGeometry(5, 12, 4);
+      /* One InstancedMesh carries every arrow: per-frame matrices + colors
+       * give each arrow its own fade/bob while costing a single draw call. */
+      this._arrowGeo = new THREE.ConeGeometry(4.4, 11, 6);
       this._arrowGeo.rotateX(Math.PI / 2);
       this._arrowMat = new THREE.MeshBasicMaterial({
-        color: PALETTE.path, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false
+        color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
       });
       this._track(this._arrowGeo, this._arrowMat);
     }
     const ARROWS = 14;
-    for (let i = 0; i < ARROWS; i++) {
-      const arrow = new THREE.Mesh(this._arrowGeo, this._arrowMat);
-      arrow.raycast = () => {};
-      const t = i / ARROWS;
-      arrow.position.copy(curve.getPointAt(t));
-      arrow.lookAt(curve.getPointAt((t + 0.02) % 1));
-      this.pathGroup.add(arrow);
-      this.routeArrows.push({ mesh: arrow, t });
-    }
+    const inst = new THREE.InstancedMesh(this._arrowGeo, this._arrowMat, ARROWS);
+    inst.raycast = () => {};
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    inst.frustumCulled = false;
+    const col = new THREE.Color();
+    for (let i = 0; i < ARROWS; i++) inst.setColorAt(i, col.setHex(0x000000)); // additive black = hidden
+    this.pathGroup.add(inst);
+    this.routeArrows.push({ mesh: inst, inst, t: Array.from({ length: ARROWS }, (_, i) => i / ARROWS), curve });
+    this._updateArrows(0);
 
-    /* Route markers: subtle origin/target pucks. */
-    const puckGeo = new THREE.CylinderGeometry(9, 9, 4, 24);
-    const originMat = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.85 });
-    const origin = new THREE.Mesh(puckGeo, originMat);
+    /* Route markers: flat sonar rings — origin pulses gently, the target
+     * "lands" with a one-shot expanding ripple, then breathes. */
+    const mkRing = (rIn, rOut, hex, opacity) => {
+      const g = new THREE.RingGeometry(rIn, rOut, 48);
+      const m = new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+      const mesh = new THREE.Mesh(g, m);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.renderOrder = 6;
+      mesh.raycast = () => {};
+      return mesh;
+    };
     const p0 = WAYPOINTS.bus;
-    origin.position.set(p0[0], 3, p0[1]);
+    const origin = mkRing(9, 11.5, PALETTE.path, 0.7);
+    origin.position.set(p0[0], 2.6, p0[1]);
     this.pathGroup.add(origin);
-    this._track(puckGeo, originMat);
+    this._track(origin.geometry, origin.material);
 
-    const targetMat = new THREE.MeshBasicMaterial({ color: PALETTE.pin, transparent: true, opacity: 0.9 });
-    const target = new THREE.Mesh(puckGeo, targetMat);
     const p1 = WAYPOINTS[entrance];
-    target.position.set(p1[0], 3, p1[1]);
+    const target = mkRing(13, 15.5, PALETTE.pin, 0.85);
+    target.position.set(p1[0], 2.6, p1[1]);
     this.pathGroup.add(target);
-    this._track(null, targetMat);
-    this.pathPucks = [origin, target];
+    this._track(target.geometry, target.material);
+    /* Landing ripple: expand + fade once on arrival. */
+    const ripple = mkRing(13, 15.5, PALETTE.pin, 0.6);
+    ripple.position.set(p1[0], 2.7, p1[1]);
+    this.pathGroup.add(ripple);
+    this._track(ripple.geometry, ripple.material);
+    if (this.gsap) {
+      ripple.scale.setScalar(0.6);
+      this.gsap.to(ripple.scale, { x: 2.6, y: 2.6, z: 2.6, duration: 1.3, ease: 'power2.out' });
+      this.gsap.to(ripple.material, { opacity: 0, duration: 1.3, ease: 'power2.out' });
+    }
+    this.pathPucks = [origin, target, ripple];
     if (this.mount) this.mount.dataset.pathSegments = String(this.pathLines.length);
+  }
+
+  /* Drive the instanced route arrows: position + orientation + per-arrow
+   * fade (transparent at both ends so the wrap is invisible) + a gentle bob.
+   * One draw call for the whole formation. */
+  _updateArrows(dt) {
+    const entry = this.routeArrows[this.routeArrows.length - 1];
+    if (!entry || !this.pathGroup.visible) return;
+    const THREE = this.THREE;
+    this._pathQ = this._pathQ || new THREE.Quaternion();
+    this._pathM = this._pathM || new THREE.Matrix4();
+    this._pathS = this._pathS || new THREE.Vector3();
+    this._pathUp = this._pathUp || new THREE.Vector3(0, 1, 0);
+    this._pathLook = this._pathLook || new THREE.Vector3();
+    this._pathCol = this._pathCol || new THREE.Color();
+    const t = this.clockUniform.value;
+    const flow = t * 0.042;
+    const baseTint = this._pathTint || (this._pathTint = new THREE.Color(PALETTE.path));
+    for (let i = 0; i < entry.t.length; i++) {
+      const u = (entry.t[i] + flow) % 1;
+      entry.curve.getPointAt(u, this._tmpA);
+      entry.curve.getTangentAt(u, this._tmpB);
+      const bob = Math.sin(t * 1.8 + i * 2.399) * 1.4;
+      this._pathLook.copy(this._tmpA).add(this._tmpB);
+      this._pathM.lookAt(this._tmpA, this._pathLook, this._pathUp);
+      this._pathQ.setFromRotationMatrix(this._pathM);
+      const pulse = 0.92 + 0.12 * Math.sin(t * 2.2 + i * 1.7);
+      this._pathS.setScalar(pulse);
+      this._pathM.compose(this._tmpA.setY(8 + 1.5 + bob), this._pathQ, this._pathS);
+      entry.inst.setMatrixAt(i, this._pathM);
+      /* Additive blending: black = invisible. Fade the formation's ends so
+       * arrows materialize after the bus stop and dissolve at the door. */
+      const fade = THREE.MathUtils.smoothstep(u, 0.0, 0.07) * (1 - THREE.MathUtils.smoothstep(u, 0.93, 1.0));
+      this._pathCol.copy(baseTint).multiplyScalar(0.85 * fade + 0.12);
+      entry.inst.setColorAt(i, this._pathCol);
+    }
+    entry.inst.instanceMatrix.needsUpdate = true;
+    if (entry.inst.instanceColor) entry.inst.instanceColor.needsUpdate = true;
   }
 
   _clearPaths() {
@@ -1141,7 +1201,10 @@ export class CampusMap3DManager {
       if (mat) mat.dispose();
     }
     this.pathLines = [];
-    for (const a of this.routeArrows || []) this.pathGroup.remove(a.mesh);
+    for (const a of this.routeArrows || []) {
+      a.inst?.dispose?.();          // free instance buffers (geo/mat are shared + tracked)
+      this.pathGroup.remove(a.mesh);
+    }
     this.routeArrows = [];
     this.routeCurve = null;
     if (this.mount) this.mount.dataset.pathSegments = '0';
@@ -1884,23 +1947,19 @@ export class CampusMap3DManager {
         this.sph.yaw += (this.camMode === 'focus' ? this.orbitSpeed : 0.03) * dt;
       }
       this._applyDampedRig(dt);
-      /* Floating wayfinding arrows glide along the route spline. */
-      if (this.routeCurve && this.pathGroup.visible && this.routeArrows.length) {
-        const flow = this.clockUniform.value * 0.045;
-        for (const a of this.routeArrows) {
-          const u = (a.t + flow) % 1;
-          this.routeCurve.getPointAt(u, this._tmpA);
-          this.routeCurve.getTangentAt(u, this._tmpB);
-          a.mesh.position.copy(this._tmpA);
-          a.mesh.position.y += 1.5;
-          this._tmpA.add(this._tmpB);
-          a.mesh.lookAt(this._tmpA);
-        }
-      }
+      /* Floating wayfinding arrows glide along the route spline — instanced,
+       * fading in/out at the ends so the loop never pops. */
+      this._updateArrows(dt);
       /* Pulsing transit halo. */
       if (this.busRing) {
         const s = 1 + 0.05 * Math.sin(this.clockUniform.value * 1.6);
         this.busRing.scale.setScalar(s);
+      }
+      /* Route rings breathe softly (origin cyan, target amber). */
+      if (this.pathPucks) {
+        const b = 0.92 + 0.1 * Math.sin(this.clockUniform.value * 2.1);
+        this.pathPucks[0].scale.setScalar(b);
+        this.pathPucks[1].material.opacity = 0.62 + 0.2 * Math.sin(this.clockUniform.value * 2.1 + 1.2);
       }
       /* Focused-building ring: a slow, calm sonar sweep. */
       if (this.focusRing?.visible) {
