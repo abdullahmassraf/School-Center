@@ -417,6 +417,79 @@ export class CampusMap3DManager {
     this.sunSprite.scale.set(360, 360, 1);
     this.scene.add(this.sunSprite);
     this._track(null, this.sunSprite.material);
+
+    this._buildSky();
+  }
+
+  /* --- Sky dome ------------------------------------------------------------
+   * A stylized HDRI-feel sky painted by a shader: vertical gradient with a
+   * real sun halo at the true solar position, night stars, and weather
+   * grading — matched to the site's navy/indigo palette. Attached to the
+   * camera target so it never clips, and rendered behind everything. */
+  _buildSky() {
+    const THREE = this.THREE;
+    const geo = new THREE.SphereGeometry(3000, 32, 18);
+    this.skyUniforms = {
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uDayF: { value: 0 },
+      uHorizonF: { value: 0 },
+      uOvercast: { value: 0 },
+      uAccent: { value: new THREE.Color(this.accentHex || 0x7c8cff) }
+    };
+    this.skyMat = new THREE.ShaderMaterial({
+      uniforms: this.skyUniforms,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        uniform vec3 uSunDir; uniform float uDayF; uniform float uHorizonF; uniform float uOvercast; uniform vec3 uAccent;
+        varying vec3 vDir;
+        float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.259)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        void main() {
+          vec3 d = normalize(vDir);
+          float h = clamp(d.y, -0.12, 1.0);
+          /* Day: site indigo -> pale horizon. Night: deep navy with a subtle
+           * accent glow along the horizon band. */
+          vec3 dayZenith = vec3(0.16, 0.22, 0.46);
+          vec3 dayHorizon = vec3(0.55, 0.63, 0.82);
+          vec3 nightZenith = vec3(0.024, 0.032, 0.09);
+          vec3 nightHorizon = vec3(0.07, 0.08, 0.18);
+          vec3 zen = mix(nightZenith, dayZenith, uDayF);
+          vec3 hor = mix(nightHorizon, dayHorizon, uDayF);
+          /* Warm band at sunrise/sunset. */
+          vec3 warm = vec3(0.85, 0.44, 0.25);
+          hor = mix(hor, warm, uHorizonF * 0.55);
+          zen = mix(zen, vec3(0.28, 0.16, 0.22), uHorizonF * 0.3);
+          vec3 col = mix(hor, zen, pow(clamp(h, 0.0, 1.0), 0.62));
+          /* Stars fade in with darkness. */
+          float star = step(0.9992, hash(floor(d * 420.0))) * (1.0 - uDayF) * smoothstep(0.02, 0.25, d.y);
+          col += vec3(star * 0.8);
+          /* Sun halo on the true direction. */
+          float sunD = max(dot(d, normalize(uSunDir)), 0.0);
+          float halo = pow(sunD, 90.0) * 0.9 + pow(sunD, 260.0) * 1.1;
+          vec3 sunTint = mix(vec3(1.0, 0.55, 0.3), vec3(1.0, 0.93, 0.8), uDayF);
+          col += sunTint * halo * (1.0 - uOvercast) * smoothstep(-0.12, 0.1, uSunDir.y);
+          /* Overcast washes the sky toward flat grey. */
+          col = mix(col, vec3(0.42, 0.45, 0.52) * (0.35 + 0.65 * uDayF), uOvercast * 0.75);
+          /* Fog band at the horizon ties the dome to the campus haze. */
+          float fogBand = 1.0 - smoothstep(0.0, 0.22, d.y);
+          col = mix(col, vec3(0.09, 0.11, 0.22), fogBand * (1.0 - uDayF) * 0.55);
+          gl_FragColor = vec4(col, 1.0);
+        }`
+    });
+    this.sky = new THREE.Mesh(geo, this.skyMat);
+    this.sky.raycast = () => {};
+    this.sky.renderOrder = -10;
+    this.sky.frustumCulled = false;
+    this.scene.add(this.sky);
+    this._track(geo, this.skyMat);
   }
 
   /* Stylized window glow: emissive panels on the primary facades that light
@@ -452,19 +525,26 @@ export class CampusMap3DManager {
       const v = VARIETY[id] || { w: 9, h: 6.5, cols: 6, rows: 5, lit: 0.6 };
       const box = new THREE.Box3().setFromObject(mesh);
       const cx = (box.min.x + box.max.x) / 2;
-      const cz = box.max.z + 0.5;
-      const y0 = box.min.y + 8;
+      /* Attach to the wall itself (+0.15 clearance, not floating off it). */
+      const cz = box.max.z + 0.15;
+      const wallBottom = box.min.y + 7;
+      const wallTop = box.max.y - 3;
+      const ROW_H = 11;
+      /* Clamp rows to the actual wall height — no floating rows above the
+       * roof — then center the block vertically on the facade. */
+      const rows = Math.max(1, Math.min(v.rows, Math.floor((wallTop - wallBottom) / ROW_H)));
+      const y0 = wallBottom + Math.max(0, (wallTop - wallBottom - (rows - 1) * ROW_H) / 2 - 2);
       const span = Math.min(box.max.x - box.min.x - 12, 96);
       if (span < 24) continue;
       const cells = [];
-      for (let r = 0; r < v.rows; r++) {
+      for (let r = 0; r < rows; r++) {
         for (let c = 0; c < v.cols; c++) {
           const seed = (r * 13 + c * 7 + id.charCodeAt(0) * 5) % 9;
           if (seed === 0) continue; // structural gap, per-building rhythm
           const lit = ((seed * 31 + r * 7 + c * 3) % 100) / 100 < v.lit;
           /* Two warm tints + a cool tint for variety. */
           const tint = seed % 3 === 0 ? 0xd6e4ff : seed % 3 === 1 ? 0xffd9a0 : 0xffc98a;
-          cells.push({ x: cx - span / 2 + (c + 0.5) * (span / v.cols), y: y0 + r * 11, tint, on: lit });
+          cells.push({ x: cx - span / 2 + (c + 0.5) * (span / v.cols), y: y0 + r * ROW_H, tint, on: lit });
         }
       }
       /* One InstancedMesh per building: every window is an instance with its
@@ -1195,6 +1275,14 @@ export class CampusMap3DManager {
       this.sunSprite.scale.set(s, s, 1);
     }
 
+    /* Sky dome uniforms follow the same real sun. */
+    if (this.skyUniforms) {
+      this.skyUniforms.uSunDir.value.copy(sunPos).normalize();
+      this.skyUniforms.uDayF.value = dayF;
+      this.skyUniforms.uHorizonF.value = horizonF * (el > -8 ? 1 : 0);
+      this.skyUniforms.uOvercast.value = { clear: 0, cloudy: 0.25, overcast: 0.75, fog: 0.6, rain: 0.6, snow: 0.5, thunder: 0.85 }[this.weatherCondition] ?? 0;
+    }
+
     if (this.sun.shadow) this.sun.shadow.needsUpdate = true;
     this._pendingShadowRefresh = true;
   }
@@ -1796,6 +1884,9 @@ export class CampusMap3DManager {
           if (this.weatherCondition === 'thunder' && Math.random() < dt / 5) this._flash = 0.32 + Math.random() * 0.3;
         }
       }
+      /* Keep the sky dome centered on the orbit target: the horizon never
+       * drifts as the camera moves. */
+      if (this.sky) this.sky.position.set(this.camTarget.x, 0, this.camTarget.z);
       this._animateParticles(dt);
       this._render();
     };
