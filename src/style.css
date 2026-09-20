@@ -3992,3 +3992,5 @@ main#view-host,
 /* v1.4.1 — materials load-failure state (course Materials tab) */
 .materials-error-banner{border:1px solid rgba(240,96,138,.35);background:rgba(240,96,138,.08);border-radius:12px;padding:14px 16px;color:var(--ink)}
 .materials-error-banner p{margin:0 0 4px}
+
+.search-target-highlight{outline:2px solid var(--accent);outline-offset:4px;box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 18%,transparent),0 12px 40px rgba(0,0,0,.28);transition:outline .2s ease,box-shadow .2s ease;}
