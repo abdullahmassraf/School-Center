@@ -1128,10 +1128,11 @@ export class CampusMap3DManager {
     if (!this._arrowGeo) {
       /* One InstancedMesh carries every arrow: per-frame matrices + colors
        * give each arrow its own fade/bob while costing a single draw call. */
-      this._arrowGeo = new THREE.ConeGeometry(4.4, 11, 6);
+      /* Slim, quiet chevron: reads as a direction cue, not a traffic cone. */
+      this._arrowGeo = new THREE.ConeGeometry(3.4, 9.5, 8);
       this._arrowGeo.rotateX(Math.PI / 2);
       this._arrowMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
+        color: 0xffffff, transparent: true, opacity: 0.78, blending: THREE.AdditiveBlending, depthWrite: false
       });
       this._track(this._arrowGeo, this._arrowMat);
     }
@@ -1197,14 +1198,18 @@ export class CampusMap3DManager {
     this._pathCol = this._pathCol || new THREE.Color();
     const t = this.clockUniform.value;
     const flow = t * 0.042;
-    const baseTint = this._pathTint || (this._pathTint = new THREE.Color(PALETTE.path));
+    /* Tint refreshed by refreshAccent() so arrows match the theme. */
+    const baseTint = this._pathTint || (this._pathTint = this.accentHex.clone().lerp(new THREE.Color(0xffffff), 0.1));
     for (let i = 0; i < entry.t.length; i++) {
       const u = (entry.t[i] + flow) % 1;
       entry.curve.getPointAt(u, this._tmpA);
       entry.curve.getTangentAt(u, this._tmpB);
       const bob = Math.sin(t * 1.8 + i * 2.399) * 1.4;
       this._pathLook.copy(this._tmpA).add(this._tmpB);
-      this._pathM.lookAt(this._tmpA, this._pathLook, this._pathUp);
+      /* +Z column = eye − target, so eye = point + tangent makes the cone
+       * tip (rotateX(π/2) points it at +Z) aim ALONG the travel direction.
+       * The previous argument order aimed arrows backwards. */
+      this._pathM.lookAt(this._pathLook, this._tmpA, this._pathUp);
       this._pathQ.setFromRotationMatrix(this._pathM);
       const pulse = 0.92 + 0.12 * Math.sin(t * 2.2 + i * 1.7);
       this._pathS.setScalar(pulse);
@@ -2145,6 +2150,12 @@ export class CampusMap3DManager {
     const focused = this.focusId ? this.meshById.get(this.focusId) : null;
     if (focused) this._setFocusMaterial(focused);
     else this._resetMaterials();
+    /* Wayfinding follows the theme: line shader color, arrow instance tint
+     * and the origin ring. The amber target ring stays fixed — a deliberate
+     * destination contrast that must stay readable on every theme. */
+    for (const { mat } of this.pathLines || []) mat?.uniforms?.uColor?.value.set(this.accentHex);
+    if (this._pathTint) this._pathTint.copy(this.accentHex).lerp(new this.THREE.Color(0xffffff), 0.1);
+    if (this.pathPucks?.[0]) this.pathPucks[0].material.color.set(this.accentHex).lerp(new this.THREE.Color(0xffffff), 0.25);
     if (this.skyUniforms) this.skyUniforms.uAccent.value.copy(this.accentHex);
     if (this.poolMat) this.poolMat.color.set(this.accentHex).lerp(new this.THREE.Color(0xffc27a), 0.5);
     if (this.focusRing) this.focusRing.material.color.set(this.accentHex);

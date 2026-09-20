@@ -352,6 +352,29 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   if (chip.focusBuilding !== 'C' || !chip.segments) throw new Error(`Chip selection failed: ${JSON.stringify(chip)}`);
   console.log(`CHIPS: quick-select C -> focus + route (${chip.segments} segment)`);
 
+  /* Arrow orientation guard: cone tips (+Z) must aim ALONG the travel
+   * tangent — a Matrix4.lookAt argument swap once pointed them backwards. */
+  const orient = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const T = mgr.THREE;
+    const entry = mgr.routeArrows[mgr.routeArrows.length - 1];
+    if (!entry) return null;
+    const m4 = new T.Matrix4(), q = new T.Quaternion(), p = new T.Vector3(), sc = new T.Vector3();
+    const axis = new T.Vector3(0, 0, 1), wa = new T.Vector3();
+    const flow = (mgr.clockUniform.value * 0.042) % 1;
+    let min = 1, sum = 0, n = 0;
+    for (let i = 0; i < entry.inst.count; i += 3) {
+      entry.inst.getMatrixAt(i, m4);
+      m4.decompose(p, q, sc);
+      wa.copy(axis).applyQuaternion(q);
+      const d = wa.dot(entry.curve.getTangentAt((entry.t[i] + flow) % 1));
+      min = Math.min(min, d); sum += d; n++;
+    }
+    return { avg: sum / n, min, count: entry.inst.count };
+  })()`);
+  if (!orient || orient.avg < 0.9 || orient.min < 0.85) throw new Error(`Arrows misoriented: ${JSON.stringify(orient)}`);
+  console.log(`ARROWS: ${orient.count} instanced, pointing along travel (avg dot ${orient.avg.toFixed(2)}, min ${orient.min.toFixed(2)})`);
+
   const pathToggle = await evaluate(`(() => {
     const button = document.querySelector('.cm3d-path-toggle');
     const mount = document.querySelector('#cm3d-mount');
