@@ -281,6 +281,42 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   if (lightStates.night.windowOpacity < 0.55) throw new Error(`Windows not lit at night: ${JSON.stringify(lightStates)}`);
   console.log(`DAY/NIGHT: windows day=${lightStates.day.windowOpacity} night=${lightStates.night.windowOpacity} (nightF ${lightStates.day.nightF}/${lightStates.night.nightF})`);
 
+  /* --- Celestial guard ------------------------------------------------------
+   * (1) The sun glow must be bright in daylight, gone at night, and must NOT
+   *     be fogged out (FogExp2 used to erase ~75% of the disc).
+   * (2) The sprite must ride the camera along the sun direction so it stays
+   *     aligned with the dome's disc from any orbit pose (at-infinity). */
+  const celestial = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const dayState = (() => {
+      mgr._solarOverride = { elevationDeg: 38, azimuthDeg: 225 };
+      mgr._applyTimeOfDay();
+      return { sunOpacity: +mgr.sunSprite.material.opacity.toFixed(3), fog: mgr.sunSprite.material.fog,
+        starsW: +((1 - mgr.skyUniforms.uDayF.value)).toFixed(3) };
+    })();
+    const nightState = (() => {
+      mgr._solarOverride = { elevationDeg: -32, azimuthDeg: 305 };
+      mgr._applyTimeOfDay();
+      return { sunOpacity: +mgr.sunSprite.material.opacity.toFixed(3),
+        starsW: +((1 - mgr.skyUniforms.uDayF.value)).toFixed(3) };
+    })();
+    /* Alignment: off-axis orbit pose, sprite direction vs dome sun direction. */
+    mgr.camera.position.set(700, 500, 900);
+    mgr._applyTimeOfDay();
+    const a = mgr.sunSprite.position.clone().sub(mgr.camera.position).normalize();
+    const b = mgr.skyUniforms.uSunDir.value.clone().normalize();
+    const angleDeg = +(Math.acos(Math.min(1, Math.max(-1, a.dot(b)))) * 180 / Math.PI).toFixed(2);
+    mgr._solarOverride = null;
+    mgr._applyTimeOfDay();
+    return { dayState, nightState, angleDeg };
+  })()`);
+  if (celestial.dayState.sunOpacity < 0.3) throw new Error(`Sun glow invisible at 38deg elevation: ${JSON.stringify(celestial.dayState)}`);
+  if (celestial.nightState.sunOpacity > 0.05) throw new Error(`Sun glow leaks at night: ${JSON.stringify(celestial.nightState)}`);
+  if (celestial.dayState.fog !== false) throw new Error('Sun sprite is fogged (FogExp2 erases the disc)');
+  if (celestial.dayState.starsW > 0.1 || celestial.nightState.starsW < 0.9) throw new Error(`Star weight wrong day/night: ${JSON.stringify(celestial)}`);
+  if (celestial.angleDeg > 10) throw new Error(`Sun sprite misaligned with dome sun by ${celestial.angleDeg}deg`);
+  console.log(`CELESTIAL: day sunOp=${celestial.dayState.sunOpacity} night sunOp=${celestial.nightState.sunOpacity} fogOff starsW ${celestial.dayState.starsW}/${celestial.nightState.starsW} align=${celestial.angleDeg}deg`);
+
   /* --- Theme accent follows --accent ----------------------------------------
    * Simulate switching the theme to red and confirm every glass body,
    * emissive and the selection color re-tint live (not fixed purple). */

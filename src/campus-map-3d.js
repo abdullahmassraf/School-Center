@@ -426,7 +426,11 @@ export class CampusMap3DManager {
     if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
     this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this._spriteTex, color: 0xffedc8, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false
+      blending: THREE.AdditiveBlending, depthWrite: false,
+      /* Celestial object: the sky shader already renders atmospheric
+       * scattering around the sun, so scene fog must not eat the disc —
+       * FogExp2 at overview distance used to erase ~75% of it. */
+      fog: false
     }));
     this.sunSprite.scale.set(300, 300, 1);
     this.scene.add(this.sunSprite);
@@ -1446,6 +1450,11 @@ export class CampusMap3DManager {
       -Math.cos(azR) * Math.cos(elR)
     ).multiplyScalar(1100);
     this.sun.position.copy(sunPos);
+    /* Canonical sun direction (unit): the glow sprite rides the CAMERA at a
+     * large offset along this vector every frame, so it reads as a celestial
+     * object at infinity - aligned with the sky dome's disc/halo from every
+     * orbit pose (a fixed world point parallax-drifts ~60 deg off the sun). */
+    this._sunDir = sunPos.clone().normalize();
     /* Sun color: warm on the horizon -> neutral high in the sky. */
     this.sun.color.copy(lerpC(0xff8f4d, 0xfff4e2, this._smooth01(el, 2, 38)));
     this._todSunI = 1.85 * this._smooth01(el, -1, 14);
@@ -1467,10 +1476,10 @@ export class CampusMap3DManager {
     this.scene.fog.color.copy(fog);
     this.renderer?.setClearColor(fog, 1);
 
-    /* Sun glow sprite rides the real sun position (clean ray-glow that
-     * strengthens with elevation and sky clarity). */
-    if (this.sunSprite) {
-      this.sunSprite.position.copy(sunPos).setLength(1600);
+    /* Sun glow sprite rides the real sun direction (position is refreshed
+     * camera-relative in the tick; opacity/scale follow elevation + clarity). */
+    if (this.sunSprite && this._sunDir) {
+      this.sunSprite.position.copy(this.camera.position).addScaledVector(this._sunDir, 1500);
       const clarity = { clear: 1, cloudy: 0.45, overcast: 0.12, fog: 0.1, rain: 0.15, snow: 0.3, thunder: 0.08 }[this.weatherCondition] ?? 0.8;
       this.sunSprite.material.opacity = Math.max(0, this._smooth01(el, -2, 12)) * (0.35 + 0.4 * clarity);
       const s = 300 + 90 * this._smooth01(el, 0, 45);
@@ -2118,8 +2127,12 @@ export class CampusMap3DManager {
         }
       }
       /* Keep the sky dome centered on the orbit target: the horizon never
-       * drifts as the camera moves. */
+       * drifts as the camera moves. The sun sprite rides the camera along
+       * the sun direction so it stays pinned to the true solar position
+       * (at-infinity behavior) from every orbit pose. */
       if (this.sky) this.sky.position.set(this.camTarget.x, 0, this.camTarget.z);
+      if (this.sunSprite && this._sunDir && this._solarElevation != null)
+        this.sunSprite.position.copy(this.camera.position).addScaledVector(this._sunDir, 1500);
       this._animateParticles(dt);
       this._render();
     };
