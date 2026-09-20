@@ -627,11 +627,26 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
     });
     return Math.max(await sample(), await sample(), await sample());
   })()`);
-  /* Floor 8: catches catastrophic scene regressions (incident history: 3fps).
-   * SwiftShader best-of-3 on a shared CI box wobbles 10-13fps; real GPUs run
-   * an order of magnitude faster and are not gated here. */
-  if (!(fps >= 8)) throw new Error(`Frame rate too low even for software rendering: ${fps} fps`);
-  console.log(`PERF: ~${fps} fps under SwiftShader at desktop size (bloom + particles live)`);
+  /* Baseline: a trivial full-canvas clear loop measures what the shared box
+   * can currently deliver. Co-tenant CPU starvation depresses BOTH numbers
+   * together; a genuine scene regression opens a gap between them. */
+  const base = await evaluate(`(async () => {
+    const c = document.createElement('canvas');
+    c.width = 698; c.height = 480;
+    const gl = c.getContext('webgl');
+    const sample = () => new Promise((res) => {
+      let frames = 0; const start = performance.now();
+      const step = () => { gl.clear(gl.COLOR_BUFFER_BIT); frames++; (performance.now() - start < 1800) ? requestAnimationFrame(step) : res(Math.round(frames / ((performance.now() - start) / 1000))); };
+      requestAnimationFrame(step);
+    });
+    return Math.max(await sample(), await sample());
+  })()`);
+  /* Scene must deliver >= 55% of the trivial-clear baseline (floor 4 fps
+   * absolute, incident history: 3fps total collapse). Real GPUs run an order
+   * of magnitude faster and are not gated here. */
+  const ratio = base > 0 ? fps / base : 0;
+  if (!(fps >= 4 && ratio >= 0.55)) throw new Error(`Scene too slow relative to box baseline: scene ${fps} fps vs trivial-clear ${base} fps (ratio ${ratio.toFixed(2)})`);
+  console.log(`PERF: ~${fps} fps scene vs ${base} fps trivial-clear baseline (ratio ${ratio.toFixed(2)}) under SwiftShader`);
 
   /* Geometry fidelity vs the traced Davis plan: the 3D scene maps SVG space
    * to world space 1:1 (X -> X, Y -> Z), so every building's world footprint

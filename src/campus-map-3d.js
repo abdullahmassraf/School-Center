@@ -706,12 +706,16 @@ export class CampusMap3DManager {
     /* Lifted, semi-glossy surface: catches sky/sun so it reads as a lit
      * plaza instead of a black void, and carries real-time sun shadows.
      * Hue follows the live theme accent (refreshAccent re-derives it). */
-    this._groundBase = new THREE.Color(0x232c54);   // neutral dark-blue base
+    this._groundBase = new THREE.Color(0x2b3565);   // lifted dark-blue base
     const m = new THREE.MeshStandardMaterial({
-      color: this._groundBase.clone().lerp(this.accentHex || new THREE.Color(this.accentColor || '#7c8cff'), 0.26),
-      roughness: 0.58, metalness: 0.28
+      color: this._groundBase.clone().lerp(this.accentHex || new THREE.Color(this.accentColor || '#7c8cff'), 0.3),
+      /* Glossy dielectric: low roughness gives a visible sun/sky sheen;
+       * metalness stays low because metal without an env map reads dark. */
+      roughness: 0.38, metalness: 0.12,
+      envMapIntensity: 0.9
     });
     this.groundMat = m;
+    this._groundRough = m.roughness;
     this.ground = new THREE.Mesh(g, m);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.position.set(WORLD.w / 2, -0.4, WORLD.h / 2);
@@ -2067,12 +2071,12 @@ export class CampusMap3DManager {
         const raining = this._particleMode === 'rain';
         this.wetness = Math.min(1, (this.wetness || 0) + (raining ? dt / 20 : -dt / 45));
         if (this.wetness <= 0.001) {
-          if (this.wetPlane.visible) { this.wetPlane.visible = false; this.groundMat.roughness = 0.95; this.roadMat.roughness = 0.95; }
+          if (this.wetPlane.visible) { this.wetPlane.visible = false; this.groundMat.roughness = this._groundRough ?? 0.38; this.roadMat.roughness = 0.95; }
         } else {
           this.wetPlane.visible = true;
           this.wetMat.opacity = this.wetness * 0.16;
           /* Wet surfaces are darker + shinier: pull roughness down. */
-          this.groundMat.roughness = 0.95 - this.wetness * 0.55;
+          this.groundMat.roughness = (this._groundRough ?? 0.38) - this.wetness * 0.16;
           this.roadMat.roughness = 0.95 - this.wetness * 0.6;
         }
       }
@@ -2227,7 +2231,7 @@ export class CampusMap3DManager {
      * neutral base tinted toward the accent so glass buildings, the route
      * and shadows keep their contrast on any theme. */
     if (this.groundMat && this._groundBase) {
-      this.groundMat.color.set(this._groundBase).lerp(this.accentHex, 0.26);
+      this.groundMat.color.set(this._groundBase).lerp(this.accentHex, 0.3);
     }
     if (this.ringMat) this.ringMat.color.set(PALETTE.groundRing).lerp(this.accentHex, 0.5);
     if (this.grid) this._rebuildGrid();
