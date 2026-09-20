@@ -79,6 +79,8 @@ export function performUniversalSearch(query, courses = []) {
           subtitle: `${c.code} · ${m.type}`,
           snippet: summary ? (summary.slice(0, 140) + '...') : '',
           courseId: c.id,
+          materialId: m.id || m.file_path || m.file_url || '',
+          fileUrl: m.file_url || '',
           courseAccent: c.accent || '#8B7CF6',
           targetTab: 'materials'
         });

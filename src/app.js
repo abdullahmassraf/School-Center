@@ -567,6 +567,7 @@ let state = {
   assignmentDetailId: null,  // id of assignment to show in detail modal
   noteModalOpen: false,
   noteModalPreset: {},        // { courseId }
+  materialTargetId: null,
   flashcardsModalOpen: false,
   flashcardIndex: 0,
   // Phase 2 New Modals
@@ -1087,26 +1088,10 @@ export const PORTFOLIO_URL = 'https://abdullahmassraf.github.io/Portfolio/';
    and it pushed every screen's real content ~96px down. This is a single
    hairline row: wordmark left, term chip + portfolio link right. Styling
    lives under "APP BAR" in src/style.css. */
-/** Official app logo mark (inline SVG: crisp at any size, keeps the coin
- * look in header badge, favicon, and print). Keep in sync with assets/logo.svg. */
+/** Official app logo mark (authoritative reference asset, keeps the coin
+ * look in header badge, favicon, and print). Keep in sync with assets/logo.png. */
 function renderLogoMark() {
-  return `<svg viewBox="0 0 100 100" class="sc-logo-svg" focusable="false" aria-hidden="true">
-    <circle cx="50" cy="50" r="49" fill="#05060E"/>
-    <g fill="none" stroke="#F4F6FD" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="50" cy="50" r="44" stroke-width="3.4"/>
-      <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke-width="8"/>
-      <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke="#0B0F2E" stroke-width="3"/>
-      <path d="M35 76 L64 27" stroke-width="2.6"/>
-      <path d="M64 27 l-9 -1.5 M64 27 l-3.5 8.5" stroke-width="2.4"/>
-      <path d="M36 73 l6 5" stroke-width="2.2"/>
-      <circle cx="66.5" cy="24.5" r="3" stroke-width="2.2"/>
-      <circle cx="57" cy="31" r="2" fill="#F4F6FD" stroke="none"/>
-      <circle cx="63" cy="38" r="2.4" fill="#F4F6FD" stroke="none"/>
-      <circle cx="52" cy="27" r="1.8" fill="#F4F6FD" stroke="none"/>
-      <circle cx="45" cy="66" r="2" fill="#F4F6FD" stroke="none"/>
-      <circle cx="50" cy="71.5" r="2.4" fill="#F4F6FD" stroke="none"/>
-    </g>
-  </svg>`;
+  return `<img class="sc-logo-svg" src="./assets/logo.png?v=v1.8.0" alt="" width="128" height="128" decoding="sync" fetchpriority="high">`;
 }
 
 function renderHeader() {
@@ -1502,7 +1487,7 @@ function renderCourseDetailView(c) {
           const questions = json.practice_questions || [];
           const concepts = json.key_concepts || [];
           return `
-            <div class="lecture-block" style="background:rgba(255,255,255,0.03);padding:16px;border-radius:var(--radius-md);">
+            <div class="lecture-block" data-material-id="${escapeHtml(m.id || m.file_path || m.file_url || '')}" style="background:rgba(255,255,255,0.03);padding:16px;border-radius:var(--radius-md);">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
                 <div>
                   <h3 style="margin:0 0 4px;font-size:1.05rem;">${m.title}</h3>
@@ -1785,7 +1770,7 @@ function renderAiSearchResultsView(q) {
   state.aiSearchResultsCount = results.length;
   if (!q) return `<div class="ai-discovery"><div class="ai-discovery-mark">${icon('spark')}</div><h2>Search School Center</h2><p>Courses, schedules, assignments, notes, materials, and concepts appear here as you type.</p></div>`;
   if (!results.length) return `<div class="ai-no-results"><div class="ai-no-results-icon">${icon('spark')}</div><div><strong>Nothing in School Center matches “${escapeHtml(q)}”.</strong><p>The same composer is now ready to ask the AI about it.</p></div></div>`;
-  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
+  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" data-note-id="${escapeHtml(r.noteId || '')}" data-material-id="${escapeHtml(r.materialId || '')}" data-material-url="${escapeHtml(r.fileUrl || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
 }
 
 function renderAiConversation() {
@@ -2095,6 +2080,36 @@ function renderAssignmentDetailModal() {
 function renderNoteModal() {
   if (!state.noteModalOpen) return '';
   const preset = state.noteModalPreset || {};
+  const viewingNote = preset.noteId ? notesManager.getById(preset.noteId) : null;
+
+  if (viewingNote) {
+    const course = courseById(viewingNote.courseId);
+    return `
+      <div class="modal-overlay open" id="note-modal-overlay">
+        <div class="modal-box" style="max-width:760px;">
+          <div class="modal-head">
+            <div>
+              <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.08em;">Note</div>
+              <h3 class="headfont" style="margin:3px 0 0;">${escapeHtml(viewingNote.title || 'Untitled Note')}</h3>
+            </div>
+            <div class="icon-btn sm" id="close-note-modal">${icon('close')}</div>
+          </div>
+          <div class="modal-body">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+              ${course ? `<span class="badge">${escapeHtml(course.code)}</span>` : ''}
+              <span style="font-size:0.76rem;color:var(--muted);">Updated ${new Date(viewingNote.updatedAt || Date.now()).toLocaleDateString()}</span>
+              ${(viewingNote.tags || []).map(tag => `<span class="badge">${escapeHtml(tag)}</span>`).join('')}
+            </div>
+            <div style="font-size:0.95rem;line-height:1.75;white-space:pre-wrap;word-break:break-word;">${escapeHtml(viewingNote.content || 'No content in this note.')}</div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-ghost" id="close-note-modal-cancel">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   const courseOptions = [{ id: '', code: 'No Course', name: '' }, ...COURSES].map(c =>
     `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' — ' + c.name : ''}</option>`
   ).join('');
@@ -3000,9 +3015,43 @@ function attachEventHandlers() {
       const saveBtn = e.target.closest('[data-ai-save-edit]');
       const searchHit = e.target.closest('[data-unified-search-type]');
       if (searchHit) {
+        const type = searchHit.getAttribute('data-unified-search-type');
         const courseId = searchHit.getAttribute('data-course');
         const tab = searchHit.getAttribute('data-tab') || 'overview';
         const assignmentId = searchHit.getAttribute('data-assignment');
+        const materialId = searchHit.getAttribute('data-material-id') || '';
+
+        // Material result: open Materials and focus the EXACT matching card.
+        if (type === 'material' && courseId) {
+          state.searchQuery = '';
+          state.courseId = courseId;
+          state.courseTab = 'materials';
+          state.materialTargetId = materialId || null;
+          state.view = 'courses';
+          render();
+          requestAnimationFrame(() => {
+            if (!materialId) return;
+            const target = document.querySelector('[data-material-id="' + CSS.escape(materialId) + '"]');
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              target.classList.add('search-target-highlight');
+              setTimeout(() => target.classList.remove('search-target-highlight'), 2200);
+            }
+          });
+          return;
+        }
+
+        if (type === 'note') {
+          const noteId = searchHit.getAttribute('data-note-id');
+          if (noteId) {
+            state.searchQuery = '';
+            state.noteModalOpen = true;
+            state.noteModalPreset = { noteId, courseId };
+            render();
+            return;
+          }
+        }
+
         if (courseId) {
           state.courseId = courseId;
           state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : tab === 'materials' ? 'materials' : tab === 'deadlines' ? 'deadlines' : 'overview';
@@ -3180,7 +3229,10 @@ function attachEventHandlers() {
       const navType = item.getAttribute('data-spotlight-nav'); const targetId = item.getAttribute('data-spotlight-id'); state.spotlightSearchOpen = false;
       if (navType === 'course') { state.courseId = targetId; state.view = 'courses'; state.courseTab = 'overview'; }
       else if (navType === 'asg') state.assignmentDetailId = targetId;
-      else if (navType === 'note') state.view = 'settings';
+      else if (navType === 'note') {
+        state.noteModalOpen = true;
+        state.noteModalPreset = { noteId: targetId };
+      }
       render();
     }));
   });
