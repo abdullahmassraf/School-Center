@@ -521,8 +521,9 @@ export class CampusMap3DManager {
           float disc = pow(sunD, 320.0) * 1.5 + pow(sunD, 60.0) * 0.35;
           vec3 sunTint = mix(vec3(1.0, 0.5, 0.26), vec3(1.0, 0.94, 0.82), uDayF);
           col += sunTint * (scatter + disc) * (1.0 - uOvercast * 0.88) * smoothstep(-0.12, 0.1, sd.y);
-          /* Overcast wash: bright neutral grey (real overcast stays bright). */
-          col = mix(col, vec3(0.82, 0.85, 0.90) * (0.55 + 0.45 * uDayF), uOvercast * 0.72);
+          /* Overcast wash: bright neutral grey at midday, dimming to dark
+           * slate through the evening — real overcast tracks the sun. */
+          col = mix(col, vec3(0.82, 0.85, 0.90) * (0.10 + 0.80 * uDayF), uOvercast * 0.72);
           /* Horizon fog bands tie the dome to the campus haze. */
           float fogBand = 1.0 - smoothstep(0.0, 0.22, d.y);
           col = mix(col, vec3(0.09, 0.11, 0.22), fogBand * night * 0.55);
@@ -1441,7 +1442,11 @@ export class CampusMap3DManager {
     const phaseKey = el <= -6 ? 'night' : el < 3 ? (az < 180 ? 'dawn' : 'dusk') : 'midday';
     this._todKeys = phaseKey;
 
-    const dayF = this._smooth01(el, -8, 10);          // 0 night -> 1 day
+    /* 0 night -> 1 day. The old (-8,10) window held dayF ~0.91 until the
+     * sun was 7 deg from the horizon — 18:30 looked like noon. The wider
+     * ramp starts softening mid-afternoon and falls fast through sunset:
+     * 25deg=1.0, 6.7deg=0.78, 0deg=0.67, -6deg=0.33, -10deg=0. */
+    const dayF = this._smooth01(el, -10, 24);
     /* Continuous darkness factor: drives window/pool glow so they follow
      * real light levels, not phase labels (windows must be off in daylight
      * even while the phase is still 'dusk' or 'dawn'). */
