@@ -1087,26 +1087,10 @@ export const PORTFOLIO_URL = 'https://abdullahmassraf.github.io/Portfolio/';
    and it pushed every screen's real content ~96px down. This is a single
    hairline row: wordmark left, term chip + portfolio link right. Styling
    lives under "APP BAR" in src/style.css. */
-/** Official app logo mark (inline SVG: crisp at any size, keeps the coin
- * look in header badge, favicon, and print). Keep in sync with assets/logo.svg. */
+/** Official app logo mark (authoritative reference asset, keeps the coin
+ * look in header badge, favicon, and print). Keep in sync with assets/logo.png. */
 function renderLogoMark() {
-  return `<svg viewBox="0 0 100 100" class="sc-logo-svg" focusable="false" aria-hidden="true">
-    <circle cx="50" cy="50" r="49" fill="#05060E"/>
-    <g fill="none" stroke="#F4F6FD" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="50" cy="50" r="44" stroke-width="3.4"/>
-      <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke-width="8"/>
-      <path d="M63 30 C45 20 28 26 32 39 C35 49 52 48 58 57 C64 67 52 76 38 73" stroke="#0B0F2E" stroke-width="3"/>
-      <path d="M35 76 L64 27" stroke-width="2.6"/>
-      <path d="M64 27 l-9 -1.5 M64 27 l-3.5 8.5" stroke-width="2.4"/>
-      <path d="M36 73 l6 5" stroke-width="2.2"/>
-      <circle cx="66.5" cy="24.5" r="3" stroke-width="2.2"/>
-      <circle cx="57" cy="31" r="2" fill="#F4F6FD" stroke="none"/>
-      <circle cx="63" cy="38" r="2.4" fill="#F4F6FD" stroke="none"/>
-      <circle cx="52" cy="27" r="1.8" fill="#F4F6FD" stroke="none"/>
-      <circle cx="45" cy="66" r="2" fill="#F4F6FD" stroke="none"/>
-      <circle cx="50" cy="71.5" r="2.4" fill="#F4F6FD" stroke="none"/>
-    </g>
-  </svg>`;
+  return `<img class="sc-logo-svg" src="./assets/logo.png?v=v1.8.0" alt="" width="128" height="128" decoding="sync" fetchpriority="high">`;
 }
 
 function renderHeader() {
