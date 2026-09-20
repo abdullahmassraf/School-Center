@@ -48,7 +48,10 @@ ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
   if (message.id && pending.has(message.id)) { pending.get(message.id)(message); pending.delete(message.id); }
   if (message.method === 'Runtime.exceptionThrown') browserErrors.push(message.params.exceptionDetails?.text || 'Runtime exception');
-  if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') browserErrors.push('console.error');
+  if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+    const text = (message.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
+    browserErrors.push(`console.error: ${text.slice(0, 300)}`);
+  }
 };
 const send = (method, params = {}) => new Promise((resolve, reject) => {
   const id = ++messageId;
@@ -176,6 +179,32 @@ try {
     };
   })()`);
   if (focus.cameraMode !== 'focus' || focus.focusBuilding !== 'J') throw new Error(`Building selection/camera focus failed: ${JSON.stringify(focus)}`);
+  /* Reference look: focused building solid, others translucent glass. */
+  const opac = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const out = {};
+    for (const [id, m] of mgr.meshById) out[id] = +m.material.opacity.toFixed(2);
+    return out;
+  })()`);
+  if (opac.J < 0.95) throw new Error(`Focused building not solid: ${JSON.stringify(opac)}`);
+  for (const id of ['H', 'B', 'C', 'M']) {
+    if (opac[id] > 0.35) throw new Error(`Non-focused ${id} not translucent: ${JSON.stringify(opac)}`);
+  }
+  /* The position bug: focused meshes must never be scaled or moved. */
+  const transforms = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const out = {};
+    for (const [id, m] of mgr.meshById) out[id] = { sx: +m.scale.x.toFixed(3), px: Math.round(m.position.x), pz: Math.round(m.position.z) };
+    return out;
+  })()`);
+  for (const [id, tr] of Object.entries(transforms)) {
+    if (Math.abs(tr.sx - 1) > 0.001 || tr.px !== 0 || tr.pz !== 0) {
+      throw new Error(`Building ${id} transform drifted (position bug): ${JSON.stringify(transforms)}`);
+    }
+  }
+  console.log('FOCUS LOOK: J solid, others translucent, zero transform drift');
+  const ringVisible = await evaluate(`!!window.__SC_CAMPUS_MAP_3D__?.focusRing?.visible`);
+  if (!ringVisible) throw new Error('Focus targeting ring did not appear on selection');
   if (!focus.status || /Overview\. Tap a building/i.test(focus.status)) throw new Error(`Focus status line not updated: "${focus.status}"`);
 
   const pathToggle = await evaluate(`(() => {
@@ -199,6 +228,17 @@ try {
     };
   })()`);
   if (!reset.overview || reset.cameraMode !== 'overview' || reset.focusBuilding) throw new Error(`Camera reset failed: ${JSON.stringify(reset)}`);
+  await new Promise((resolve) => setTimeout(resolve, 1400));
+  const rig = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const c = mgr.camTarget, W = mgr.WORLD || { w: 930, h: 1000 };
+    return { dist: Math.round(mgr.sph.dist), lookCenter: Math.abs(c.x - W.w / 2) < 4 && Math.abs(c.z - W.h / 2) < 4,
+      pitch: +mgr.sph.pitch.toFixed(2), solarElev: mgr._solarElevation != null ? Math.round(mgr._solarElevation) : null };
+  })()`);
+  if (!rig.lookCenter) throw new Error(`Reset does not re-center the map: ${JSON.stringify(rig)}`);
+  if (!(rig.dist > 1300 && rig.dist < 1800)) throw new Error(`Reset distance wrong: ${JSON.stringify(rig)}`);
+  if (rig.solarElev == null) throw new Error(`Solar engine not reporting elevation: ${JSON.stringify(rig)}`);
+  console.log(`RIG: overview dist=${rig.dist} pitch=${rig.pitch} look=center solarElev=${rig.solarElev}deg`);
 
   /* Automated environment: time-of-day engine and snowfall must be live. */
   const environment = await evaluate(`(() => {
@@ -210,7 +250,14 @@ try {
       particleMode: manager?._particleMode || 'none',
       weatherCondition: manager?.weatherCondition || document.querySelector('#cm3d-mount')?.dataset.weatherCondition || '',
       arrows: manager?.routeArrows === null ? -1 : (manager?.routeArrows?.length ?? -1),
-      wireframes: manager?.scene ? true : false
+      wireframes: manager?.scene ? true : false,
+      composer: !!manager?.composer,
+      bloom: manager?.bloomPass?.isPass === true || manager?.bloomPass != null,
+      toneMappingAces: manager?.renderer?.toneMapping === manager?.THREE?.ACESFilmicToneMapping,
+      hemi: manager?.hemi?.isHemisphereLight === true,
+      dust: manager?.dust?.isPoints === true,
+      windowGlow: manager?.windowGlow?.length ?? -1,
+      focusRing: !!manager?.focusRing
     };
   })()`);
   if (!environment.tod || !environment.fogIsExp2) throw new Error(`Environment engine missing: ${JSON.stringify(environment)}`);
@@ -220,7 +267,35 @@ try {
     : (environment.weatherCondition === 'rain' || environment.weatherCondition === 'thunder') ? 'rain' : 'none';
   if (environment.particleMode !== expectedMode) throw new Error(`Particle mode ${environment.particleMode} does not match condition ${environment.weatherCondition} (expected ${expectedMode})`);
   if (environment.arrows <= 0) throw new Error(`Wayfinding arrows missing: ${JSON.stringify(environment)}`);
-  console.log(`ENVIRONMENT: tod=${environment.tod} condition=${environment.weatherCondition} particles=${environment.particleMode} arrows=${environment.arrows}`);
+  /* Post-processing is tier-aware: full bloom on real GPUs, ACES-only lite
+   * tier on software rasterizers where fullscreen blur passes are ruinous. */
+  const softwareGpu = await evaluate(`window.__SC_CAMPUS_MAP_3D__?.softwareGpu === true`);
+  if (softwareGpu) {
+    if (environment.composer) throw new Error(`Bloom enabled on software renderer — adaptive tier failed: ${JSON.stringify(environment)}`);
+    console.log('POSTFX: lite tier (software rasterizer) — ACES tone mapping on, bloom skipped by design');
+  } else if (!environment.composer || !environment.bloom || !environment.toneMappingAces) {
+    throw new Error(`Post-processing chain missing: ${JSON.stringify(environment)}`);
+  } else {
+    console.log('POSTFX: full tier — EffectComposer + UnrealBloom + ACES tone mapping');
+  }
+  if (!environment.hemi) throw new Error(`Hemisphere fill light missing: ${JSON.stringify(environment)}`);
+  if (!environment.dust) throw new Error(`Ambient dust layer missing: ${JSON.stringify(environment)}`);
+  if (!(environment.windowGlow > 0)) throw new Error(`Window glow panels missing: ${JSON.stringify(environment)}`);
+  console.log(`ENVIRONMENT: tod=${environment.tod} condition=${environment.weatherCondition} particles=${environment.particleMode} arrows=${environment.arrows} windows=${environment.windowGlow} bloom=on aces=on dust=on`);
+
+  /* Performance smoke check at desktop size: sample the RAF cadence. Under
+   * SwiftShader (software rasterizer) this is an order of magnitude slower
+   * than any real GPU, so the threshold is deliberately conservative. */
+  const fps = await evaluate(`(async () => {
+    let frames = 0; const start = performance.now();
+    await new Promise((res) => {
+      const step = () => { frames++; (performance.now() - start < 2200) ? requestAnimationFrame(step) : res(); };
+      requestAnimationFrame(step);
+    });
+    return Math.round(frames / ((performance.now() - start) / 1000));
+  })()`);
+  if (!(fps > 10)) throw new Error(`Frame rate too low even for software rendering: ${fps} fps`);
+  console.log(`PERF: ~${fps} fps under SwiftShader at desktop size (bloom + particles live)`);
 
   /* Geometry fidelity vs the traced Davis plan: the 3D scene maps SVG space
    * to world space 1:1 (X -> X, Y -> Z), so every building's world footprint
@@ -285,10 +360,15 @@ try {
       width: canvas?.clientWidth || 0,
       rendererWidth: manager?.renderer?.domElement?.width || 0,
       hud: document.querySelectorAll('.cm3d-hud button').length,
-      ready: manager?.ready === true
+      ready: manager?.ready === true,
+      composerAlive: !!manager?.composer,
+      dustAlive: manager?.dust?.isPoints === true,
+      isMobileTier: manager?.isMobile === true
     };
   })()`);
   if (!mobile.ready || mobile.hud !== 2) throw new Error(`Mobile HUD broken: ${JSON.stringify(mobile)}`);
+  if (!mobile.dustAlive) throw new Error(`Mobile atmosphere lost after resize: ${JSON.stringify(mobile)}`);
+  if (!softwareGpu && !mobile.composerAlive) throw new Error(`Mobile composer lost after resize: ${JSON.stringify(mobile)}`);
   if (!(mobile.width > 150 && mobile.width < desktopWidth)) throw new Error(`Mobile resize failed: ${JSON.stringify({ desktopWidth, mobile })}`);
   if (browserErrors.length) throw new Error(`Browser errors: ${browserErrors.join('; ')}`);
 

@@ -165,6 +165,7 @@ export async function initCampusMap3d() {
     /* Publish the instance before awaiting CDN imports so a second render
      * cannot start a duplicate renderer while the first one is booting. */
     manager = new CampusMap3DManager(mount, {
+      accentColor: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c8cff',
       getBuildings: () => CAMPUS_BUILDINGS,
       /* Real traced site data: lots and the shuttle stop come from the same
        * source of truth as the building footprints. */

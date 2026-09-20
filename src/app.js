@@ -1173,6 +1173,7 @@ function renderTodayView() {
       ${nextClass ? renderShowLocationButton(nextClass.schedule.room, 'margin-top:10px;') : ''}
     </div>
 
+    ${renderCampusMapWidget()}
     <!-- Urgent Deadlines -->
     <div class="panel">
       <h2><span>Upcoming Assignments (${allAssignments.length})</span><span style="font-size:0.8rem;color:var(--accent);cursor:pointer;" id="see-all-asg">View all</span></h2>
@@ -1197,7 +1198,6 @@ function renderTodayView() {
       ` : `<div style="color:var(--muted-dim);font-size:0.88rem;padding:8px 0;">No pending assignments due this week.</div>`}
     </div>
 
-    ${renderCampusMapWidget()}
   `;
 }
 

@@ -50,15 +50,9 @@ const BUILDING_STYLES = {
 };
 
 /* --- Automated time-of-day engine -----------------------------------------
- * Real-clock phases (dawn / midday / dusk / night) grade the sun, ambient
- * light and fog color. No sliders: the environment simply follows the hour
- * and cross-fades across phase boundaries. */
-const TOD_PHASES = {
-  night:  { fog: 0x0b1030, ambient: 0x44508f, ambientI: 0.42, sun: 0x93a7ff, sunI: 0.55, sunPos: [-320, 520, -180] },
-  dawn:   { fog: 0x241c3f, ambient: 0x9a7aa0, ambientI: 0.58, sun: 0xffb27a, sunI: 0.95, sunPos: [-520, 300, 340] },
-  midday: { fog: 0x101735, ambient: 0xcdd6ff, ambientI: 0.6,  sun: 0xffffff, sunI: 1.35, sunPos: [420, 700, 260] },
-  dusk:   { fog: 0x1f1a44, ambient: 0x8a72b0, ambientI: 0.55, sun: 0xff9a6a, sunI: 0.85, sunPos: [560, 260, 440] }
-};
+ * The sun's position (and therefore angle, strength and color) comes from
+ * the real NOAA solar position for the campus coordinates at the current
+ * instant — sunrise/sunset follow the real calendar incl. DST. */
 const SNOW_COUNT = 520;
 
 /* --- Live weather (Open-Meteo, keyless + CORS, ideal for a static site) ----
@@ -150,6 +144,29 @@ const ENTRANCES = {
   J: 'jEnt', H: 'hEnt', M: 'mEnt', B: 'bEnt', C: 'cEnt', A: 'aEnt'
 };
 
+/* --- Real solar position (NOAA low-precision algorithm) --------------------
+ * Elevation/azimuth from the actual date + campus coordinates, so sunrise,
+ * sunset and sun angle follow the real calendar (DST handled automatically —
+ * the calculation is clock-based, not hour-table-based). */
+const CAMPUS_COORDS = { lat: 43.7230, lon: -79.7130 };
+
+function solarPosition(date = new Date(), lat = CAMPUS_COORDS.lat, lon = CAMPUS_COORDS.lon) {
+  const rad = Math.PI / 180;
+  const J1970 = 2440588, J2000 = 2451545;
+  const d = date.valueOf() / 86400000 - 0.5 + J1970 - J2000;
+  const M = rad * (357.5291 + 0.98560028 * d);
+  const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + rad * 102.9372 + Math.PI;
+  const e = rad * 23.4397;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const RA = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const st = rad * (280.16 + 360.9856235 * d) - rad * lon;
+  const latR = rad * lat;
+  const el = Math.asin(Math.sin(latR) * Math.sin(dec) + Math.cos(latR) * Math.cos(dec) * Math.cos(RA - st));
+  const az = Math.atan2(Math.sin(RA - st), Math.cos(RA - st) * Math.sin(latR) - Math.tan(dec) * Math.cos(latR));
+  return { elevationDeg: el / rad, azimuthDeg: (az / rad + 180) % 360 };
+}
+
 /* --- Tiny helpers --------------------------------------------------------- */
 function dist2(a, b) {
   const dx = a[0] - b[0], dy = a[1] - b[1];
@@ -188,20 +205,40 @@ export class CampusMap3DManager {
     this._snowData = null;
     this._todKeys = null;
     this.orbitTarget = null;
+    /* Spherical camera rig: every camera motion (tweens, auto-orbit, drag,
+     * zoom) writes target values; the render loop eases the live values,
+     * so all motion shares one smooth, inertial feel. */
+    this.sph = { dist: 1500, pitch: 0.66, yaw: Math.PI / 4 };
+    this.sphCur = { dist: 1500, pitch: 0.66, yaw: Math.PI / 4 };
     this._tmpA = null;
     this._tmpB = null;
     this._geos = [];
     this._mats = [];
+    this._owned = [];
+    this.accentColor = opts.accentColor || '#7c8cff';
+    this.accentHex = null;                 // resolved to a THREE.Color in init()
   }
 
   async init() {
-    const [threeModule, { SVGLoader }, gsapModule] = await Promise.all([
+    const [threeModule, { SVGLoader }, gsapModule, postModules] = await Promise.all([
       import('three'),
       import('three/addons/loaders/SVGLoader.js'),
-      import('gsap')
+      import('gsap'),
+      Promise.all([
+        import('three/addons/postprocessing/EffectComposer.js'),
+        import('three/addons/postprocessing/RenderPass.js'),
+        import('three/addons/postprocessing/UnrealBloomPass.js'),
+        import('three/addons/utils/BufferGeometryUtils.js')
+      ])
     ]);
     if (this.disposed) return false;
     this.SVGLoader = SVGLoader;
+    /* Post-processing chain classes (bloom presentation). */
+    const [composerMod, renderPassMod, bloomMod, bufferUtilsMod] = postModules;
+    this.EffectComposer = composerMod.EffectComposer;
+    this.RenderPass = renderPassMod.RenderPass;
+    this.UnrealBloomPass = bloomMod.UnrealBloomPass;
+    this.BufferGeometryUtils = bufferUtilsMod;
     /* Browser ESM builds expose Three.js as a namespace, while GSAP exposes
      * its API as either a default export or a namespace depending on the CDN
      * / bundler. Normalize both shapes before constructing the renderer. */
@@ -210,6 +247,7 @@ export class CampusMap3DManager {
     this.THREE = THREE;
     this.gsap = gsap;
     this.loader = new SVGLoader();
+    this.accentHex = new THREE.Color(this.accentColor || '#7c8cff');
 
     this._buildRenderer();
     this._buildScene();
@@ -219,6 +257,11 @@ export class CampusMap3DManager {
     this._buildBuildings();
     this._buildGraph();
     this._buildCameraRig();
+    this._buildWindowGlow();
+    this._buildAmbientDust();
+    this._buildWeatherSurfaces();
+    this._buildPost();
+    if (this.disposed || !this.mount.isConnected) { this.dispose(); return false; }
     this._showPathFor('J');
     this._buildParticles(this._initialParticleMode());
     this._applyTimeOfDay();
@@ -232,16 +275,37 @@ export class CampusMap3DManager {
   /* --- Renderer / scene / lights ----------------------------------------- */
   _buildRenderer() {
     const THREE = this.THREE;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    /* Quality tier: mobile caps pixel ratio, shadow map and particle density
+     * so the twin stays smooth on phones (tier chosen once, at build time). */
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+    const smallSide = Math.min(window.screen?.width || 9999, window.screen?.height || 9999);
+    this.isMobile = Boolean(coarse || smallSide < 620);
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.isMobile ? 1.75 : 2));
+    /* Filmic presentation: ACES tone mapping + sRGB output give highlights a
+     * natural roll-off instead of the harsh clamped look. */
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.softwareGpu = this._detectSoftwareGpu();
+    if (this.softwareGpu) {
+      /* Software rasterizer (SwiftShader/llvmpipe): cap DPR at 1 — per-pixel
+       * cost dominates there, and real devices never hit this tier. */
+      this.renderer.setPixelRatio(1);
+    }
     this.renderer.domElement.className = 'cm3d-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Interactive 3D campus map');
     this.renderer.domElement.setAttribute('role', 'img');
     this.mount.appendChild(this.renderer.domElement);
 
     this.info = null;
+    this._flash = 0;
+    this._quality = this.isMobile ? 0.6 : 1;      // particle density scaling
+    this._shadowSize = this.isMobile ? 1024 : 2048;
+    this._bloomBase = this.isMobile ? 0.32 : 0.42;
+    this.hoverId = null;
     this.weather = null;
     this.weatherCondition = 'clear';
     this._particleMode = null;
@@ -279,6 +343,17 @@ export class CampusMap3DManager {
     }
   }
 
+  _detectSoftwareGpu() {
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER));
+      return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+    } catch (_) { return false; }
+  }
+
   _buildScene() {
     const THREE = this.THREE;
     this.scene = new THREE.Scene();
@@ -303,10 +378,15 @@ export class CampusMap3DManager {
     this.ambient = new THREE.AmbientLight(0xcdd6ff, 0.6);
     this.scene.add(this.ambient);
 
+    /* Sky/ground bounce fill: lifts the flat ambient with a natural vertical
+     * gradient (three-point lighting, AAA scene staple). */
+    this.hemi = new THREE.HemisphereLight(0x8fa4ff, 0x1a2142, 0.5);
+    this.scene.add(this.hemi);
+
     this.sun = new THREE.DirectionalLight(0xffffff, 1.35);
     this.sun.position.set(420, 700, 260);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(this._shadowSize, this._shadowSize);
     this.sun.shadow.camera.left = -620;
     this.sun.shadow.camera.right = 620;
     this.sun.shadow.camera.top = 700;
@@ -315,13 +395,141 @@ export class CampusMap3DManager {
     this.sun.shadow.camera.far = 1900;
     this.sun.shadow.bias = -0.00045;          // z-fighting guard per spec
     this.sun.shadow.normalBias = 0.6;
+    /* The sun only moves on time-of-day changes and buildings only rescale
+     * on focus, so render the shadow map on demand instead of every frame —
+     * a full extra scene pass saved per frame. */
+    this.sun.shadow.autoUpdate = false;
+    this.sun.shadow.needsUpdate = true;
     this.scene.add(this.sun);
+
+    /* Storm system: a cold secondary light that flickers during thunder. */
+    this.lightning = new THREE.DirectionalLight(0xbcd4ff, 0);
+    this.lightning.position.set(-380, 620, -240);
+    this.scene.add(this.lightning);
+
+    /* Sun disc glow: rides the real solar position; strength follows
+     * elevation and sky clarity (minimalist ray-feel, no lens clutter). */
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+    this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._spriteTex, color: 0xffedc8, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    this.sunSprite.scale.set(360, 360, 1);
+    this.scene.add(this.sunSprite);
+    this._track(null, this.sunSprite.material);
+  }
+
+  /* Stylized window glow: emissive panels on the primary facades that light
+   * up at dusk/night, giving the twin its "city lights" read. */
+  _buildWindowGlow() {
+    const THREE = this.THREE;
+    this.windowMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0, side: THREE.DoubleSide });
+    this._track(null, this.windowMat);
+    /* Warm light pools on the ground under each building: this is what makes
+     * a night city read from a high camera — panels alone are 2-3px specks
+     * at overview distance, pools carry the glow. */
+    this.poolMat = new THREE.MeshBasicMaterial({
+      map: null, color: 0xffc27a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    this._track(null, this.poolMat);
+    this.windowGlow = [];
+    this.lightPools = [];
+    this._nightWindows = [];
+    /* Per-building window variety: each building gets its own size, spacing
+     * and lit-probability (deterministic per id), so the skyline doesn't
+     * repeat one texture. */
+    const VARIETY = {
+      J: { w: 11, h: 5, cols: 5, rows: 6, lit: 0.72 },
+      H: { w: 6, h: 9, cols: 7, rows: 4, lit: 0.6 },
+      M: { w: 14, h: 6, cols: 3, rows: 3, lit: 0.5 },
+      B: { w: 5, h: 5, cols: 8, rows: 5, lit: 0.65 },
+      C: { w: 8, h: 12, cols: 4, rows: 2, lit: 0.45 },
+      A: { w: 7, h: 4, cols: 6, rows: 7, lit: 0.75 }
+    };
+    for (const mesh of this.buildingMeshes) {
+      const id = mesh.userData.buildingId || 'X';
+      const v = VARIETY[id] || { w: 9, h: 6.5, cols: 6, rows: 5, lit: 0.6 };
+      const box = new THREE.Box3().setFromObject(mesh);
+      const cx = (box.min.x + box.max.x) / 2;
+      const cz = box.max.z + 0.5;
+      const y0 = box.min.y + 8;
+      const span = Math.min(box.max.x - box.min.x - 12, 96);
+      if (span < 24) continue;
+      const cells = [];
+      for (let r = 0; r < v.rows; r++) {
+        for (let c = 0; c < v.cols; c++) {
+          const seed = (r * 13 + c * 7 + id.charCodeAt(0) * 5) % 9;
+          if (seed === 0) continue; // structural gap, per-building rhythm
+          const lit = ((seed * 31 + r * 7 + c * 3) % 100) / 100 < v.lit;
+          /* Two warm tints + a cool tint for variety. */
+          const tint = seed % 3 === 0 ? 0xd6e4ff : seed % 3 === 1 ? 0xffd9a0 : 0xffc98a;
+          cells.push({ x: cx - span / 2 + (c + 0.5) * (span / v.cols), y: y0 + r * 11, tint, on: lit });
+        }
+      }
+      /* One InstancedMesh per building: every window is an instance with its
+       * own color (lit warm / off dark) — the whole facade costs 1 draw. */
+      if (cells.length) {
+        const wg = new THREE.PlaneGeometry(v.w, v.h);
+        const wm = new THREE.MeshBasicMaterial({
+          color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
+        });
+        const inst = new THREE.InstancedMesh(wg, wm, cells.length);
+        const m4 = new THREE.Matrix4();
+        const col = new THREE.Color();
+        cells.forEach((cell, i) => {
+          m4.makeTranslation(cell.x, cell.y, cz + 0.5);
+          inst.setMatrixAt(i, m4);
+          inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x10141f));
+        });
+        inst.raycast = () => {};
+        this.scene.add(inst);
+        this._track(wg, wm);
+        this._owned.push(inst);
+        this.windowGlow.push(inst);
+        this._nightWindows.push({
+          inst, wm, cells, colors: cells.map((c2) => col.setHex(c2.on ? c2.tint : 0x10141f).clone()),
+          timers: cells.map((c) => (c.on ? -1 : 8 + Math.random() * 30))
+        });
+      }
+      /* One soft pool hugging the building's projected footprint. */
+      if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+      this.poolMat.map = this._spriteTex;
+      const pg = new THREE.PlaneGeometry(span * 1.9, span * 1.9);
+      const pool = new THREE.Mesh(pg, this.poolMat);
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(cx, 1.6, cz + 6);
+      pool.renderOrder = 2;
+      pool.raycast = () => {};
+      this.scene.add(pool);
+      this._track(pg);
+      this._owned.push(pool);
+      this.lightPools.push(pool);
+    }
+  }
+
+  /* Post chain: MSAA-backed composer + UnrealBloom for the neon signage
+   * (wayfinding paths, shuttle halo, night windows). */
+  _buildPost() {
+    const THREE = this.THREE;
+    if (!this.EffectComposer) return;
+    /* Adaptive quality: bloom is a stack of fullscreen blurs — the single
+     * most expensive effect. Skip it on software renderers and lean on the
+     * emissive + additive materials for the neon read instead. */
+    if (this.softwareGpu) return;
+    const size = new THREE.Vector2(this.mount.clientWidth || 600, this.mount.clientHeight || 420);
+    this.composer = new this.EffectComposer(this.renderer);
+    this.composer.setPixelRatio(this.renderer.getPixelRatio());
+    this.composer.addPass(new this.RenderPass(this.scene, this.camera));
+    this.bloomPass = new this.UnrealBloomPass(size, this._bloomBase, 0.55, 0.82);
+    this.composer.addPass(this.bloomPass);
   }
 
   _buildGround() {
     const THREE = this.THREE;
     const g = new THREE.CircleGeometry(468, 72);
     const m = new THREE.MeshStandardMaterial({ color: PALETTE.ground, roughness: 0.95, metalness: 0.05 });
+    this.groundMat = m;
     this.ground = new THREE.Mesh(g, m);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.position.set(WORLD.w / 2, -0.4, WORLD.h / 2);
@@ -349,6 +557,7 @@ export class CampusMap3DManager {
       [43, 364, 34, 700]
     ];
     const roadMat = new THREE.MeshStandardMaterial({ color: PALETTE.road, roughness: 0.95, metalness: 0 });
+    this.roadMat = roadMat;
     this._track(null, roadMat);
     for (const [cx, cz, w, d] of roads) {
       const g = new THREE.BoxGeometry(w, 0.3, d);
@@ -376,6 +585,64 @@ export class CampusMap3DManager {
       this.scene.add(el);
       this._track(g);
       this._track(eg);
+    }
+
+    /* Visible pedestrian walkways: one slab per unique A* graph edge, so the
+     * route arrows always follow a path you can see on the ground — and the
+     * graph is drawn to avoid building footprints by construction. */
+    const walkMat = new THREE.MeshStandardMaterial({ color: 0x36427a, roughness: 0.85, metalness: 0.05 });
+    this.walkMat = walkMat;
+    this._track(null, walkMat);
+    const seen = new Set();
+    const parts = [];
+    const m4 = new THREE.Matrix4(), eul = new THREE.Euler(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3();
+    for (const [a, b] of WAYPOINT_EDGES) {
+      const key = [a, b].sort().join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const A = WAYPOINTS[a], B = WAYPOINTS[b];
+      if (!A || !B) continue;
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const g = new THREE.BoxGeometry(9, 0.22, len + 9);
+      eul.set(0, Math.atan2(B[0] - A[0], B[1] - A[1]), 0);
+      q.setFromEuler(eul);
+      pv.set((A[0] + B[0]) / 2, 0.32, (A[1] + B[1]) / 2);
+      g.applyMatrix4(m4.compose(pv, q, sc));
+      parts.push(g);
+    }
+    if (parts.length && this.BufferGeometryUtils) {
+      const merged = this.BufferGeometryUtils.mergeGeometries(parts);
+      parts.forEach((g) => g.dispose());
+      const m = new THREE.Mesh(merged, walkMat);
+      m.receiveShadow = true;
+      m.raycast = () => {};
+      this.scene.add(m);
+      this._track(merged);
+    } else if (parts.length) {
+      for (const g of parts) {
+        const m = new THREE.Mesh(g, walkMat);
+        m.receiveShadow = true;
+        this.scene.add(m);
+        this._track(g);
+      }
+    }
+
+    /* Low cloud layer: sprite puffs at ~320u that drift slowly. Opacity and
+     * color are driven by the live weather condition. */
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+    this.cloudMat = new THREE.SpriteMaterial({ map: this._spriteTex, color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+    this._track(null, this.cloudMat);
+    this.clouds = [];
+    const nClouds = Math.round(14 * (this._quality || 1));
+    for (let i = 0; i < nClouds; i++) {
+      const c = new THREE.Sprite(this.cloudMat);
+      c.position.set(Math.random() * WORLD.w, 300 + Math.random() * 130, Math.random() * WORLD.h);
+      const sc = 180 + Math.random() * 210;
+      c.scale.set(sc * 1.7, sc, 1);
+      c.userData.ph = Math.random() * Math.PI * 2;
+      c.raycast = () => {};
+      this.scene.add(c);
+      this.clouds.push(c);
     }
 
     /* Shuttle bus stop: glowing puck + pulsing halo (animated in the loop). */
@@ -413,14 +680,26 @@ export class CampusMap3DManager {
         bevelEnabled: true,
         bevelThickness: 3,
         bevelSize: 2.5,
-        bevelSegments: 2
+        bevelSegments: 2,
+        curveSegments: 6
       });
+      /* rotation.x = π/2 keeps the footprint mapping (SVG y -> world z) but
+       * sends the extrusion along -Y; lift the geometry so the mass rises
+       * from ground level instead of sinking beneath it. */
+      geo.translate(0, 0, -(style.height + 3));
+      /* Glass skyscraper look: accent-tinted translucent body. Per-mesh
+       * material (windows/u-vary read from userData in the shader). */
       const mat = new THREE.MeshStandardMaterial({
-        color: style.color,
-        roughness: 0.55,
-        metalness: 0.15,
-        emissive: new THREE.Color(style.color).multiplyScalar(0.08)
+        color: new THREE.Color(style.color).lerp(this.accentHex || new THREE.Color(this.accentColor), 0.35),
+        transparent: true,
+        opacity: 0.55,
+        roughness: 0.22,
+        metalness: 0.35,
+        emissive: new THREE.Color(style.color).multiplyScalar(0.06),
+        side: THREE.DoubleSide,
+        depthWrite: false
       });
+      mat.userData.windows = 0;
       const mesh = new THREE.Mesh(geo, mat);
       /* SVG Y grows downward; world Z keeps the same orientation so labels
        * and paths transfer without flipping. Shape Z becomes height. */
@@ -462,6 +741,64 @@ export class CampusMap3DManager {
       this._track(g);
     }
     this._track(null, minorMat);
+  }
+
+  /* --- Weather surface effects --------------------------------------------
+   * Snow: a soft white blanket plane that fades in and slowly rises while it
+   * snows (plus per-building roof caps). Rain: clear gloss planes on the
+   * ground and roofs that make surfaces look wet and reflective. */
+  _buildWeatherSurfaces() {
+    const THREE = this.THREE;
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+
+    /* Snow blanket: large soft-edged plane slightly above the ground. */
+    const sg = new THREE.PlaneGeometry(WORLD.w + 80, WORLD.h + 80);
+    this.snowBlanketMat = new THREE.MeshBasicMaterial({
+      map: this._spriteTex, color: 0xeef3ff, transparent: true, opacity: 0,
+      depthWrite: false
+    });
+    this.snowBlanket = new THREE.Mesh(sg, this.snowBlanketMat);
+    this.snowBlanket.rotation.x = -Math.PI / 2;
+    this.snowBlanket.position.set(WORLD.w / 2, 1.1, WORLD.h / 2);
+    this.snowBlanket.renderOrder = 1;
+    this.snowBlanket.visible = false;
+    this.snowBlanket.raycast = () => {};
+    this.scene.add(this.snowBlanket);
+    this._track(sg, this.snowBlanketMat);
+
+    /* Snow depth drives opacity up + height creep for the pile-up feel. */
+    this.snowDepth = 0;
+
+    /* Wetness: additive gloss layers on ground + roads. */
+    const wg = new THREE.CircleGeometry(468, 64);
+    this.wetMat = new THREE.MeshBasicMaterial({
+      color: 0x9fc8ff, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    this.wetPlane = new THREE.Mesh(wg, this.wetMat);
+    this.wetPlane.rotation.x = -Math.PI / 2;
+    this.wetPlane.position.set(WORLD.w / 2, 0.75, WORLD.h / 2);
+    this.wetPlane.visible = false;
+    this.wetPlane.raycast = () => {};
+    this.scene.add(this.wetPlane);
+    this._track(wg, this.wetMat);
+    this.wetness = 0;
+
+    /* Roof snow/wet caps share the blanket/wet materials. */
+    this.roofCaps = [];
+    for (const mesh of this.buildingMeshes) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const w = box.max.x - box.min.x, d = box.max.z - box.min.z;
+      const rg = new THREE.PlaneGeometry(w * 1.02, d * 1.02);
+      const cap = new THREE.Mesh(rg, this.snowBlanketMat);
+      cap.rotation.x = -Math.PI / 2;
+      cap.position.set((box.min.x + box.max.x) / 2, box.max.y + 0.8, (box.min.z + box.max.z) / 2);
+      cap.visible = false;
+      cap.raycast = () => {};
+      this.scene.add(cap);
+      this._track(rg);
+      this.roofCaps.push(cap);
+    }
   }
 
   /* --- Waypoint graph + A* ------------------------------------------------ */
@@ -539,7 +876,9 @@ export class CampusMap3DManager {
         uTime: this.clockUniform,
         uColor: { value: new THREE.Color(PALETTE.path) },
         uOpacity: { value: 0.8 },
-        uFocus: { value: 0 }
+        uFocus: { value: 0 },
+        uReveal: { value: 0 },
+        uTotal: { value: 1 }
       },
       vertexShader: `
         varying vec2 vUvX;
@@ -551,6 +890,7 @@ export class CampusMap3DManager {
         }`,
       fragmentShader: `
         uniform float uTime; uniform vec3 uColor; uniform float uOpacity; uniform float uFocus;
+        uniform float uReveal; uniform float uTotal;
         varying float vDist;
         void main() {
           float dash = 26.0;
@@ -558,6 +898,8 @@ export class CampusMap3DManager {
           float arrow = smoothstep(0.0, 0.35, flow) * (1.0 - smoothstep(0.55, 1.0, flow));
           float alpha = uOpacity * (0.35 + 0.65 * arrow);
           alpha *= mix(1.0, 1.15, uFocus);
+          alpha *= smoothstep(0.0, 90.0, uReveal - vDist);
+          alpha *= 1.0 - smoothstep(uTotal - 55.0, uTotal, vDist);
           gl_FragColor = vec4(uColor, alpha);
         }`
     });
@@ -570,6 +912,7 @@ export class CampusMap3DManager {
       dists[i] = acc;
     }
     geo.setAttribute('aDist', new THREE.BufferAttribute(dists, 1));
+    mat.uniforms.uTotal.value = acc;
 
     const line = new THREE.Line(geo, mat);
     line.renderOrder = 5;
@@ -585,6 +928,9 @@ export class CampusMap3DManager {
     if (!ids || ids.length < 2) return;
     const pts = this._smooth(ids.map((id) => WAYPOINTS[id]));
     const { line, mat } = this._buildPathLine(pts);
+    /* Cinematic reveal: the route paints itself from the bus stop outward. */
+    mat.uniforms.uReveal.value = 0;
+    this.gsap.to(mat.uniforms.uReveal, { value: mat.uniforms.uTotal.value + 70, duration: 1.1, ease: 'power2.out' });
     this.pathGroup.add(line);
     this.pathLines.push({ line, mat });
 
@@ -675,9 +1021,11 @@ export class CampusMap3DManager {
     }
     this._particleMode = mode;
     if (mode === 'none' || this.disposed || !this.scene) return;
+    /* Quality tier scales density: mobile keeps the atmosphere at ~60%. */
+    const q = this._quality || 1;
     const conf = mode === 'rain'
-      ? { n: 700, size: 2.0, opacity: 0.5, color: 0x9fd8ff, speed: [260, 380] }
-      : { n: SNOW_COUNT, size: 3.4, opacity: 0.62, color: 0xdfe8ff, speed: [22, 56] };
+      ? { n: Math.round(900 * q), size: 2.2, opacity: 0.55, color: 0xbfe3ff, speed: [420, 620] }
+      : { n: Math.round(SNOW_COUNT * q), size: 3.2, opacity: 0.66, color: 0xdfe8ff, speed: [22, 56] };
     const positions = new Float32Array(conf.n * 3);
     const phases = new Float32Array(conf.n);
     const speeds = new Float32Array(conf.n);
@@ -690,9 +1038,10 @@ export class CampusMap3DManager {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
     const mat = new THREE.PointsMaterial({
-      color: conf.color, size: conf.size, transparent: true, opacity: conf.opacity,
-      sizeAttenuation: true, depthWrite: false, fog: true
+      color: conf.color, size: conf.size, map: this._spriteTex, transparent: true, opacity: conf.opacity,
+      alphaTest: 0.02, blending: THREE.AdditiveBlending, sizeAttenuation: true, depthWrite: false, fog: true
     });
     this.snow = new THREE.Points(geo, mat);
     this.snow.raycast = () => {};
@@ -701,16 +1050,75 @@ export class CampusMap3DManager {
     this._snowData = { phases, speeds, mode };
   }
 
+  _makeSpriteTexture() {
+    /* Soft round particle sprite: kills the square-particle artifact. */
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,.7)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    const tex = new this.THREE.CanvasTexture(c);
+    this._track(null, tex);
+    return tex;
+  }
+
+  _buildAmbientDust() {
+    /* Always-on drifting motes: the "living air" layer that separates a
+     * static render from a scene. Cheaper than the weather systems. */
+    const THREE = this.THREE;
+    if (this.dust || this.disposed || !this.scene) return;
+    const n = Math.round(220 * (this._quality || 1));
+    const positions = new Float32Array(n * 3);
+    const phases = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      positions[i * 3] = Math.random() * WORLD.w;
+      positions[i * 3 + 1] = 6 + Math.random() * 120;
+      positions[i * 3 + 2] = Math.random() * WORLD.h;
+      phases[i] = Math.random() * Math.PI * 2;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
+    const mat = new THREE.PointsMaterial({
+      color: 0xaebcff, size: 1.7, map: this._spriteTex, transparent: true, opacity: 0.28,
+      alphaTest: 0.02, blending: THREE.AdditiveBlending, sizeAttenuation: true, depthWrite: false, fog: true
+    });
+    this.dust = new THREE.Points(geo, mat);
+    this.dust.raycast = () => {};
+    this.dust.frustumCulled = false;
+    this.scene.add(this.dust);
+    this._dustData = { phases };
+    this._track(geo, mat);
+  }
+
   _animateParticles(dt) {
-    if (!this.snow || this.disposed || this._particleMode === 'none') return;
+    if (this.disposed) return;
+    const t = this.clockUniform.value;
+    /* Ambient dust rises and swirls regardless of weather. */
+    if (this.dust) {
+      const dp = this.dust.geometry.getAttribute('position');
+      const dPhases = this._dustData.phases;
+      for (let i = 0; i < dp.count; i++) {
+        let y = dp.getY(i) + 3.5 * dt;
+        if (y > 130) y = 6;
+        dp.setY(i, y);
+        dp.setX(i, dp.getX(i) + Math.sin(t * 0.35 + dPhases[i]) * 4 * dt);
+      }
+      dp.needsUpdate = true;
+    }
+    if (!this.snow || this._particleMode === 'none') return;
     const pos = this.snow.geometry.getAttribute('position');
     const { phases, speeds, mode } = this._snowData;
-    const t = this.clockUniform.value;
     if (mode === 'rain') {
-      /* Rain falls fast with a steady wind slant; flakes recycle at the top. */
+      /* Rain: fast slanted streaks; a light sway keeps drops from reading as
+       * perfectly parallel lines. */
       for (let i = 0; i < pos.count; i++) {
         let y = pos.getY(i) - speeds[i] * dt;
-        let x = pos.getX(i) + 16 * dt;
+        let x = pos.getX(i) + (16 + Math.sin(t * 2 + phases[i]) * 6) * dt;
         if (y < 2) { y = 470 + Math.random() * 40; x = Math.random() * WORLD.w; }
         if (x > WORLD.w) x -= WORLD.w;
         pos.setXYZ(i, x, y, pos.getZ(i));
@@ -728,32 +1136,67 @@ export class CampusMap3DManager {
   }
 
   /* --- Time-of-day engine (dawn / midday / dusk / night) -------------------- */
-  _todPhaseForHour(h) {
-    if (h >= 6 && h < 10) return 'dawn';
-    if (h >= 10 && h < 17) return 'midday';
-    if (h >= 17 && h < 21) return 'dusk';
-    return 'night';
-  }
+  _smooth01(x, a, b) { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
   _applyTimeOfDay() {
-    const phaseKey = this._todPhaseForHour(new Date().getHours());
-    const phase = TOD_PHASES[phaseKey];
     const THREE = this.THREE;
-    this.ambient.color.setHex(phase.ambient);
-    this.ambient.intensity = phase.ambientI;
-    this.sun.color.setHex(phase.sun);
-    this.sun.intensity = phase.sunI;
-    this.sun.position.set(...phase.sunPos);
-    this.scene.fog.color.setHex(phase.fog);
-    if (this.renderer) this.renderer.setClearColor(phase.fog, 1);
-    this._todKeys = phaseKey;
-    /* Bases the live-weather grader modulates on top of. */
-    this._todSunI = phase.sunI;
-    this._todAmbientI = phase.ambientI;
     this._todFogColor = this._todFogColor || new THREE.Color();
-    this._todFogColor.setHex(phase.fog);
     this._overcastTint = this._overcastTint || new THREE.Color(0x8a94a8);
     this._tmpFog = this._tmpFog || new THREE.Color();
+    const sp = solarPosition(new Date());
+    const el = sp.elevationDeg;              // sun elevation, degrees
+    const az = sp.azimuthDeg;                // azimuth from north, clockwise
+    this._solarElevation = el;
+    this._solarAzimuth = az;
+    /* Phase key from actual solar elevation (civil twilight boundaries). */
+    const phaseKey = el <= -6 ? 'night' : el < 3 ? (az < 180 ? 'dawn' : 'dusk') : 'midday';
+    this._todKeys = phaseKey;
+
+    const dayF = this._smooth01(el, -8, 10);          // 0 night -> 1 day
+    const horizonF = Math.max(0, 1 - Math.abs(el) / 16); // sunrise/sunset warmth
+    const lerpC = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t);
+
+    /* Sun direction from the real azimuth/elevation (map north = -Z). */
+    const elR = el * Math.PI / 180, azR = az * Math.PI / 180;
+    const sunPos = new THREE.Vector3(
+      Math.sin(azR) * Math.cos(elR),
+      Math.sin(elR),
+      -Math.cos(azR) * Math.cos(elR)
+    ).multiplyScalar(1100);
+    this.sun.position.copy(sunPos);
+    /* Sun color: warm on the horizon -> neutral high in the sky. */
+    this.sun.color.copy(lerpC(0xff8f4d, 0xfff4e2, this._smooth01(el, 2, 38)));
+    this._todSunI = 1.85 * this._smooth01(el, -1, 14);
+    this.sun.intensity = this._todSunI;
+
+    /* Ambient + hemisphere fill follow daylight. */
+    this._todAmbientI = 0.3 + 0.38 * dayF;
+    this.ambient.intensity = this._todAmbientI;
+    this.ambient.color.copy(lerpC(0x44508f, 0xcdd6ff, dayF));
+    if (this.hemi) {
+      this.hemi.intensity = 0.12 + 0.42 * dayF;
+      this.hemi.color.copy(lerpC(0x27305e, 0x9db8ff, dayF));
+    }
+
+    /* Sky/fog: deep navy night -> pale day, warmed at sunrise/sunset. */
+    const fog = lerpC(0x0a0e28, 0x18204a, dayF);
+    fog.lerp(new THREE.Color(0x7a4a33), horizonF * 0.32 * (el > -8 ? 1 : 0));
+    this._todFogColor.copy(fog);
+    this.scene.fog.color.copy(fog);
+    this.renderer?.setClearColor(fog, 1);
+
+    /* Sun glow sprite rides the real sun position (clean ray-glow that
+     * strengthens with elevation and sky clarity). */
+    if (this.sunSprite) {
+      this.sunSprite.position.copy(sunPos).setLength(1600);
+      const clarity = { clear: 1, cloudy: 0.45, overcast: 0.12, fog: 0.1, rain: 0.15, snow: 0.3, thunder: 0.08 }[this.weatherCondition] ?? 0.8;
+      this.sunSprite.material.opacity = Math.max(0, this._smooth01(el, -2, 12)) * (0.35 + 0.4 * clarity);
+      const s = 300 + 90 * this._smooth01(el, 0, 45);
+      this.sunSprite.scale.set(s, s, 1);
+    }
+
+    if (this.sun.shadow) this.sun.shadow.needsUpdate = true;
+    this._pendingShadowRefresh = true;
   }
 
   /* --- Live weather integration ------------------------------------------- */
@@ -791,6 +1234,14 @@ export class CampusMap3DManager {
     };
     this._weatherTimer = setTimeout(refresh, WEATHER_TTL);
     this._cleanupFns.push(() => clearTimeout(this._weatherTimer));
+    /* Minute tick: the sun's real position moves continuously, so re-run the
+     * solar engine without waiting for the weather TTL. */
+    this._todTimer = setInterval(() => {
+      if (this.disposed) return;
+      this._applyTimeOfDay();
+      this._applyWeatherEnvironment();
+    }, 60000);
+    this._cleanupFns.push(() => clearInterval(this._todTimer));
   }
 
   _ingestWeather(data) {
@@ -836,6 +1287,28 @@ export class CampusMap3DManager {
     const mode = this.weatherCondition === 'snow' ? 'snow'
       : (this.weatherCondition === 'rain' || this.weatherCondition === 'thunder') ? 'rain' : 'none';
     if (mode !== this._particleMode) this._buildParticles(mode);
+    if (this.weatherCondition === 'thunder') this._flash = 0.32 + Math.random() * 0.3;
+
+    /* Clouds: dense grey on rain/overcast/thunder/snow, sparse white when
+     * clear, hidden at night (stars of the scene go up instead). */
+    if (this.cloudMat && this.clouds?.length) {
+      const cloudConf = {
+        clear: { o: 0.34, c: 0xffffff }, cloudy: { o: 0.5, c: 0xe8edf5 },
+        overcast: { o: 0.72, c: 0x9aa4b8 }, fog: { o: 0.4, c: 0xc4cad6 },
+        rain: { o: 0.8, c: 0x8b95a9 }, snow: { o: 0.7, c: 0xdfe6f2 },
+        thunder: { o: 0.88, c: 0x5d6474 }
+      }[this.weatherCondition] || { o: 0.3, c: 0xffffff };
+      const nightDim = this._todKeys === 'night' ? 0.3 : this._todKeys === 'dusk' || this._todKeys === 'dawn' ? 0.65 : 1;
+      this.cloudMat.opacity = cloudConf.o * nightDim;
+      this.cloudMat.color.setHex(cloudConf.c);
+    }
+
+    /* Sun glow reacts to condition (handled here so it updates on weather
+     * change without waiting for the next minute tick). */
+    if (this.sunSprite && this._solarElevation != null) {
+      const clarity = { clear: 1, cloudy: 0.45, overcast: 0.12, fog: 0.1, rain: 0.15, snow: 0.3, thunder: 0.08 }[this.weatherCondition] ?? 0.8;
+      this.sunSprite.material.opacity = Math.max(0, this._smooth01(this._solarElevation, -2, 12)) * (0.35 + 0.4 * clarity);
+    }
     if (this.mount) {
       this.mount.dataset.weatherCondition = this.weatherCondition;
       this.mount.dataset.weatherTemp = this.weather && Number.isFinite(this.weather.temperature_2m)
@@ -849,33 +1322,32 @@ export class CampusMap3DManager {
     this.camera = new THREE.PerspectiveCamera(38, 1, 5, 4200);
     this.camTarget = new THREE.Vector3(WORLD.w / 2, 0, WORLD.h / 2);
     this._applyOverview(0);
+    /* Cinematic arrival: descend from high above into the overview framing. */
+    if (this.gsap) {
+      this.sph.dist = 2350; this.sph.pitch = 1.15; this.sph.yaw = Math.PI / 4 + 0.7;
+      Object.assign(this.sphCur, this.sph);
+      this.gsap.to(this.sph, { dist: this._overviewPose().dist, pitch: this._overviewPose().pitch, yaw: Math.PI / 4, duration: 2.4, ease: 'power3.out' });
+    }
   }
 
   _overviewPose() {
-    const c = this.camTarget;
-    return {
-      /* Slightly oblique rather than perfectly flat: this keeps the overview
-       * readable as a spatial map while preserving the mock-up's calm framing. */
-      pos: new (this.THREE.Vector3)(c.x, 1040, c.z + 620),
-      look: c.clone()
-    };
+    /* Cinematic 3/4 view (~37 deg elevation). Keeps the user's current
+     * bearing — reset eases back to the map center without yaw snap. */
+    return { dist: 1560, pitch: 0.65, yaw: this.sph?.yaw ?? Math.PI / 4 };
   }
 
   _focusPose(mesh) {
     const THREE = this.THREE;
     const box = new THREE.Box3().setFromObject(mesh);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const c = sphere.center;
     const r = Math.max(sphere.radius, 60);
-    const d = r * 3.1;
-    /* ~45° from horizontal; keep a consistent compass bearing. */
-    const yaw = this.orbitAngle;
-    const pos = new THREE.Vector3(
-      c.x + Math.sin(yaw) * d * 0.9,
-      c.y + d * 0.95,
-      c.z + Math.cos(yaw) * d * 0.9
-    );
-    return { pos, look: c.clone(), radius: r };
+    return {
+      look: sphere.center.clone(),
+      dist: r * 3.0,
+      pitch: 0.42,                 // lower angle: buildings read tall in frame
+      yaw: this.sph.yaw,           // keep the user's bearing
+      radius: r
+    };
   }
 
   _applyOverview(duration = 1.1) {
@@ -884,7 +1356,8 @@ export class CampusMap3DManager {
     this.focusId = null;
     this.autoOrbit = true;
     this._tweenCamera(pose, duration);
-    this._setFocusMaterial(null);
+    this._resetMaterials();
+    this._hideFocusRing();
     this._status('Overview. Tap a building to focus.');
   }
 
@@ -895,37 +1368,93 @@ export class CampusMap3DManager {
     this.focusId = id;
     this.autoOrbit = true;
     this._setFocusMaterial(mesh);
+    this._showFocusRing(mesh);
     this._showPathFor(id);
     this._tweenCamera(this._focusPose(mesh), duration);
     this._status(`${mesh.userData.label} — wayfinding from Bus Stop shown.`);
   }
 
-  _tweenCamera(pose, duration) {
+  _tweenCamera(pose, duration = 1.6) {
     const THREE = this.THREE;
-    const from = this.camera.position.clone();
-    const lookFrom = this.camTarget.clone();
-    this.gsap.killTweensOf(this.camera.position);
+    /* All camera motion goes through the spherical rig: tweens write target
+     * values, the loop eases toward them — no competing position tweens. */
+    this.gsap.killTweensOf(this.sph);
     this.gsap.killTweensOf(this.camTarget);
-    this.gsap.to(this.camera.position, {
-      x: pose.pos.x, y: pose.pos.y, z: pose.pos.z,
-      duration, ease: 'power3.inOut',
-      onUpdate: () => this.camera.updateMatrixWorld()
+    this.gsap.to(this.sph, {
+      dist: pose.dist, pitch: pose.pitch, yaw: pose.yaw,
+      duration, ease: 'power2.inOut'
     });
-    this.gsap.to(this.camTarget, {
-      x: pose.look.x, y: pose.look.y, z: pose.look.z,
-      duration, ease: 'power3.inOut',
-      onUpdate: () => this.camera.lookAt(this.camTarget)
-    });
+    if (pose.look) {
+      this.gsap.to(this.camTarget, {
+        x: pose.look.x, y: pose.look.y, z: pose.look.z,
+        duration, ease: 'power2.inOut'
+      });
+    } else {
+      this.gsap.to(this.camTarget, {
+        x: WORLD.w / 2, y: 0, z: WORLD.h / 2,
+        duration, ease: 'power2.inOut'
+      });
+    }
   }
 
   _setFocusMaterial(mesh) {
+    /* Reference look: the selected building turns solid accent; all others
+     * stay faint translucent glass. Pure material change — meshes never move
+     * or scale, so footprints cannot shift or overlap on focus. */
     for (const m of this.buildingMeshes) {
       const active = m === mesh;
-      m.material.emissive.setHex(active ? 0x2a2350 : m.userData.baseColor);
-      m.material.emissiveIntensity = active ? 0.55 : 0.08;
-      m.scale.setScalar(active ? 1.06 : 1);
+      const mat = m.material;
+      if (active) {
+        mat.opacity = 1;
+        mat.depthWrite = true;
+        mat.emissive.set(this.accentHex || 0x7c8cff);
+        mat.emissiveIntensity = 0.3;
+      } else {
+        mat.opacity = 0.18;
+        mat.depthWrite = false;
+        mat.emissive.set(m.userData.baseColor || 0x7c8cff);
+        mat.emissiveIntensity = 0.05;
+      }
     }
   }
+
+  _resetMaterials() {
+    for (const m of this.buildingMeshes) {
+      m.material.opacity = 0.55;
+      m.material.depthWrite = false;
+      m.material.emissive.set(m.userData.baseColor || 0x7c8cff);
+      m.material.emissiveIntensity = 0.05;
+    }
+  }
+
+  /* Targeting ring that snaps onto the focused building's footprint. */
+  _showFocusRing(mesh) {
+    const THREE = this.THREE;
+    if (!this.focusRing) {
+      const g = new THREE.RingGeometry(0.97, 1.03, 56);
+      const m = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+      this.focusRing = new THREE.Mesh(g, m);
+      this.focusRing.rotation.x = -Math.PI / 2;
+      this.focusRing.raycast = () => {};
+      this._track(g, m);
+      this.scene.add(this.focusRing);
+    }
+    const box = new THREE.Box3().setFromObject(mesh);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const r = Math.max(sphere.radius, 30);
+    this.focusRing.position.set(sphere.center.x, 1.2, sphere.center.z);
+    this.focusRing.visible = true;
+    this.focusRing.material.opacity = 0.9;
+    if (this.gsap) {
+      this.gsap.killTweensOf(this.focusRing.scale);
+      this.gsap.fromTo(this.focusRing.scale, { x: r * 0.4, y: r * 0.4, z: r * 0.4 },
+        { x: r, y: r, z: r, duration: 0.7, ease: 'power2.out' });
+    } else {
+      this.focusRing.scale.setScalar(r);
+    }
+  }
+
+  _hideFocusRing() { if (this.focusRing) this.focusRing.visible = false; }
 
   /* --- Input: tap select, pinch zoom, pan/orbit override ------------------- */
   _bindEvents() {
@@ -965,6 +1494,7 @@ export class CampusMap3DManager {
         this._userOverride();
       } else if (pointers.size === 1 && moved > 6) {
         this._orbitBy(dx * 0.006);
+        this._pitchBy(dy * 0.004);
         this._userOverride();
       }
     };
@@ -979,6 +1509,32 @@ export class CampusMap3DManager {
       this._zoomBy(Math.pow(1.0015, e.deltaY));
       this._userOverride();
     };
+
+    /* Desktop hover: raycast the pointer and lift the hovered building so
+     * the scene feels alive under the cursor (skipped on touch — no hover). */
+    if (!this.isMobile) {
+      const onHover = (e) => {
+        if (this.disposed || !this.ready) return;
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.pointerNdc.set(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+        const hit = this.raycaster.intersectObjects(this.buildingMeshes, false)[0];
+        const id = hit ? hit.object.userData.buildingId : null;
+        if (id !== this.hoverId) {
+          this.hoverId = id;
+          for (const m of this.buildingMeshes) {
+            const hovered = m.userData.buildingId === id && id !== this.focusId;
+            m.material.emissiveIntensity = m.userData.buildingId === this.focusId ? 0.55 : hovered ? 0.3 : 0.08;
+          }
+          this.renderer.domElement.style.cursor = id ? 'pointer' : 'grab';
+        }
+      };
+      el.addEventListener('pointermove', onHover);
+      this._cleanupFns.push(() => el.removeEventListener('pointermove', onHover));
+    }
 
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('pointermove', onPointerMove);
@@ -1037,11 +1593,14 @@ export class CampusMap3DManager {
 
   _zoomBy(factor) {
     const THREE = this.THREE;
-    const dir = new THREE.Vector3().subVectors(this.camera.position, this.camTarget);
-    const len = THREE.MathUtils.clamp(dir.length() * factor, 240, 2400);
-    dir.setLength(len);
-    this.gsap.killTweensOf(this.camera.position);
-    this.camera.position.copy(this.camTarget).add(dir);
+    /* Zoom also drives perspective: far = map-like top view, close = street
+     * view with a low pitch and wider FOV (depth-of-field feel). */
+    this.gsap.killTweensOf(this.sph);
+    const d = THREE.MathUtils.clamp(this.sph.dist * factor, 150, 2400);
+    const t = (d - 150) / (2400 - 150);
+    this.sph.dist = d;
+    this.sph.pitch = THREE.MathUtils.lerp(0.2, 0.92, Math.min(1, Math.max(0, t)));
+    this._userOverride();
   }
 
   _panBy(dx, dy) {
@@ -1062,32 +1621,54 @@ export class CampusMap3DManager {
    * eases the real angle toward it, so drags feel inertial instead of 1:1
    * jittery (spec: custom dampening / lerp loop). */
   _orbitBy(delta) {
-    this.orbitTarget = (this.orbitTarget == null ? this.orbitAngle : this.orbitTarget) + delta;
+    this.gsap.killTweensOf(this.sph);
+    this.sph.yaw += delta;
     this._userOverride();
   }
 
-  _applyDampedOrbit(dt) {
-    if (this.orbitTarget == null || Math.abs(this.orbitTarget - this.orbitAngle) < 0.0004) return;
-    this.orbitAngle += (this.orbitTarget - this.orbitAngle) * Math.min(1, dt * 9);
-    const c = this.camTarget;
-    const d = this.camera.position.distanceTo(c);
-    const horizontal = Math.max(Math.hypot(this.camera.position.x - c.x, this.camera.position.z - c.z), 1);
-    const pitch = Math.atan2(this.camera.position.y - c.y, horizontal);
-    const hr = d * Math.cos(pitch);
+  _pitchBy(delta) {
+    const THREE = this.THREE;
+    this.gsap.killTweensOf(this.sph);
+    this.sph.pitch = THREE.MathUtils.clamp(this.sph.pitch + delta, 0.16, 1.32);
+    this._userOverride();
+  }
+
+  /* Single easing pass: the live rig chases the target rig every frame, so
+   * tweens, drags, zoom and auto-orbit all feel inertial, never rushed. */
+  _applyDampedRig(dt) {
+    const k = 1 - Math.exp(-dt * 6.5);
+    const s = this.sph, c = this.sphCur;
+    c.dist += (s.dist - c.dist) * k;
+    c.pitch += (s.pitch - c.pitch) * k;
+    let dy = s.yaw - c.yaw;
+    c.yaw += dy * k;
+    const T = this.THREE;
+    const cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
     this.camera.position.set(
-      c.x + Math.sin(this.orbitAngle) * hr,
-      c.y + d * Math.sin(pitch),
-      c.z + Math.cos(this.orbitAngle) * hr
+      this.camTarget.x + Math.sin(c.yaw) * cp * c.dist,
+      this.camTarget.y + sp * c.dist,
+      this.camTarget.z + Math.cos(c.yaw) * cp * c.dist
     );
-    this.camera.lookAt(c);
+    /* Depth-of-field feel: wider lens up close, tighter from above. */
+    const t = Math.min(1, Math.max(0, (c.dist - 150) / (2400 - 150)));
+    this.camera.fov = T.MathUtils.lerp(50, 36, t);
+    this.camera.updateProjectionMatrix();
+    this.camera.lookAt(this.camTarget);
   }
 
   _resize() {
     const w = this.mount.clientWidth || 600;
     const h = this.mount.clientHeight || 420;
+    /* Cost scales with pixel count: when the map fills a phone screen in
+     * portrait, relax the pixel ratio instead of dropping features. */
+    const raw = this.softwareGpu ? 1 : Math.min(window.devicePixelRatio || 1, this.isMobile ? 1.75 : 2);
+    const cap = this.isMobile ? 1300000 : 2600000;
+    const dpr = w * h * raw > cap ? Math.max(1, cap / (w * h)) : raw;
+    this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
+    this.composer?.setPixelRatio(dpr);
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
-    this.camera.fov = w < 520 ? 46 : 38;
     this.camera.updateProjectionMatrix();
   }
 
@@ -1098,19 +1679,13 @@ export class CampusMap3DManager {
       const dt = Math.min((t - this.lastT) / 1000, 0.05);
       this.lastT = t;
       this.clockUniform.value = t / 1000;
-      if (this.autoOrbit && this.camMode === 'focus' && !this.gsap.isTweening(this.camera.position)) {
-        this.orbitAngle += this.orbitSpeed * dt;
-        this.orbitTarget = this.orbitAngle;
-        const mesh = this.focusId ? this.meshById.get(this.focusId) : null;
-        if (mesh) {
-          const pose = this._focusPose(mesh);
-          const k = 0.08;
-          this.camera.position.lerp(pose.pos, k);
-          this.camTarget.lerp(pose.look, k);
-          this.camera.lookAt(this.camTarget);
-        }
+      const tweeningRig = this.gsap.isTweening(this.sph) || this.gsap.isTweening(this.camTarget);
+      if (this.autoOrbit && !tweeningRig) {
+        /* Focus: slow orbit around the selected building. Overview: the whole
+         * world rotates around the map's center (calm showcase spin). */
+        this.sph.yaw += (this.camMode === 'focus' ? this.orbitSpeed : 0.03) * dt;
       }
-      this._applyDampedOrbit(dt);
+      this._applyDampedRig(dt);
       /* Floating wayfinding arrows glide along the route spline. */
       if (this.routeCurve && this.pathGroup.visible && this.routeArrows.length) {
         const flow = this.clockUniform.value * 0.045;
@@ -1129,10 +1704,117 @@ export class CampusMap3DManager {
         const s = 1 + 0.14 * Math.sin(this.clockUniform.value * 2.4);
         this.busRing.scale.setScalar(s);
       }
+      /* Focused-building ring: slow spin + heartbeat pulse. */
+      if (this.focusRing?.visible) {
+        this.focusRing.rotation.z += dt * 0.5;
+        this.focusRing.material.opacity = 0.65 + 0.25 * Math.sin(this.clockUniform.value * 3);
+      }
+      /* Low clouds drift with the wind. */
+      if (this.clouds?.length && this.cloudMat.opacity > 0.01) {
+        const w = this.weather ? (this.weather.wind_speed_10m || 8) : 8;
+        for (const c of this.clouds) {
+          c.position.x += w * 0.55 * dt;
+          c.position.z += Math.sin(this.clockUniform.value * 0.05 + c.userData.ph) * 3 * dt;
+          if (c.position.x > WORLD.w + 160) c.position.x = -160;
+        }
+      }
+      /* Snow pile-up: depth eases toward full while snowing, melts slowly
+       * after; blanket + roof caps fade/rise with depth. */
+      if (this.snowBlanketMat) {
+        const snowing = this._particleMode === 'snow';
+        this.snowDepth = Math.min(1, (this.snowDepth || 0) + (snowing ? dt / 240 : -dt / 300));
+        if (this.snowDepth <= 0.001) {
+          if (this.snowBlanket.visible) { this.snowBlanket.visible = false; for (const c of this.roofCaps) c.visible = false; }
+        } else {
+          const lift = this.snowDepth * 5;
+          this.snowBlanket.visible = true;
+          this.snowBlanketMat.opacity = Math.min(0.85, this.snowDepth * 1.6);
+          this.snowBlanket.position.y = 1.1 + lift * 0.4;
+          for (const c of this.roofCaps) {
+            c.visible = true;
+            c.position.y += 0; /* caps ride their building; material carries fade */
+          }
+        }
+      }
+      /* Rain wetness: gloss fades in while raining, dries after. */
+      if (this.wetMat) {
+        const raining = this._particleMode === 'rain';
+        this.wetness = Math.min(1, (this.wetness || 0) + (raining ? dt / 20 : -dt / 45));
+        if (this.wetness <= 0.001) {
+          if (this.wetPlane.visible) { this.wetPlane.visible = false; this.groundMat.roughness = 0.95; this.roadMat.roughness = 0.95; }
+        } else {
+          this.wetPlane.visible = true;
+          this.wetMat.opacity = this.wetness * 0.16;
+          /* Wet surfaces are darker + shinier: pull roughness down. */
+          this.groundMat.roughness = 0.95 - this.wetness * 0.55;
+          this.roadMat.roughness = 0.95 - this.wetness * 0.6;
+        }
+      }
+      /* Nightlife: random windows toggle on/off on their own timers. All
+       * windows of one building share one InstancedMesh (1 draw call), so a
+       * toggle is just an instance-color write. */
+      if (this._nightWindows?.length) {
+        const base = this._todKeys === 'night' ? 0.95 : this._todKeys === 'dusk' || this._todKeys === 'dawn' ? 0.6 : 0;
+        const t = this.clockUniform.value;
+        const col = this._nightCol || (this._nightCol = new this.THREE.Color());
+        for (const b of this._nightWindows) {
+          if (base > 0) {
+            let dirty = false;
+            b.timers.forEach((timer, i) => {
+              if (t > Math.abs(timer)) {
+                b.cells[i].on = timer < 0 ? b.cells[i].on : !b.cells[i].on;
+                b.timers[i] = (b.cells[i].on ? -1 : 1) * (t + 10 + Math.random() * 34);
+                dirty = true;
+              }
+            });
+            if (dirty) {
+              b.cells.forEach((c, i) => {
+                col.setHex(c.on ? c.tint : 0x10141f);
+                b.inst.setColorAt(i, col);
+              });
+              b.inst.instanceColor.needsUpdate = true;
+            }
+          }
+          if (Math.abs(b.wm.opacity - base) > 0.01) {
+            b.wm.opacity += (base - b.wm.opacity) * Math.min(1, dt * 3);
+          }
+        }
+      }
+      /* Bloom breathes gently so the neon never looks like a static overlay. */
+      if (this.bloomPass) {
+        const night = this._todKeys === 'night' ? 1.35 : this._todKeys === 'dusk' ? 1.1 : 1;
+        this.bloomPass.strength = this._bloomBase * night * (1 + 0.07 * Math.sin(this.clockUniform.value * 1.6));
+      }
+      /* Storm flashes: rapid flicker with a hard decay, re-striking every
+       * few seconds while the storm cell is overhead. */
+      if (this.lightning) {
+        if (this._flash > 0) {
+          this._flash -= dt;
+          this.lightning.intensity = 2.6 * Math.max(0, Math.sin(this._flash * 40)) * Math.min(1, this._flash * 6);
+        } else {
+          if (this.lightning.intensity !== 0) this.lightning.intensity = 0;
+          if (this.weatherCondition === 'thunder' && Math.random() < dt / 5) this._flash = 0.32 + Math.random() * 0.3;
+        }
+      }
       this._animateParticles(dt);
-      this.renderer.render(this.scene, this.camera);
+      this._render();
     };
+    this._tick = tick;
     this.raf = requestAnimationFrame(tick);
+    /* Battery & thermal guard: stop the RAF while the tab is hidden. */
+    this._onVisibility = () => {
+      if (this.disposed) return;
+      if (document.hidden) { cancelAnimationFrame(this.raf); this.raf = 0; }
+      else if (!this.raf) { this.lastT = performance.now(); this.raf = requestAnimationFrame(this._tick); }
+    };
+    document.addEventListener('visibilitychange', this._onVisibility);
+    this._cleanupFns.push(() => document.removeEventListener('visibilitychange', this._onVisibility));
+  }
+
+  _render() {
+    /* Composer when available (bloom), direct render as the safe fallback. */
+    if (this.composer && !this.disposed) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   _status(msg) {
@@ -1176,9 +1858,14 @@ export class CampusMap3DManager {
         mats.forEach((mm) => mm.dispose());
       }
     });
+    this._spriteTex?.dispose();
+    this.composer?.dispose?.();
     this.renderer?.dispose();
     this.renderer?.domElement?.remove();
     this.hud?.remove();
+    for (const m of this._owned || []) m.parent?.remove(m);
+    this._owned = [];
+    this.windowGlow = [];
     this.weatherChip?.remove();
     this.ready = false;
   }
