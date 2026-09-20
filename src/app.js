@@ -567,6 +567,7 @@ let state = {
   assignmentDetailId: null,  // id of assignment to show in detail modal
   noteModalOpen: false,
   noteModalPreset: {},        // { courseId }
+  materialTargetId: null,
   flashcardsModalOpen: false,
   flashcardIndex: 0,
   // Phase 2 New Modals
@@ -1486,7 +1487,7 @@ function renderCourseDetailView(c) {
           const questions = json.practice_questions || [];
           const concepts = json.key_concepts || [];
           return `
-            <div class="lecture-block" style="background:rgba(255,255,255,0.03);padding:16px;border-radius:var(--radius-md);">
+            <div class="lecture-block" data-material-id="${escapeHtml(m.id || m.file_path || m.file_url || '')}" style="background:rgba(255,255,255,0.03);padding:16px;border-radius:var(--radius-md);">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
                 <div>
                   <h3 style="margin:0 0 4px;font-size:1.05rem;">${m.title}</h3>
@@ -1769,7 +1770,7 @@ function renderAiSearchResultsView(q) {
   state.aiSearchResultsCount = results.length;
   if (!q) return `<div class="ai-discovery"><div class="ai-discovery-mark">${icon('spark')}</div><h2>Search School Center</h2><p>Courses, schedules, assignments, notes, materials, and concepts appear here as you type.</p></div>`;
   if (!results.length) return `<div class="ai-no-results"><div class="ai-no-results-icon">${icon('spark')}</div><div><strong>Nothing in School Center matches “${escapeHtml(q)}”.</strong><p>The same composer is now ready to ask the AI about it.</p></div></div>`;
-  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" data-note-id="${escapeHtml(r.noteId || '')}" data-material-url="${escapeHtml(r.fileUrl || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
+  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" data-note-id="${escapeHtml(r.noteId || '')}" data-material-id="${escapeHtml(r.materialId || '')}" data-material-url="${escapeHtml(r.fileUrl || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
 }
 
 function renderAiConversation() {
@@ -3018,20 +3019,25 @@ function attachEventHandlers() {
         const courseId = searchHit.getAttribute('data-course');
         const tab = searchHit.getAttribute('data-tab') || 'overview';
         const assignmentId = searchHit.getAttribute('data-assignment');
-        const materialUrl = searchHit.getAttribute('data-material-url') || '';
+        const materialId = searchHit.getAttribute('data-material-id') || '';
 
-        // Search results should open the actual thing the user searched for,
-        // not merely dump them onto the containing course page.
-        if (type === 'material') {
+        // Material result: open Materials and focus the EXACT matching card.
+        if (type === 'material' && courseId) {
           state.searchQuery = '';
-          if (materialUrl) {
-            window.open(materialUrl, '_blank', 'noopener,noreferrer');
-          } else if (courseId) {
-            state.courseId = courseId;
-            state.courseTab = 'materials';
-            state.view = 'courses';
-            render();
-          }
+          state.courseId = courseId;
+          state.courseTab = 'materials';
+          state.materialTargetId = materialId || null;
+          state.view = 'courses';
+          render();
+          requestAnimationFrame(() => {
+            if (!materialId) return;
+            const target = document.querySelector('[data-material-id="' + CSS.escape(materialId) + '"]');
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              target.classList.add('search-target-highlight');
+              setTimeout(() => target.classList.remove('search-target-highlight'), 2200);
+            }
+          });
           return;
         }
 
@@ -3223,7 +3229,10 @@ function attachEventHandlers() {
       const navType = item.getAttribute('data-spotlight-nav'); const targetId = item.getAttribute('data-spotlight-id'); state.spotlightSearchOpen = false;
       if (navType === 'course') { state.courseId = targetId; state.view = 'courses'; state.courseTab = 'overview'; }
       else if (navType === 'asg') state.assignmentDetailId = targetId;
-      else if (navType === 'note') state.view = 'settings';
+      else if (navType === 'note') {
+        state.noteModalOpen = true;
+        state.noteModalPreset = { noteId: targetId };
+      }
       render();
     }));
   });
