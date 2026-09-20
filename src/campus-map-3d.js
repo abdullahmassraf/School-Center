@@ -398,11 +398,17 @@ export class CampusMap3DManager {
     this.sun = new THREE.DirectionalLight(0xffffff, 1.35);
     this.sun.position.set(420, 700, 260);
     this.sun.castShadow = true;
+    /* Shadow frustum follows the CAMPUS, not the world origin: the default
+     * target (0,0,0) let long low-sun shadows slide off the ortho box and
+     * pop out of existence. Centered on the plaza with headroom for the
+     * longest dawn/dusk shadow reach. */
+    this.sun.target.position.set(WORLD.w / 2, 0, WORLD.h / 2);
+    this.scene.add(this.sun.target);
     this.sun.shadow.mapSize.set(this._shadowSize, this._shadowSize);
-    this.sun.shadow.camera.left = -620;
-    this.sun.shadow.camera.right = 620;
-    this.sun.shadow.camera.top = 700;
-    this.sun.shadow.camera.bottom = -700;
+    this.sun.shadow.camera.left = -700;
+    this.sun.shadow.camera.right = 700;
+    this.sun.shadow.camera.top = 780;
+    this.sun.shadow.camera.bottom = -780;
     this.sun.shadow.camera.near = 80;
     this.sun.shadow.camera.far = 1900;
     this.sun.shadow.bias = -0.00045;          // z-fighting guard per spec
@@ -1469,7 +1475,9 @@ export class CampusMap3DManager {
       Math.sin(elR),
       -Math.cos(azR) * Math.cos(elR)
     ).multiplyScalar(1100);
-    this.sun.position.copy(sunPos);
+    /* Position relative to the shadow target so the shadow camera keeps the
+     * campus centered from every sun angle. */
+    this.sun.position.copy(this.sun.target.position).addScaledVector(sunPos.clone().normalize(), 1100);
     /* Canonical sun direction (unit): the glow sprite rides the CAMERA at a
      * large offset along this vector every frame, so it reads as a celestial
      * object at infinity - aligned with the sky dome's disc/halo from every

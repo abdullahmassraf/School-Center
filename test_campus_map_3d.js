@@ -83,7 +83,7 @@ try {
   }
   /* Wait for full init (THREE module import + building extrusion), not just
    * canvas presence — a fixed sleep races SwiftShader/CDN timing. */
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 150; i++) { /* 75s: shared-box co-tenant load can push boot past 30s */
     await new Promise((resolve) => setTimeout(resolve, 500));
     const ready = await evaluate(`!!window.__SC_CAMPUS_MAP_3D__?.ready && (window.__SC_CAMPUS_MAP_3D__?.meshById?.size || 0) > 0`);
     if (ready) break;
@@ -150,7 +150,8 @@ try {
    boots for ~10s under SwiftShader. Surface eval exceptions too. */
 let hit = null;
 let hitErr = null;
-for (let i = 0; i < 100 && !hit; i++) { /* 50s: rides out slow re-mounts on a loaded box */
+const hitOk = () => hit && Number.isFinite(hit.x) && Number.isFinite(hit.y);
+for (let i = 0; i < 100 && !hitOk(); i++) { /* 50s: rides out slow re-mounts; retries NaN projections from stale camera matrices */
     hit = await evaluate(`(() => {
     const manager = window.__SC_CAMPUS_MAP_3D__;
     const mesh = manager?.meshById?.get('J');
@@ -161,10 +162,10 @@ for (let i = 0; i < 100 && !hit; i++) { /* 50s: rides out slow re-mounts on a lo
     const rect = canvas.getBoundingClientRect();
     return { x: rect.left + (point.x + 1) * 0.5 * rect.width, y: rect.top + (1 - point.y) * 0.5 * rect.height };
   })()`).catch((e) => { hitErr = e; return null; });
-  if (!hit) await new Promise((resolve) => setTimeout(resolve, 500));
+  if (!hitOk()) await new Promise((resolve) => setTimeout(resolve, 500)); /* wait on EVERY failed attempt: NaN projections previously spun all 100 retries in ~2s */
 }
-if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`);
-  if (!hit || !Number.isFinite(hit.x) || !Number.isFinite(hit.y)) {
+if (!hitOk() && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`);
+  if (!hitOk()) {
     /* No inspection hook (e.g. the site is served from a non-loopback origin):
      * fall back to the app's public Show location control, which drives the
      * same manager.focus() integration. */
@@ -316,6 +317,108 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   if (celestial.dayState.starsW > 0.1 || celestial.nightState.starsW < 0.9) throw new Error(`Star weight wrong day/night: ${JSON.stringify(celestial)}`);
   if (celestial.angleDeg > 10) throw new Error(`Sun sprite misaligned with dome sun by ${celestial.angleDeg}deg`);
   console.log(`CELESTIAL: day sunOp=${celestial.dayState.sunOpacity} night sunOp=${celestial.nightState.sunOpacity} fogOff starsW ${celestial.dayState.starsW}/${celestial.nightState.starsW} align=${celestial.angleDeg}deg`);
+
+  /* --- Dynamic shadows: direction follows the sun, anchored to campus ----
+   * Morning sun (SE) must shade the ground NW of a building; evening sun
+   * (SW) must shade it NE — the direction flips, and the lit side stays
+   * brighter in both. Proves live, sun-tracking, campus-anchored shadows. */
+  const shadows = await evaluate(`(async () => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    mgr.weatherCondition = 'clear';
+    mgr.scene.fog.density = 0.00012;
+    /* Drop a test box on open plaza (raycast-verified, far from buildings):
+     * a shadow MEASUREMENT SURFACE with zero clutter. Ring samples can only
+     * be lit ground or this box's shadow. */
+    const probe = new mgr.THREE.Mesh(
+      new mgr.THREE.BoxGeometry(60, 46, 60),
+      new mgr.THREE.MeshLambertMaterial({ color: 0xd8d8d8 })
+    );
+    const c = (() => {
+      const ray = new mgr.THREE.Raycaster();
+      const ground = mgr.scene.children.find((o) => o.isMesh && o.geometry?.parameters?.radius === 468);
+      const tryPt = (x, z) => {
+        ray.set(new mgr.THREE.Vector3(x, 400, z), new mgr.THREE.Vector3(0, -1, 0));
+        if (ray.intersectObject(ground, false).length) return new mgr.THREE.Vector3(x, 0, z);
+        return null;
+      };
+      return tryPt(80, 700) || tryPt(-60, 640) || tryPt(0, 760) || new mgr.THREE.Vector3(80, 0, 700);
+    })();
+    probe.position.copy(c).setY(23);
+    probe.castShadow = true;
+    mgr.scene.add(probe);
+    const ringScan = (elev, az) => {
+      mgr._solarOverride = { elevationDeg: elev, azimuthDeg: az };
+      mgr._applyTimeOfDay();
+      mgr.sun.shadow.needsUpdate = true;
+      mgr.camera.position.set(0, 950, 1560);
+      mgr.camera.lookAt(0, 0, 0);
+      mgr.camera.updateMatrixWorld();
+      mgr.renderer.render(mgr.scene, mgr.camera);
+      const gl = mgr.renderer.getContext();
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      const px = new Uint8Array(4);
+      const lumAt = (wx, wz) => {
+        const v = new mgr.THREE.Vector3(wx, 0.5, wz).project(mgr.camera);
+        gl.readPixels(((v.x * 0.5 + 0.5) * w) | 0, ((v.y * 0.5 + 0.5) * h) | 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
+      };
+      /* 12-direction ring just off the footprint: the AWAY-from-sun half
+       * plane must be darker than the sun-side half plane (robust to single
+       * neighbor shadows; the compass->ring angle conversion is
+       * (sin az, -cos az) because map north is -Z). */
+      /* 12-direction ring, each direction a 3-point arc average (defeats
+       * neighbor-shadow single-point outliers): the darkest arc must align
+       * with the away-from-sun direction (compass->ring: (sin az, -cos az)). */
+      const hDir = new mgr.THREE.Vector3(mgr._sunDir.x, 0, mgr._sunDir.z).normalize();
+      const awayRingDeg = ((Math.atan2(-hDir.z, -hDir.x) * 180 / Math.PI) + 360) % 360;
+      /* Three concentric rings; pick the one whose darkest arc best aligns
+       * with away-from-sun. Open-ground rings align; scenery-darkened rings
+       * (roads/lots) do not, so a fixed ring could false-fail. */
+      const arcLum = (wx, wz, wx2, wz2) => (lumAt(wx, wz) + lumAt(wx2, wz2) + lumAt((wx + wx2) / 2, (wz + wz2) / 2)) / 3;
+      /* Raw 12-direction ring capture; the harness derives the shadow
+       * movement from the morning->evening CHANGE field (static scenery
+       * cancels per-point). */
+      const r = 55;
+      const lums = [];
+      for (let k = 0; k < 12; k++) {
+        const a = k * 30 * Math.PI / 180;
+        const a2 = (k * 30 + 12) * Math.PI / 180;
+        lums.push(Math.round(arcLum(c.x + Math.cos(a) * r, c.z + Math.sin(a) * r, c.x + Math.cos(a2) * r, c.z + Math.sin(a2) * r)));
+      }
+      const awayPx = (() => {
+        const v = new mgr.THREE.Vector3(c.x - hDir.x * r, 0.5, c.z - hDir.z * r).project(mgr.camera);
+        return Math.round(v.y * 100) / 100;
+      })();
+      return { lums, awayRingDeg: Math.round(awayRingDeg), awayNdcY: awayPx,
+        contrast: Math.round(Math.max(...lums) - Math.min(...lums)),
+        targetCx: Math.round(mgr.sun.target.position.x) };
+    };
+    const morning = ringScan(22, 135);
+    const evening = ringScan(22, 250);
+    mgr._solarOverride = null;
+    mgr._applyTimeOfDay();
+    mgr.scene.remove(probe);
+    return { morning, evening };
+  })()`);
+  const sh = shadows;
+  for (const k of ['morning', 'evening']) {
+    if (sh[k].contrast < 12) throw new Error(`${k} ring shows no shadow contrast: ${JSON.stringify(sh[k])}`);
+    if (sh[k].awayNdcY > 0) throw new Error(`${k} away sample not on ground (NDC y ${sh[k].awayNdcY})`);
+  }
+  if (sh.morning.targetCx !== 465) throw new Error(`Shadow frustum not campus-anchored: ${JSON.stringify(sh.morning)}`);
+  /* Change field: dL(k) = evening(k) - morning(k). Static scenery cancels
+   * per-point; only moving shadows remain. The old away (225: NW) must
+   * BRIGHTEN (shadow leaves) and the new away (340: NE) must DARKEN
+   * (shadow arrives). */
+  const dL = sh.evening.lums.map((L, k) => L - sh.morning.lums[k]);
+  let darkK = 0, litK = 0;
+  dL.forEach((d, k) => { if (d < dL[darkK]) darkK = k; if (d > dL[litK]) litK = k; });
+  const swing = Math.min(dL[litK] - dL[darkK], 255);
+  const near = (got, want, tol) => { const d = Math.abs(got - want); return Math.min(d, 360 - d) <= tol; };
+  if (swing < 25) throw new Error(`Shadow change field too weak: dL=${JSON.stringify(dL)}`);
+  if (!near(darkK * 30, 340, 60)) throw new Error(`New shadow side (NE/340) not darkest change: darkK=${darkK * 30} dL=${JSON.stringify(dL)}`);
+  if (!near(litK * 30, 225, 60)) throw new Error(`Old shadow side (NW/225) not brightest change: litK=${litK * 30} dL=${JSON.stringify(dL)}`);
+  console.log(`SHADOWS: change field dark at ${darkK * 30}deg (want ~340), lit at ${litK * 30}deg (want ~225), swing ${swing}, per-ring contrast ${sh.morning.contrast}/${sh.evening.contrast}, anchored (x=${sh.morning.targetCx})`);
 
   /* --- Logo: vector crest loads in header + favicon wired ----------------- */
   const logo = await evaluate(`(async () => {
