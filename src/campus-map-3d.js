@@ -448,7 +448,8 @@ export class CampusMap3DManager {
       uDayF: { value: 0 },
       uHorizonF: { value: 0 },
       uOvercast: { value: 0 },
-      uAccent: { value: new THREE.Color(this.accentHex || 0x7c8cff) }
+      uAccent: { value: new THREE.Color(this.accentHex || 0x7c8cff) },
+      uTime: this.clockUniform
     };
     this.skyMat = new THREE.ShaderMaterial({
       uniforms: this.skyUniforms,
@@ -463,43 +464,69 @@ export class CampusMap3DManager {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        uniform vec3 uSunDir; uniform float uDayF; uniform float uHorizonF; uniform float uOvercast; uniform vec3 uAccent;
+        uniform vec3 uSunDir; uniform float uDayF; uniform float uHorizonF; uniform float uOvercast; uniform vec3 uAccent; uniform float uTime;
         varying vec3 vDir;
         float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.259)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float vnoise(vec2 p) {
+          vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          float a = hash(vec3(i, 7.1)), b = hash(vec3(i + vec2(1.0, 0.0), 7.1));
+          float c = hash(vec3(i + vec2(0.0, 1.0), 7.1)), d2 = hash(vec3(i + vec2(1.0, 1.0), 7.1));
+          return mix(mix(a, b, f.x), mix(c, d2, f.x), f.y);
+        }
+        float fbm(vec2 p) { return 0.5 * vnoise(p) + 0.25 * vnoise(p * 2.13 + 17.7) + 0.125 * vnoise(p * 4.31 + 9.1); }
         void main() {
           vec3 d = normalize(vDir);
           float h = clamp(d.y, -0.12, 1.0);
-          /* Day: site indigo -> pale horizon. Night: deep navy with a subtle
-           * accent glow along the horizon band. */
-          vec3 dayZenith = vec3(0.12, 0.32, 0.62);   /* true sky blue */
-          vec3 dayHorizon = vec3(0.72, 0.82, 0.95);  /* bright blue-white */
-          vec3 nightZenith = vec3(0.024, 0.032, 0.09);
-          vec3 nightHorizon = vec3(0.07, 0.08, 0.18);
-          vec3 zen = mix(nightZenith, dayZenith, uDayF);
-          vec3 hor = mix(nightHorizon, dayHorizon, uDayF);
-          /* Warm band at sunrise/sunset. */
-          vec3 warm = vec3(0.85, 0.44, 0.25);
-          hor = mix(hor, warm, uHorizonF * 0.42);
-          zen = mix(zen, vec3(0.28, 0.16, 0.22), uHorizonF * 0.3);
-          vec3 col = mix(hor, zen, pow(clamp(h, 0.0, 1.0), 0.78));
-          /* Stars fade in with darkness. */
-          float star = step(0.9992, hash(floor(d * 420.0))) * (1.0 - uDayF) * smoothstep(0.02, 0.25, d.y);
-          col += vec3(star * 0.8);
-          /* Sun halo on the true direction. */
-          float sunD = max(dot(d, normalize(uSunDir)), 0.0);
-          float halo = pow(sunD, 90.0) * 0.9 + pow(sunD, 260.0) * 1.1;
-          vec3 sunTint = mix(vec3(1.0, 0.55, 0.3), vec3(1.0, 0.93, 0.8), uDayF);
-          col += sunTint * (halo * 1.25) * (1.0 - uOvercast * 0.85) * smoothstep(-0.12, 0.1, uSunDir.y);
-          /* Overcast washes the sky toward flat grey. */
-          /* Overcast: bright neutral-grey wash (real overcast skies are
-             almost as bright as clear ones — never a dark grey shroud). */
+          vec3 sd = normalize(uSunDir);
+          float grad = pow(clamp(h, 0.0, 1.0), 0.72);
+          float night = 1.0 - uDayF;
+          /* Three-stop day gradient: saturated cyan-blue zenith melting
+           * through sky-blue into a bright ice-white horizon. Night keeps
+           * the deep navy glass look. */
+          vec3 zen = mix(vec3(0.016, 0.024, 0.075), vec3(0.10, 0.30, 0.64), uDayF);
+          vec3 mid3 = mix(vec3(0.054, 0.067, 0.153), vec3(0.36, 0.56, 0.85), uDayF);
+          vec3 hor = mix(vec3(0.06, 0.075, 0.17), vec3(0.78, 0.87, 0.97), uDayF);
+          vec3 col = mix(hor, mid3, smoothstep(0.0, 0.45, grad));
+          col = mix(col, zen, smoothstep(0.45, 1.0, grad));
+          /* Sun-side warm scattering at sunrise/sunset: broad, soft, and
+           * strongest toward the sun's azimuth — the golden-hour read. */
+          float sunSide = 0.5 + 0.5 * dot(normalize(vec2(d.x, d.z)), normalize(vec2(sd.x, sd.z)));
+          vec3 warm = mix(vec3(0.93, 0.48, 0.22), vec3(1.0, 0.62, 0.34), sunSide);
+          col = mix(col, warm, uHorizonF * (0.26 + 0.4 * sunSide) * smoothstep(0.4, 0.0, grad));
+          /* Stars: two density scales + gentle per-star twinkle. */
+          float starField = step(0.9992, hash(floor(d * 420.0))) + step(0.99965, hash(floor(d * 260.0) + 31.0)) * 1.4;
+          float tw = 0.72 + 0.28 * sin(uTime * 2.2 + hash(floor(d * 420.0)) * 41.0);
+          col += vec3(0.9, 0.94, 1.0) * starField * tw * night * smoothstep(0.03, 0.3, d.y) * (1.0 - uOvercast);
+          /* Clouds: 3-octave value noise, slow drift, stratus cover grows
+           * with overcast, softly shaded by the sun's direction. */
+          if (d.y > 0.015) {
+            vec2 cp = d.xz / max(d.y, 0.12) * 0.5 + uTime * vec2(0.0045, 0.0016);
+            float den = fbm(cp);
+            float cover = smoothstep(mix(0.58, 0.30, uOvercast), mix(0.78, 0.52, uOvercast), den);
+            cover *= smoothstep(0.015, 0.12, d.y) * (1.0 - 0.55 * smoothstep(0.75, 1.0, d.y));
+            float lit = 0.5 + 0.5 * dot(d, sd);
+            vec3 cloudDay = mix(vec3(0.80, 0.85, 0.93), vec3(1.04, 1.02, 0.99), lit);
+            vec3 cloudNight = vec3(0.075, 0.085, 0.15);
+            vec3 cloud = mix(cloudNight, cloudDay, uDayF);
+            cloud = mix(cloud, vec3(0.84, 0.87, 0.92) * (0.35 + 0.65 * uDayF), uOvercast * 0.55);
+            col = mix(col, cloud, cover * (0.85 - 0.25 * uOvercast));
+          }
+          /* Sun: broad warm scatter + tight bright disc on the real direction. */
+          float sunD = max(dot(d, sd), 0.0);
+          float scatter = pow(sunD, 6.0) * 0.16 + pow(sunD, 32.0) * 0.30;
+          float disc = pow(sunD, 320.0) * 1.5 + pow(sunD, 60.0) * 0.35;
+          vec3 sunTint = mix(vec3(1.0, 0.5, 0.26), vec3(1.0, 0.94, 0.82), uDayF);
+          col += sunTint * (scatter + disc) * (1.0 - uOvercast * 0.88) * smoothstep(-0.12, 0.1, sd.y);
+          /* Overcast wash: bright neutral grey (real overcast stays bright). */
           col = mix(col, vec3(0.82, 0.85, 0.90) * (0.55 + 0.45 * uDayF), uOvercast * 0.72);
-          /* Fog band at the horizon ties the dome to the campus haze. */
+          /* Horizon fog bands tie the dome to the campus haze. */
           float fogBand = 1.0 - smoothstep(0.0, 0.22, d.y);
-          col = mix(col, vec3(0.09, 0.11, 0.22), fogBand * (1.0 - uDayF) * 0.55);
-          /* Day haze: pale blue at the horizon (not navy) so the dome meets
-             the ground without a dark seam. */
-          col = mix(col, vec3(0.62, 0.71, 0.86), fogBand * uDayF * 0.40);
+          col = mix(col, vec3(0.09, 0.11, 0.22), fogBand * night * 0.55);
+          col = mix(col, vec3(0.66, 0.75, 0.88), fogBand * uDayF * 0.42);
+          /* A whisper of the theme accent in the night horizon band. */
+          col += uAccent * night * fogBand * 0.05;
+          /* Dither: kills gradient banding on smooth skies. */
+          col += (hash(vec3(gl_FragCoord.xy, 1.7)) - 0.5) * (1.5 / 255.0);
           gl_FragColor = vec4(col, 1.0);
         }`
     });

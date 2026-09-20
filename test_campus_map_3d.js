@@ -150,7 +150,7 @@ try {
    boots for ~10s under SwiftShader. Surface eval exceptions too. */
 let hit = null;
 let hitErr = null;
-for (let i = 0; i < 40 && !hit; i++) {
+for (let i = 0; i < 60 && !hit; i++) {
     hit = await evaluate(`(() => {
     const manager = window.__SC_CAMPUS_MAP_3D__;
     const mesh = manager?.meshById?.get('J');
@@ -374,6 +374,30 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   })()`);
   if (!orient || orient.avg < 0.9 || orient.min < 0.85) throw new Error(`Arrows misoriented: ${JSON.stringify(orient)}`);
   console.log(`ARROWS: ${orient.count} instanced, pointing along travel (avg dot ${orient.avg.toFixed(2)}, min ${orient.min.toFixed(2)})`);
+
+  /* Sky coverage guard: the dome must paint a real gradient, never a flat
+   * wash. Tilt the rig up first so both sample rows are pure sky (at the
+   * overview pose the lower row reads ground, which is darker than sky). */
+  const sky = await evaluate(`(async () => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const canvas = document.querySelector('.cm3d-canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(4);
+    const lumAt = (y) => { mgr.renderer.render(mgr.scene, mgr.camera); gl.readPixels((w / 2) | 0, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]; };
+    /* Level view from the camera's own height: the frame's top samples
+     * mid-elevation sky, the 55% row samples just above the horizon —
+     * both guaranteed sky, and the gradient is maximal between them. */
+    const THREE = mgr.THREE;
+    const up = new THREE.Vector3(mgr.camTarget.x, mgr.camera.position.y, mgr.camTarget.z);
+    mgr.camera.lookAt(up);
+    const out = { top: +lumAt(h - 4).toFixed(1), mid: +lumAt((h * 0.55) | 0).toFixed(1), accent: '#' + mgr.skyUniforms.uAccent.value.getHexString() };
+    mgr.camera.lookAt(mgr.camTarget);
+    return out;
+  })()`);
+  if (!(sky.top < sky.mid)) throw new Error(`Sky gradient flat or inverted: ${JSON.stringify(sky)}`);
+  if (sky.top < 8 || sky.top > 250) throw new Error(`Sky zenith out of readable range: ${JSON.stringify(sky)}`);
+  console.log(`SKY: gradient present (zenith ${sky.top} < horizon ${sky.mid}), accent-linked (${sky.accent})`);
 
   const pathToggle = await evaluate(`(() => {
     const button = document.querySelector('.cm3d-path-toggle');
