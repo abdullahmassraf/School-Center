@@ -530,6 +530,14 @@ export class CampusMap3DManager {
           col = mix(col, vec3(0.66, 0.75, 0.88), fogBand * uDayF * 0.42);
           /* A whisper of the theme accent in the night horizon band. */
           col += uAccent * night * fogBand * 0.05;
+          /* Below-horizon: the dome under the horizon line must fall to a
+           * dark ground-tone, not continue the bright sky — otherwise the
+           * reset view shows a huge pale "globe" bowl under the campus
+           * disc. A thin haze remains right at the horizon line. */
+          float below = smoothstep(0.0, -0.14, d.y);
+          vec3 under = mix(vec3(0.028, 0.038, 0.085), vec3(0.13, 0.16, 0.26), uDayF);
+          under = mix(under, vec3(0.10, 0.12, 0.18), uOvercast * 0.5);
+          col = mix(col, under, below);
           /* Dither: kills gradient banding on smooth skies. */
           col += (hash(vec3(gl_FragCoord.xy, 1.7)) - 0.5) * (1.5 / 255.0);
           gl_FragColor = vec4(col, 1.0);
