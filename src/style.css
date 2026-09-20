@@ -3863,6 +3863,7 @@ main#view-host,
 .cm3d-hud button:hover{background:rgba(16,23,53,.9);transform:translateY(-1px)}
 .cm3d-hud button svg{width:17px;height:17px}
 .cm3d-hud button.is-off{opacity:.45}
+.cm3d-hud button.is-hidden{display:none}
 /* No-WebGL fallback message (the legacy 2D plan no longer exists) */
 .cm3d-unavailable{display:grid;justify-items:center;gap:6px;min-height:280px;place-content:center;text-align:center;padding:26px 30px;color:var(--muted)}
 .cm3d-unavailable svg{width:34px;height:34px;color:#8a70ed;opacity:.8}

@@ -105,7 +105,8 @@ try {
       weatherTemp: document.querySelector('.cm3d-weather-temp')?.textContent || '',
       cameraMode: manager?.camMode || '',
       pathSegments: Number(document.querySelector('#cm3d-mount')?.dataset.pathSegments || 0),
-      pathVisible: document.querySelector('#cm3d-mount')?.dataset.pathVisible !== 'false'
+      pathVisible: document.querySelector('#cm3d-mount')?.dataset.pathVisible !== 'false',
+      pathBtnHidden: document.querySelector('.cm3d-path-toggle')?.classList.contains('is-hidden') ?? null
     };
   })()`);
   if (!overview.canvas || !overview.webgl || overview.hud !== 2) throw new Error(`3D overview did not initialize: ${JSON.stringify(overview)}`);
@@ -122,7 +123,10 @@ try {
   if (legacy2d.stage || legacy2d.svg || legacy2d.buildings || legacy2d.lots || legacy2d.pin || legacy2d.modeToggle) {
     throw new Error(`Legacy 2D map elements still present in the DOM: ${JSON.stringify(legacy2d)}`);
   }
-  if (!overview.pathSegments || !overview.pathVisible) throw new Error(`Initial wayfinding path missing: ${JSON.stringify(overview)}`);
+  /* Overview shows no route: the bus-stop path belongs to a focused
+   * building only, and the toggle button is hidden until one is selected. */
+  if (overview.pathSegments) throw new Error(`Route visible at overview — must be empty: ${JSON.stringify(overview)}`);
+  if (overview.pathBtnHidden !== true) throw new Error(`Wayfinding toggle visible with no selection: ${JSON.stringify(overview)}`);
   if (!overview.weatherChip) throw new Error(`Weather chip missing from the 3D map: ${JSON.stringify(overview)}`);
   const chipPos = await evaluate(`(() => {
     const chip = document.querySelector('.cm3d-weather');
@@ -304,6 +308,12 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   if (!(r > b + 40 && r > g + 40)) throw new Error(`Glass did not follow red accent: ${JSON.stringify(accentTest)}`);
   if (accentTest.before === accentTest.after.glassH) throw new Error(`Accent refresh produced no color change: ${JSON.stringify(accentTest)}`);
   console.log(`ACCENT: glass ${accentTest.before} -> red-theme ${accentTest.after.glassH} (live re-tint works)`);
+  const focusBtn = await evaluate(`(() => ({
+    segments: Number(document.querySelector('#cm3d-mount')?.dataset.pathSegments || 0),
+    btnHidden: document.querySelector('.cm3d-path-toggle')?.classList.contains('is-hidden') ?? null
+  }))()`);
+  if (!focusBtn.segments || focusBtn.btnHidden !== false) throw new Error(`Focus did not show route + toggle button: ${JSON.stringify(focusBtn)}`);
+  console.log(`ROUTE VISIBILITY: hidden at overview, shown on focus (${focusBtn.segments} segment, button visible)`);
   const ringVisible = await evaluate(`!!window.__SC_CAMPUS_MAP_3D__?.focusRing?.visible`);
   if (!ringVisible) throw new Error('Focus targeting ring did not appear on selection');
   if (!focus.status || /Overview\. Tap a building/i.test(focus.status)) throw new Error(`Focus status line not updated: "${focus.status}"`);
@@ -325,10 +335,13 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
       overview: (document.getElementById('cm-status-text')?.textContent || '').includes('Overview') || mount?.dataset.cameraMode === 'overview',
       cameraMode: mount?.dataset.cameraMode || '',
       focusBuilding: mount?.dataset.focusBuilding || '',
-      pathVisible: mount?.dataset.pathVisible === 'false'
+      pathVisible: mount?.dataset.pathVisible === 'false',
+      segments: Number(mount?.dataset.pathSegments || 0),
+      btnHidden: document.querySelector('.cm3d-path-toggle')?.classList.contains('is-hidden') ?? null
     };
   })()`);
   if (!reset.overview || reset.cameraMode !== 'overview' || reset.focusBuilding) throw new Error(`Camera reset failed: ${JSON.stringify(reset)}`);
+  if (reset.segments || reset.btnHidden !== true) throw new Error(`Reset left the route or toggle visible: ${JSON.stringify(reset)}`);
   await new Promise((resolve) => setTimeout(resolve, 1400));
   const rig = await evaluate(`(() => {
     const mgr = window.__SC_CAMPUS_MAP_3D__;
@@ -367,7 +380,10 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   const expectedMode = environment.weatherCondition === 'snow' ? 'snow'
     : (environment.weatherCondition === 'rain' || environment.weatherCondition === 'thunder') ? 'rain' : 'none';
   if (environment.particleMode !== expectedMode) throw new Error(`Particle mode ${environment.particleMode} does not match condition ${environment.weatherCondition} (expected ${expectedMode})`);
-  if (environment.arrows <= 0) throw new Error(`Wayfinding arrows missing: ${JSON.stringify(environment)}`);
+  /* Arrows are selection-bound now: the final state is post-reset (nothing
+   * selected), so 0 arrows is correct. Arrow presence during focus is
+   * asserted by the ROUTE VISIBILITY step above. */
+  if (environment.arrows !== 0) throw new Error(`Route should be cleared after reset: ${JSON.stringify(environment)}`);
   /* Post-processing is tier-aware: full bloom on real GPUs, ACES-only lite
    * tier on software rasterizers where fullscreen blur passes are ruinous. */
   const softwareGpu = await evaluate(`window.__SC_CAMPUS_MAP_3D__?.softwareGpu === true`);

@@ -270,7 +270,9 @@ export class CampusMap3DManager {
     this._buildWeatherSurfaces();
     this._buildPost();
     if (this.disposed || !this.mount.isConnected) { this.dispose(); return false; }
-    this._showPathFor('J');
+    /* No building is selected at boot — no route, toggle hidden. */
+    this._clearPaths();
+    this._updatePathToggleVisibility();
     this._buildParticles(this._initialParticleMode());
     this._applyTimeOfDay();
     this._initWeather();
@@ -469,17 +471,17 @@ export class CampusMap3DManager {
           float h = clamp(d.y, -0.12, 1.0);
           /* Day: site indigo -> pale horizon. Night: deep navy with a subtle
            * accent glow along the horizon band. */
-          vec3 dayZenith = vec3(0.16, 0.22, 0.46);
-          vec3 dayHorizon = vec3(0.55, 0.63, 0.82);
+          vec3 dayZenith = vec3(0.12, 0.32, 0.62);   /* true sky blue */
+          vec3 dayHorizon = vec3(0.72, 0.82, 0.95);  /* bright blue-white */
           vec3 nightZenith = vec3(0.024, 0.032, 0.09);
           vec3 nightHorizon = vec3(0.07, 0.08, 0.18);
           vec3 zen = mix(nightZenith, dayZenith, uDayF);
           vec3 hor = mix(nightHorizon, dayHorizon, uDayF);
           /* Warm band at sunrise/sunset. */
           vec3 warm = vec3(0.85, 0.44, 0.25);
-          hor = mix(hor, warm, uHorizonF * 0.55);
+          hor = mix(hor, warm, uHorizonF * 0.42);
           zen = mix(zen, vec3(0.28, 0.16, 0.22), uHorizonF * 0.3);
-          vec3 col = mix(hor, zen, pow(clamp(h, 0.0, 1.0), 0.62));
+          vec3 col = mix(hor, zen, pow(clamp(h, 0.0, 1.0), 0.78));
           /* Stars fade in with darkness. */
           float star = step(0.9992, hash(floor(d * 420.0))) * (1.0 - uDayF) * smoothstep(0.02, 0.25, d.y);
           col += vec3(star * 0.8);
@@ -487,12 +489,17 @@ export class CampusMap3DManager {
           float sunD = max(dot(d, normalize(uSunDir)), 0.0);
           float halo = pow(sunD, 90.0) * 0.9 + pow(sunD, 260.0) * 1.1;
           vec3 sunTint = mix(vec3(1.0, 0.55, 0.3), vec3(1.0, 0.93, 0.8), uDayF);
-          col += sunTint * halo * (1.0 - uOvercast) * smoothstep(-0.12, 0.1, uSunDir.y);
+          col += sunTint * (halo * 1.25) * (1.0 - uOvercast * 0.85) * smoothstep(-0.12, 0.1, uSunDir.y);
           /* Overcast washes the sky toward flat grey. */
-          col = mix(col, vec3(0.42, 0.45, 0.52) * (0.35 + 0.65 * uDayF), uOvercast * 0.75);
+          /* Overcast: bright neutral-grey wash (real overcast skies are
+             almost as bright as clear ones — never a dark grey shroud). */
+          col = mix(col, vec3(0.82, 0.85, 0.90) * (0.55 + 0.45 * uDayF), uOvercast * 0.72);
           /* Fog band at the horizon ties the dome to the campus haze. */
           float fogBand = 1.0 - smoothstep(0.0, 0.22, d.y);
           col = mix(col, vec3(0.09, 0.11, 0.22), fogBand * (1.0 - uDayF) * 0.55);
+          /* Day haze: pale blue at the horizon (not navy) so the dome meets
+             the ground without a dark seam. */
+          col = mix(col, vec3(0.62, 0.71, 0.86), fogBand * uDayF * 0.40);
           gl_FragColor = vec4(col, 1.0);
         }`
     });
@@ -510,6 +517,7 @@ export class CampusMap3DManager {
     const THREE = this.THREE;
     this.windowGlow = [];
     this.lightPools = [];
+    this.facadeGlows = [];
     this._nightWindows = [];
     /* Warm light pools on the ground under each building: this is what makes
      * a night city read from a high camera — panels alone are 2-3px specks
@@ -545,17 +553,28 @@ export class CampusMap3DManager {
         { z: box.min.z - 0.35, flip: -1 }
       ];
       const cells = [];
+      /* L-shaped footprints: the bounding-box plane only matches the actual
+       * wall in parts. Raycast each column against the real geometry and
+       * anchor the pane where the wall actually is — never mid-air. */
+      const ray = new THREE.Raycaster();
+      ray.far = 220;
+      const origin = new THREE.Vector3();
+      const dirV = new THREE.Vector3();
       for (const face of faces) {
         for (let r = 0; r < rows; r++) {
-          /* Per-window brightness variation (seeded): night skyline doesn't
-           * repeat one intensity — AAA city-light read. */
+          const wy = y0 + (r + 0.5) * rowPitch;
           for (let c = 0; ; c++) {
             const wx = box.min.x + 6 + (c + 0.5) * colPitch;
             if (wx > box.max.x - 6) break;
+            origin.set(wx, wy, face.z - face.flip * 60);   // start off-wall
+            dirV.set(0, 0, face.flip);
+            ray.set(origin, dirV);
+            const hit = ray.intersectObject(mesh, false)[0];
+            if (!hit) continue;                            // open air: no wall here
             const rnd = seedOf(r * 57 + c * 13 + (face.flip > 0 ? 0 : 91));
-            if (rnd < 0.14) continue;                    // structural gap
+            if (rnd < 0.14) continue;                      // structural gap
             cells.push({
-              x: wx, y: y0 + (r + 0.5) * rowPitch, z: face.z,
+              x: wx, y: wy, z: hit.point.z + face.flip * 0.35,  // hugging the wall
               on: rnd < litP,
               tint: rnd * 9 % 1 < 0.33 ? 0xd6e4ff : rnd * 9 % 1 < 0.66 ? 0xffd9a0 : 0xffc98a,
               bright: 0.72 + seedOf(r * 31 + c * 7 + 5) * 0.55   // 0.72-1.27
@@ -596,6 +615,24 @@ export class CampusMap3DManager {
         inst, wm, cells,
         timers: cells.map((c) => (c.on ? -1 : 8 + Math.random() * 30))
       });
+
+      /* Outward facade glow: a soft additive halo rising off the lit wall
+       * into the map — the "light spills out of the windows" read. */
+      const fw = Math.min(box.max.x - box.min.x + 46, 190);
+      const fh = Math.min(box.max.y - box.min.y + 26, 120);
+      const glowGeo = new THREE.PlaneGeometry(fw, fh);
+      const glowMat = new THREE.MeshBasicMaterial({
+        map: this._spriteTex, color: 0xffc98a, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+      });
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      glow.position.set((box.min.x + box.max.x) / 2, (y0 + y1) / 2 + 4, box.max.z + 14);
+      glow.renderOrder = 3;
+      glow.raycast = () => {};
+      this.scene.add(glow);
+      this._track(glowGeo, glowMat);
+      this._owned.push(glow);
+      this.facadeGlows.push(glow);
 
       /* One soft pool hugging the building's projected footprint. */
       const span = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
@@ -1330,6 +1367,11 @@ export class CampusMap3DManager {
     /* Ground light pools + window materials follow real darkness: invisible
      * in daylight, full glow at night (the daylight-glow bug fix). */
     if (this.poolMat && !this.disposed) this.poolMat.opacity = 0.45 * this._nightF;
+    /* Windows shed light outward only at night. */
+    if (this.facadeGlows?.length && !this.disposed) {
+      const g = 0.34 * this._nightF;
+      for (const glow of this.facadeGlows) glow.material.opacity = g;
+    }
 
     /* Flag the on-demand (software-tier) shadow map: lighting just changed. */
     if (this.sun?.shadow && !this.sun.shadow.autoUpdate) this.sun.shadow.needsUpdate = true;
@@ -1495,7 +1537,16 @@ export class CampusMap3DManager {
     this._tweenCamera(pose, duration);
     this._resetMaterials();
     this._hideFocusRing();
+    /* Nothing is selected in overview — the bus-stop route (and its toggle
+     * button) belong to a focused building only. */
+    this._clearPaths();
+    this._updatePathToggleVisibility();
     this._status('Overview. Tap a building to focus.');
+  }
+
+  /* The wayfinding toggle only makes sense while a route exists. */
+  _updatePathToggleVisibility() {
+    if (this.pathBtn) this.pathBtn.classList.toggle('is-hidden', !(this.focusId && this.pathLines.length));
   }
 
   _focusBuilding(id, duration = 1.15) {
@@ -1507,6 +1558,7 @@ export class CampusMap3DManager {
     this._setFocusMaterial(mesh);
     this._showFocusRing(mesh);
     this._showPathFor(id);
+    this._updatePathToggleVisibility();
     this._tweenCamera(this._focusPose(mesh), duration);
     this._status(`${mesh.userData.label} — wayfinding from Bus Stop shown.`);
   }
