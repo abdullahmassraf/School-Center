@@ -1769,7 +1769,7 @@ function renderAiSearchResultsView(q) {
   state.aiSearchResultsCount = results.length;
   if (!q) return `<div class="ai-discovery"><div class="ai-discovery-mark">${icon('spark')}</div><h2>Search School Center</h2><p>Courses, schedules, assignments, notes, materials, and concepts appear here as you type.</p></div>`;
   if (!results.length) return `<div class="ai-no-results"><div class="ai-no-results-icon">${icon('spark')}</div><div><strong>Nothing in School Center matches “${escapeHtml(q)}”.</strong><p>The same composer is now ready to ask the AI about it.</p></div></div>`;
-  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
+  return `<div class="unified-search-results">${results.map(r => `<button class="unified-search-result glass-secondary" data-unified-search-type="${escapeHtml(r.type)}" data-course="${escapeHtml(r.courseId || '')}" data-tab="${escapeHtml(r.targetTab || 'overview')}" data-assignment="${escapeHtml(r.assignmentId || '')}" data-note-id="${escapeHtml(r.noteId || '')}" data-material-url="${escapeHtml(r.fileUrl || '')}" type="button"><span class="search-result-badge">${escapeHtml(r.badge)}</span><span class="search-result-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(r.subtitle || r.snippet || '')}</small>${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ''}</span>${icon('chevronRight')}</button>`).join('')}</div>`;
 }
 
 function renderAiConversation() {
@@ -2079,6 +2079,36 @@ function renderAssignmentDetailModal() {
 function renderNoteModal() {
   if (!state.noteModalOpen) return '';
   const preset = state.noteModalPreset || {};
+  const viewingNote = preset.noteId ? notesManager.getById(preset.noteId) : null;
+
+  if (viewingNote) {
+    const course = courseById(viewingNote.courseId);
+    return `
+      <div class="modal-overlay open" id="note-modal-overlay">
+        <div class="modal-box" style="max-width:760px;">
+          <div class="modal-head">
+            <div>
+              <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.08em;">Note</div>
+              <h3 class="headfont" style="margin:3px 0 0;">${escapeHtml(viewingNote.title || 'Untitled Note')}</h3>
+            </div>
+            <div class="icon-btn sm" id="close-note-modal">${icon('close')}</div>
+          </div>
+          <div class="modal-body">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+              ${course ? `<span class="badge">${escapeHtml(course.code)}</span>` : ''}
+              <span style="font-size:0.76rem;color:var(--muted);">Updated ${new Date(viewingNote.updatedAt || Date.now()).toLocaleDateString()}</span>
+              ${(viewingNote.tags || []).map(tag => `<span class="badge">${escapeHtml(tag)}</span>`).join('')}
+            </div>
+            <div style="font-size:0.95rem;line-height:1.75;white-space:pre-wrap;word-break:break-word;">${escapeHtml(viewingNote.content || 'No content in this note.')}</div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-ghost" id="close-note-modal-cancel">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   const courseOptions = [{ id: '', code: 'No Course', name: '' }, ...COURSES].map(c =>
     `<option value="${c.id}" ${c.id === (preset.courseId || state.courseId || '') ? 'selected' : ''}>${c.code}${c.name ? ' — ' + c.name : ''}</option>`
   ).join('');
@@ -2984,9 +3014,38 @@ function attachEventHandlers() {
       const saveBtn = e.target.closest('[data-ai-save-edit]');
       const searchHit = e.target.closest('[data-unified-search-type]');
       if (searchHit) {
+        const type = searchHit.getAttribute('data-unified-search-type');
         const courseId = searchHit.getAttribute('data-course');
         const tab = searchHit.getAttribute('data-tab') || 'overview';
         const assignmentId = searchHit.getAttribute('data-assignment');
+        const materialUrl = searchHit.getAttribute('data-material-url') || '';
+
+        // Search results should open the actual thing the user searched for,
+        // not merely dump them onto the containing course page.
+        if (type === 'material') {
+          state.searchQuery = '';
+          if (materialUrl) {
+            window.open(materialUrl, '_blank', 'noopener,noreferrer');
+          } else if (courseId) {
+            state.courseId = courseId;
+            state.courseTab = 'materials';
+            state.view = 'courses';
+            render();
+          }
+          return;
+        }
+
+        if (type === 'note') {
+          const noteId = searchHit.getAttribute('data-note-id');
+          if (noteId) {
+            state.searchQuery = '';
+            state.noteModalOpen = true;
+            state.noteModalPreset = { noteId, courseId };
+            render();
+            return;
+          }
+        }
+
         if (courseId) {
           state.courseId = courseId;
           state.courseTab = tab === 'assignments' ? 'assignments' : tab === 'notes' ? 'notes' : tab === 'materials' ? 'materials' : tab === 'deadlines' ? 'deadlines' : 'overview';
