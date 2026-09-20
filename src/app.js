@@ -21,7 +21,7 @@ import {
 import { jobsManager } from './jobs.js';
 import { detectCourseFromContent } from './course-detector.js';
 import { assignmentsManager } from './assignments.js';
-import { renderCampusMapWidget, renderShowLocationButton, attachCampusMapHandlers, highlightBuilding, initCampusMap3d } from './campus-map.js';
+import { renderCampusMapWidget, renderShowLocationButton, highlightBuilding, initCampusMap3d } from './campus-map.js';
 import { notesManager } from './notes.js';
 import { deadlinesManager } from './deadlines.js';
 import { routeCourseContent } from './course-data.js';
@@ -3299,7 +3299,6 @@ function attachEventHandlers() {
     }
   });
 
-  attachCampusMapHandlers();
   initCampusMap3d();
   document.querySelectorAll('[data-show-location]').forEach((btn) => {
     btn.addEventListener('click', (e) => {

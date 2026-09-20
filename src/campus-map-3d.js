@@ -49,6 +49,59 @@ const BUILDING_STYLES = {
   A: { color: PALETTE.academic, height: BUILDING_HEIGHT }
 };
 
+/* --- Automated time-of-day engine -----------------------------------------
+ * Real-clock phases (dawn / midday / dusk / night) grade the sun, ambient
+ * light and fog color. No sliders: the environment simply follows the hour
+ * and cross-fades across phase boundaries. */
+const TOD_PHASES = {
+  night:  { fog: 0x0b1030, ambient: 0x44508f, ambientI: 0.42, sun: 0x93a7ff, sunI: 0.55, sunPos: [-320, 520, -180] },
+  dawn:   { fog: 0x241c3f, ambient: 0x9a7aa0, ambientI: 0.58, sun: 0xffb27a, sunI: 0.95, sunPos: [-520, 300, 340] },
+  midday: { fog: 0x101735, ambient: 0xcdd6ff, ambientI: 0.6,  sun: 0xffffff, sunI: 1.35, sunPos: [420, 700, 260] },
+  dusk:   { fog: 0x1f1a44, ambient: 0x8a72b0, ambientI: 0.55, sun: 0xff9a6a, sunI: 0.85, sunPos: [560, 260, 440] }
+};
+const SNOW_COUNT = 520;
+
+/* --- Live weather (Open-Meteo, keyless + CORS, ideal for a static site) ----
+ * Davis Campus coordinates: Sheridan Davis Campus, Brampton ON. */
+const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast?latitude=43.7230&longitude=-79.7130&current=temperature_2m,weather_code,cloud_cover,is_day,wind_speed_10m,precipitation,snowfall&timezone=auto';
+const WEATHER_CACHE_KEY = 'sc_weather_cache_v1';
+const WEATHER_TTL = 15 * 60 * 1000;
+
+/* WMO weather code + precipitation → the scene condition we can render. */
+function conditionFromCode(code, snowfall = 0, precipitation = 0) {
+  const c = Number(code) || 0;
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86 || Number(snowfall) > 0) return 'snow';
+  if (c >= 95) return 'thunder';
+  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82) || Number(precipitation) > 0.2) return 'rain';
+  if (c === 45 || c === 48) return 'fog';
+  if (c === 3) return 'overcast';
+  if (c === 1 || c === 2) return 'cloudy';
+  return 'clear';
+}
+
+/* How each condition grades the environment (fog density, sun/ambient
+ * multipliers, and how far to tint the sky/fog toward overcast grey). */
+const WEATHER_ENV = {
+  clear:    { fog: 0.00034, sun: 1.0,  ambient: 1.0,  tint: 0 },
+  cloudy:   { fog: 0.00044, sun: 0.6,  ambient: 1.1,  tint: 0.4 },
+  overcast: { fog: 0.00048, sun: 0.42, ambient: 1.15, tint: 0.6 },
+  fog:      { fog: 0.00090, sun: 0.5,  ambient: 1.05, tint: 0.7 },
+  rain:     { fog: 0.00062, sun: 0.42, ambient: 1.12, tint: 0.55 },
+  snow:     { fog: 0.00072, sun: 0.6,  ambient: 1.08, tint: 0.5 },
+  thunder:  { fog: 0.00068, sun: 0.35, ambient: 1.1,  tint: 0.65 }
+};
+
+/* Minimal stroke icons (no emoji — matches the app's vector-glyph rule). */
+const WEATHER_ICONS = {
+  clear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  cloudy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .4-9A7 7 0 1 0 6 16.7"/><path d="M6 19h11.5"/></svg>',
+  overcast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 16a4.5 4.5 0 0 0 .4-9A7 7 0 1 0 6 13.7"/><path d="M5 19h13M7 22h9"/></svg>',
+  fog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M6 13h13M4 17h14"/></svg>',
+  rain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 13a4.5 4.5 0 0 0 .4-9A7 7 0 1 0 6 10.7"/><path d="M8 15l-1.5 3M13 15l-1.5 3M18 15l-1.5 3"/></svg>',
+  snow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v18M5 6.5l14 11M19 6.5l-14 11"/><path d="M12 3l-2 2M12 3l2 2M12 21l-2-2M12 21l2-2"/></svg>',
+  thunder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 12a4.5 4.5 0 0 0 .4-9A7 7 0 1 0 6 9.7"/><path d="M13 12l-3 5h5l-3 5"/></svg>'
+};
+
 /* --- Waypoint graph (A*) --------------------------------------------------
  * Coordinates are SVG-space; the graph threads the driveways and walks so
  * paths look intentional rather than cutting through buildings. */
@@ -73,6 +126,8 @@ const WAYPOINTS = {
   hEnt: [423, 224],
   mEnt: [200, 464],
   jEnt: [412, 76],
+  jW1: [324, 66],
+  jW2: [404, 62],
   lot1: [734, 726],
   lot3: [396, 776]
 };
@@ -85,7 +140,10 @@ const WAYPOINT_EDGES = [
   ['bus', 'bEnt'], ['bEnt', 'hEnt'],
   ['junc1', 'mEnt'], ['bus', 'mEnt'],
   ['junc2', 'lot3'], ['rEnt', 'lot1'], ['lot1', 'aEnt'], ['lot1', 'cEnt'],
-  ['aEnt', 'cEnt'], ['rEnt', 'cEnt']
+  ['aEnt', 'cEnt'], ['rEnt', 'cEnt'],
+  /* Building J branch: north up the west driveway, then east along the
+   * Steeles frontage so the walkway never cuts through the J footprint. */
+  ['dr3', 'jW1'], ['jW1', 'jW2'], ['jW2', 'jEnt']
 ];
 
 const ENTRANCES = {
@@ -121,17 +179,34 @@ export class CampusMap3DManager {
     this._cleanupFns = [];
     this.pathLines = [];
     this.pathPucks = null;
+    this.routeCurve = null;
+    this.routeArrows = [];
+    this._arrowGeo = null;
+    this._arrowMat = null;
+    this.busRing = null;
+    this.snow = null;
+    this._snowData = null;
+    this._todKeys = null;
+    this.orbitTarget = null;
+    this._tmpA = null;
+    this._tmpB = null;
     this._geos = [];
     this._mats = [];
   }
 
   async init() {
-    const [{ default: THREE }, { SVGLoader }, { default: gsap }] = await Promise.all([
+    const [threeModule, { SVGLoader }, gsapModule] = await Promise.all([
       import('three'),
       import('three/addons/loaders/SVGLoader.js'),
       import('gsap')
     ]);
     if (this.disposed) return false;
+    this.SVGLoader = SVGLoader;
+    /* Browser ESM builds expose Three.js as a namespace, while GSAP exposes
+     * its API as either a default export or a namespace depending on the CDN
+     * / bundler. Normalize both shapes before constructing the renderer. */
+    const THREE = threeModule.default || threeModule;
+    const gsap = gsapModule.default || gsapModule.gsap || gsapModule;
     this.THREE = THREE;
     this.gsap = gsap;
     this.loader = new SVGLoader();
@@ -140,10 +215,14 @@ export class CampusMap3DManager {
     this._buildScene();
     this._buildLights();
     this._buildGround();
+    this._buildInfrastructure();
     this._buildBuildings();
     this._buildGraph();
     this._buildCameraRig();
     this._showPathFor('J');
+    this._buildParticles(this._initialParticleMode());
+    this._applyTimeOfDay();
+    this._initWeather();
     this._bindEvents();
     this._startLoop();
     this.ready = true;
@@ -162,14 +241,16 @@ export class CampusMap3DManager {
     this.renderer.domElement.setAttribute('role', 'img');
     this.mount.appendChild(this.renderer.domElement);
 
-    this.info = document.createElement('div');
-    this.info.className = 'cm3d-info';
-    this.info.innerHTML = `
-      <div class="cm3d-info-tag"><span class="cm3d-pulse"></span><span class="cm3d-info-kicker">CAMPUS MAP</span></div>
-      <strong class="cm3d-info-title">Davis Campus Overview</strong>
-      <span class="cm3d-info-copy">Select a building to inspect its 3D footprint and walkable route.</span>
-      <span class="cm3d-info-route">Routes begin at the Shuttle Bus stop</span>`;
-    this.mount.appendChild(this.info);
+    this.info = null;
+    this.weather = null;
+    this.weatherCondition = 'clear';
+    this._particleMode = null;
+    this._weatherTimer = 0;
+    this._todSunI = null;
+    this._todAmbientI = null;
+    this._todFogColor = null;
+    this._overcastTint = null;
+    this._tmpFog = null;
 
     this.hud = document.createElement('div');
     this.hud.className = 'cm3d-hud';
@@ -183,18 +264,30 @@ export class CampusMap3DManager {
     this.mount.appendChild(this.hud);
     this.resetBtn = this.hud.querySelector('.cm3d-reset');
     this.pathBtn = this.hud.querySelector('.cm3d-path-toggle');
-    this.infoTitle = this.info.querySelector('.cm3d-info-title');
-    this.infoCopy = this.info.querySelector('.cm3d-info-copy');
-    this.infoRoute = this.info.querySelector('.cm3d-info-route');
+
+    /* Minimal live-weather chip (top-left). The old info card is gone: view
+     * and building status live in the app header's status line. */
+    this.weatherChip = document.createElement('div');
+    this.weatherChip.className = 'cm3d-weather';
+    this.weatherChip.setAttribute('aria-label', 'Live campus weather');
+    this.weatherChip.dataset.condition = this.weatherCondition;
+    this.weatherChip.innerHTML = `<span class="cm3d-weather-icon" aria-hidden="true">${WEATHER_ICONS.clear}</span><span class="cm3d-weather-temp">—°</span>`;
+    this.mount.appendChild(this.weatherChip);
+    if (this.mount) {
+      this.mount.dataset.weatherCondition = this.weatherCondition;
+      this.mount.dataset.weatherTemp = '';
+    }
   }
 
   _buildScene() {
     const THREE = this.THREE;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(PALETTE.ground, 1400, 2600);
+    this.scene.fog = new THREE.FogExp2(PALETTE.ground, 0.00034);
 
     this.raycaster = new THREE.Raycaster();
     this.pointerNdc = new THREE.Vector2();
+    this._tmpA = new THREE.Vector3();
+    this._tmpB = new THREE.Vector3();
 
     this.buildingMeshes = [];
     this.meshById = new Map();
@@ -202,6 +295,7 @@ export class CampusMap3DManager {
     this.pathGroup.visible = true;
     this.scene.add(this.pathGroup);
     this.pathLines = [];
+    if (this.mount) this.mount.dataset.pathVisible = 'true';
   }
 
   _buildLights() {
@@ -244,11 +338,67 @@ export class CampusMap3DManager {
     this._track(ringG, ringM);
   }
 
+  /* --- Campus infrastructure: roads, parking lots, glowing transit marker -- */
+  _buildInfrastructure() {
+    const THREE = this.THREE;
+    const infra = (this.opts.getInfrastructure ? this.opts.getInfrastructure() : {});
+    /* [centerX, centerZ, width, depth] — Steeles Ave W along the top,
+     * McLaughlin Road along the west (matches the traced SVG plan). */
+    const roads = infra.roads || [
+      [WORLD.w / 2, 38, WORLD.w, 48],
+      [43, 364, 34, 700]
+    ];
+    const roadMat = new THREE.MeshStandardMaterial({ color: PALETTE.road, roughness: 0.95, metalness: 0 });
+    this._track(null, roadMat);
+    for (const [cx, cz, w, d] of roads) {
+      const g = new THREE.BoxGeometry(w, 0.3, d);
+      const m = new THREE.Mesh(g, roadMat);
+      m.position.set(cx, 0.05, cz);
+      m.receiveShadow = true;
+      this.scene.add(m);
+      this._track(g);
+    }
+
+    const lotMat = new THREE.MeshStandardMaterial({ color: PALETTE.lot, roughness: 0.9, metalness: 0.05 });
+    const lotEdgeMat = new THREE.LineBasicMaterial({ color: 0x40508f, transparent: true, opacity: 0.55 });
+    this._track(null, lotMat);
+    this._track(null, lotEdgeMat);
+    for (const lot of (infra.lots || [])) {
+      const g = new THREE.BoxGeometry(lot.w, 0.25, lot.h);
+      const m = new THREE.Mesh(g, lotMat);
+      m.position.set(lot.x + lot.w / 2, 0.04, lot.y + lot.h / 2);
+      m.receiveShadow = true;
+      this.scene.add(m);
+      const eg = new THREE.EdgesGeometry(g);
+      const el = new THREE.LineSegments(eg, lotEdgeMat);
+      el.position.copy(m.position);
+      el.raycast = () => {};
+      this.scene.add(el);
+      this._track(g);
+      this._track(eg);
+    }
+
+    /* Shuttle bus stop: glowing puck + pulsing halo (animated in the loop). */
+    const stop = infra.shuttleStop || [376, 450];
+    const puckG = new THREE.CylinderGeometry(10, 10, 3, 24);
+    const puckM = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.9 });
+    const puck = new THREE.Mesh(puckG, puckM);
+    puck.position.set(stop[0], 1.8, stop[1]);
+    this.scene.add(puck);
+    this._track(puckG, puckM);
+    const ringG = new THREE.RingGeometry(13, 16, 40);
+    const ringM = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+    this.busRing = new THREE.Mesh(ringG, ringM);
+    this.busRing.rotation.x = -Math.PI / 2;
+    this.busRing.position.set(stop[0], 0.5, stop[1]);
+    this.scene.add(this.busRing);
+    this._track(ringG, ringM);
+  }
+
   /* --- Buildings via SVGLoader -> ExtrudeGeometry ------------------------- */
   _shapesFromPath(d) {
     const parsed = this.loader.parse(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${d}"/></svg>`);
-    return parsed.paths.flatMap((p) => SVGLoader_createShapes(p));
-    function SVGLoader_createShapes(p) { return SVGLoader.createShapes(p); }
+    return parsed.paths.flatMap((p) => this.SVGLoader.createShapes(p));
   }
 
   _buildBuildings() {
@@ -282,6 +432,14 @@ export class CampusMap3DManager {
       mesh.userData.baseColor = style.color;
       mesh.userData.label = b.label;
       this.scene.add(mesh);
+      /* Blueprint wireframe outline for the architectural read; a child of the
+       * mesh so focus scaling applies to it and raycasts ignore it. */
+      const wireGeo = new THREE.EdgesGeometry(geo, 26);
+      const wireMat = new THREE.LineBasicMaterial({ color: 0xaebcff, transparent: true, opacity: 0.26 });
+      const wire = new THREE.LineSegments(wireGeo, wireMat);
+      wire.raycast = () => {};
+      mesh.add(wire);
+      this._track(wireGeo, wireMat);
       this.buildingMeshes.push(mesh);
       this.meshById.set(id, mesh);
       this._track(geo, mat);
@@ -430,6 +588,32 @@ export class CampusMap3DManager {
     this.pathGroup.add(line);
     this.pathLines.push({ line, mat });
 
+    /* Glowing floating arrows flowing along a CatmullRom spline through the
+     * same smoothed waypoints (spec: animated directional wayfinding). */
+    const curve = new THREE.CatmullRomCurve3(
+      pts.map(([x, y]) => new THREE.Vector3(x, 8, y)),
+      false, 'catmullrom', 0.5
+    );
+    this.routeCurve = curve;
+    if (!this._arrowGeo) {
+      this._arrowGeo = new THREE.ConeGeometry(5, 12, 4);
+      this._arrowGeo.rotateX(Math.PI / 2);
+      this._arrowMat = new THREE.MeshBasicMaterial({
+        color: PALETTE.path, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false
+      });
+      this._track(this._arrowGeo, this._arrowMat);
+    }
+    const ARROWS = 14;
+    for (let i = 0; i < ARROWS; i++) {
+      const arrow = new THREE.Mesh(this._arrowGeo, this._arrowMat);
+      arrow.raycast = () => {};
+      const t = i / ARROWS;
+      arrow.position.copy(curve.getPointAt(t));
+      arrow.lookAt(curve.getPointAt((t + 0.02) % 1));
+      this.pathGroup.add(arrow);
+      this.routeArrows.push({ mesh: arrow, t });
+    }
+
     /* Route markers: subtle origin/target pucks. */
     const puckGeo = new THREE.CylinderGeometry(9, 9, 4, 24);
     const originMat = new THREE.MeshBasicMaterial({ color: PALETTE.path, transparent: true, opacity: 0.85 });
@@ -446,6 +630,7 @@ export class CampusMap3DManager {
     this.pathGroup.add(target);
     this._track(null, targetMat);
     this.pathPucks = [origin, target];
+    if (this.mount) this.mount.dataset.pathSegments = String(this.pathLines.length);
   }
 
   _clearPaths() {
@@ -455,6 +640,10 @@ export class CampusMap3DManager {
       if (mat) mat.dispose();
     }
     this.pathLines = [];
+    for (const a of this.routeArrows || []) this.pathGroup.remove(a.mesh);
+    this.routeArrows = [];
+    this.routeCurve = null;
+    if (this.mount) this.mount.dataset.pathSegments = '0';
     if (this.pathPucks) {
       for (const p of this.pathPucks) this.pathGroup.remove(p);
       this.pathPucks = null;
@@ -464,6 +653,194 @@ export class CampusMap3DManager {
   setPathsVisible(v) {
     this.pathGroup.visible = v;
     this.pathBtn.classList.toggle('is-off', !v);
+    this.mount.dataset.pathVisible = String(v);
+  }
+
+  /* --- Atmospheric particles: condition-driven rain / snow ------------------ */
+  _initialParticleMode() {
+    /* Offline/first-frame default until live weather lands: snow in the
+     * Brampton winter months, otherwise a clear scene. */
+    const m = new Date().getMonth();
+    return (m === 11 || m <= 2) ? 'snow' : 'none';
+  }
+
+  _buildParticles(mode = 'none') {
+    const THREE = this.THREE;
+    if (this.snow) {
+      this.scene?.remove(this.snow);
+      this.snow.geometry.dispose();
+      this.snow.material.dispose();
+      this.snow = null;
+      this._snowData = null;
+    }
+    this._particleMode = mode;
+    if (mode === 'none' || this.disposed || !this.scene) return;
+    const conf = mode === 'rain'
+      ? { n: 700, size: 2.0, opacity: 0.5, color: 0x9fd8ff, speed: [260, 380] }
+      : { n: SNOW_COUNT, size: 3.4, opacity: 0.62, color: 0xdfe8ff, speed: [22, 56] };
+    const positions = new Float32Array(conf.n * 3);
+    const phases = new Float32Array(conf.n);
+    const speeds = new Float32Array(conf.n);
+    for (let i = 0; i < conf.n; i++) {
+      positions[i * 3] = Math.random() * WORLD.w;
+      positions[i * 3 + 1] = Math.random() * 460;
+      positions[i * 3 + 2] = Math.random() * WORLD.h;
+      phases[i] = Math.random() * Math.PI * 2;
+      speeds[i] = conf.speed[0] + Math.random() * (conf.speed[1] - conf.speed[0]);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: conf.color, size: conf.size, transparent: true, opacity: conf.opacity,
+      sizeAttenuation: true, depthWrite: false, fog: true
+    });
+    this.snow = new THREE.Points(geo, mat);
+    this.snow.raycast = () => {};
+    this.snow.frustumCulled = false;
+    this.scene.add(this.snow);
+    this._snowData = { phases, speeds, mode };
+  }
+
+  _animateParticles(dt) {
+    if (!this.snow || this.disposed || this._particleMode === 'none') return;
+    const pos = this.snow.geometry.getAttribute('position');
+    const { phases, speeds, mode } = this._snowData;
+    const t = this.clockUniform.value;
+    if (mode === 'rain') {
+      /* Rain falls fast with a steady wind slant; flakes recycle at the top. */
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - speeds[i] * dt;
+        let x = pos.getX(i) + 16 * dt;
+        if (y < 2) { y = 470 + Math.random() * 40; x = Math.random() * WORLD.w; }
+        if (x > WORLD.w) x -= WORLD.w;
+        pos.setXYZ(i, x, y, pos.getZ(i));
+      }
+    } else {
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - speeds[i] * dt;
+        if (y < 4) y = 470 + Math.random() * 30;
+        pos.setY(i, y);
+        /* Gentle wind drift, phase-offset per flake. */
+        pos.setX(i, pos.getX(i) + Math.sin(t * 0.6 + phases[i]) * 6 * dt);
+      }
+    }
+    pos.needsUpdate = true;
+  }
+
+  /* --- Time-of-day engine (dawn / midday / dusk / night) -------------------- */
+  _todPhaseForHour(h) {
+    if (h >= 6 && h < 10) return 'dawn';
+    if (h >= 10 && h < 17) return 'midday';
+    if (h >= 17 && h < 21) return 'dusk';
+    return 'night';
+  }
+
+  _applyTimeOfDay() {
+    const phaseKey = this._todPhaseForHour(new Date().getHours());
+    const phase = TOD_PHASES[phaseKey];
+    const THREE = this.THREE;
+    this.ambient.color.setHex(phase.ambient);
+    this.ambient.intensity = phase.ambientI;
+    this.sun.color.setHex(phase.sun);
+    this.sun.intensity = phase.sunI;
+    this.sun.position.set(...phase.sunPos);
+    this.scene.fog.color.setHex(phase.fog);
+    if (this.renderer) this.renderer.setClearColor(phase.fog, 1);
+    this._todKeys = phaseKey;
+    /* Bases the live-weather grader modulates on top of. */
+    this._todSunI = phase.sunI;
+    this._todAmbientI = phase.ambientI;
+    this._todFogColor = this._todFogColor || new THREE.Color();
+    this._todFogColor.setHex(phase.fog);
+    this._overcastTint = this._overcastTint || new THREE.Color(0x8a94a8);
+    this._tmpFog = this._tmpFog || new THREE.Color();
+  }
+
+  /* --- Live weather integration ------------------------------------------- */
+  async _fetchWeather() {
+    try {
+      const res = await fetch(WEATHER_URL, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.current) {
+        try { localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ t: Date.now(), data })); } catch (_) {}
+        return data;
+      }
+    } catch (_) { /* offline: fall back to cache or time-of-day only */ }
+    return null;
+  }
+
+  async _initWeather() {
+    let data = null;
+    try {
+      const raw = localStorage.getItem(WEATHER_CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (Date.now() - cached.t < WEATHER_TTL && cached.data?.current) data = cached.data;
+      }
+    } catch (_) {}
+    if (!data) data = await this._fetchWeather();
+    if (this.disposed) return;
+    this._ingestWeather(data);
+    /* Keep the twin live: refresh quietly on the TTL, one timer only. */
+    const refresh = async () => {
+      if (this.disposed) return;
+      this._ingestWeather(await this._fetchWeather());
+      if (this.disposed) return;
+      this._weatherTimer = setTimeout(refresh, WEATHER_TTL);
+    };
+    this._weatherTimer = setTimeout(refresh, WEATHER_TTL);
+    this._cleanupFns.push(() => clearTimeout(this._weatherTimer));
+  }
+
+  _ingestWeather(data) {
+    if (!data?.current) return;
+    this.weather = data.current;
+    this.weatherCondition = conditionFromCode(
+      data.current.weather_code, data.current.snowfall, data.current.precipitation
+    );
+    this._setWeatherChip();
+    this._applyWeatherEnvironment();
+  }
+
+  _setWeatherChip() {
+    if (!this.weatherChip) return;
+    const temp = this.weather && Number.isFinite(this.weather.temperature_2m)
+      ? `${Math.round(this.weather.temperature_2m)}°`
+      : '—';
+    this.weatherChip.innerHTML =
+      `<span class="cm3d-weather-icon" aria-hidden="true">${WEATHER_ICONS[this.weatherCondition] || WEATHER_ICONS.clear}</span>` +
+      `<span class="cm3d-weather-temp">${temp}</span>`;
+    this.weatherChip.dataset.condition = this.weatherCondition;
+    this.weatherChip.title = this.weather
+      ? `${this.weatherCondition} · ${Math.round(this.weather.temperature_2m)}°C · wind ${Math.round(this.weather.wind_speed_10m)} km/h`
+      : 'Live weather unavailable';
+  }
+
+  _applyWeatherEnvironment() {
+    const env = WEATHER_ENV[this.weatherCondition] || WEATHER_ENV.clear;
+    const nightBoost = this._todKeys === 'night' ? 1.3 : 1;
+    if (this.scene?.fog) this.scene.fog.density = env.fog * nightBoost;
+    if (this.sun && this._todSunI != null) this.sun.intensity = this._todSunI * env.sun;
+    if (this.ambient && this._todAmbientI != null) this.ambient.intensity = this._todAmbientI * env.ambient;
+    if (this.scene?.fog && this._todFogColor && this._overcastTint && this._tmpFog) {
+      if (env.tint > 0) {
+        this._tmpFog.lerpColors(this._todFogColor, this._overcastTint, env.tint);
+        this.scene.fog.color.copy(this._tmpFog);
+        this.renderer?.setClearColor(this._tmpFog, 1);
+      } else {
+        this.scene.fog.color.copy(this._todFogColor);
+        this.renderer?.setClearColor(this._todFogColor, 1);
+      }
+    }
+    const mode = this.weatherCondition === 'snow' ? 'snow'
+      : (this.weatherCondition === 'rain' || this.weatherCondition === 'thunder') ? 'rain' : 'none';
+    if (mode !== this._particleMode) this._buildParticles(mode);
+    if (this.mount) {
+      this.mount.dataset.weatherCondition = this.weatherCondition;
+      this.mount.dataset.weatherTemp = this.weather && Number.isFinite(this.weather.temperature_2m)
+        ? String(Math.round(this.weather.temperature_2m)) : '';
+    }
   }
 
   /* --- Camera rig + GSAP state machine ------------------------------------ */
@@ -629,6 +1006,11 @@ export class CampusMap3DManager {
     });
 
     this._resize();
+
+    /* Responsive scaling: keep aspect + renderer size in sync with the window. */
+    this._onWindowResize = () => { if (!this.disposed) this._resize(); };
+    window.addEventListener('resize', this._onWindowResize);
+    this._cleanupFns.push(() => window.removeEventListener('resize', this._onWindowResize));
   }
 
   _userOverride() {
@@ -676,28 +1058,28 @@ export class CampusMap3DManager {
     this.camera.lookAt(this.camTarget);
   }
 
+  /* Damped orbit: pointer input only moves a target angle; the render loop
+   * eases the real angle toward it, so drags feel inertial instead of 1:1
+   * jittery (spec: custom dampening / lerp loop). */
   _orbitBy(delta) {
-    this.orbitAngle += delta;
+    this.orbitTarget = (this.orbitTarget == null ? this.orbitAngle : this.orbitTarget) + delta;
+    this._userOverride();
+  }
+
+  _applyDampedOrbit(dt) {
+    if (this.orbitTarget == null || Math.abs(this.orbitTarget - this.orbitAngle) < 0.0004) return;
+    this.orbitAngle += (this.orbitTarget - this.orbitAngle) * Math.min(1, dt * 9);
     const c = this.camTarget;
     const d = this.camera.position.distanceTo(c);
-    if (this.camMode === 'focus') {
-      const horizontal = Math.max(Math.hypot(this.camera.position.x - c.x, this.camera.position.z - c.z), 1);
-      const pitch = Math.atan2(this.camera.position.y - c.y, horizontal);
-      const horizontalRadius = d * Math.cos(pitch);
-      this.camera.position.set(
-        c.x + Math.sin(this.orbitAngle) * horizontalRadius,
-        c.y + d * Math.sin(pitch),
-        c.z + Math.cos(this.orbitAngle) * horizontalRadius
-      );
-      this.camera.lookAt(c);
-    } else {
-      this.camera.position.set(
-        c.x + Math.sin(this.orbitAngle) * d * 0.35,
-        this.camera.position.y,
-        c.z + Math.cos(this.orbitAngle) * d * 0.35
-      );
-      this.camera.lookAt(c);
-    }
+    const horizontal = Math.max(Math.hypot(this.camera.position.x - c.x, this.camera.position.z - c.z), 1);
+    const pitch = Math.atan2(this.camera.position.y - c.y, horizontal);
+    const hr = d * Math.cos(pitch);
+    this.camera.position.set(
+      c.x + Math.sin(this.orbitAngle) * hr,
+      c.y + d * Math.sin(pitch),
+      c.z + Math.cos(this.orbitAngle) * hr
+    );
+    this.camera.lookAt(c);
   }
 
   _resize() {
@@ -718,6 +1100,7 @@ export class CampusMap3DManager {
       this.clockUniform.value = t / 1000;
       if (this.autoOrbit && this.camMode === 'focus' && !this.gsap.isTweening(this.camera.position)) {
         this.orbitAngle += this.orbitSpeed * dt;
+        this.orbitTarget = this.orbitAngle;
         const mesh = this.focusId ? this.meshById.get(this.focusId) : null;
         if (mesh) {
           const pose = this._focusPose(mesh);
@@ -727,6 +1110,26 @@ export class CampusMap3DManager {
           this.camera.lookAt(this.camTarget);
         }
       }
+      this._applyDampedOrbit(dt);
+      /* Floating wayfinding arrows glide along the route spline. */
+      if (this.routeCurve && this.pathGroup.visible && this.routeArrows.length) {
+        const flow = this.clockUniform.value * 0.045;
+        for (const a of this.routeArrows) {
+          const u = (a.t + flow) % 1;
+          this.routeCurve.getPointAt(u, this._tmpA);
+          this.routeCurve.getTangentAt(u, this._tmpB);
+          a.mesh.position.copy(this._tmpA);
+          a.mesh.position.y += 1.5;
+          this._tmpA.add(this._tmpB);
+          a.mesh.lookAt(this._tmpA);
+        }
+      }
+      /* Pulsing transit halo. */
+      if (this.busRing) {
+        const s = 1 + 0.14 * Math.sin(this.clockUniform.value * 2.4);
+        this.busRing.scale.setScalar(s);
+      }
+      this._animateParticles(dt);
       this.renderer.render(this.scene, this.camera);
     };
     this.raf = requestAnimationFrame(tick);
@@ -734,19 +1137,9 @@ export class CampusMap3DManager {
 
   _status(msg) {
     this.opts.onStatus && this.opts.onStatus(msg);
-    if (!this.infoTitle || !this.infoCopy || !this.infoRoute) return;
-    if (this.camMode === 'focus' && this.focusId) {
-      const label = this.meshById.get(this.focusId)?.userData.label || `Building ${this.focusId}`;
-      this.infoTitle.textContent = label;
-      this.infoCopy.textContent = 'Interactive 3D focus with an animated walkable route.';
-      this.infoRoute.textContent = 'Route from Shuttle Bus · Tap Reset for overview';
-      this.info.querySelector('.cm3d-info-kicker').textContent = `FOCUSED · ${this.focusId}`;
-    } else {
-      this.infoTitle.textContent = 'Davis Campus Overview';
-      this.infoCopy.textContent = 'Select a building to inspect its 3D footprint and walkable route.';
-      this.infoRoute.textContent = 'Routes begin at the Shuttle Bus stop';
-      this.info.querySelector('.cm3d-info-kicker').textContent = 'CAMPUS MAP';
-    }
+    this.mount.dataset.cameraMode = this.camMode;
+    this.mount.dataset.focusBuilding = this.focusId || '';
+    this.mount.dataset.pathSegments = String(this.pathLines?.length || 0);
   }
 
   _track(geo, mat) {
@@ -766,6 +1159,10 @@ export class CampusMap3DManager {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    /* Particles stay in the scene: the traverse below disposes their geometry
+     * and material. */
+    this.routeArrows = [];
+    this.routeCurve = null;
     if (this.gsap) this.gsap.killTweensOf([this.camera?.position, this.camTarget].filter(Boolean));
     for (const fn of this._cleanupFns) { try { fn(); } catch (_) {} }
     this._cleanupFns = [];
@@ -782,7 +1179,7 @@ export class CampusMap3DManager {
     this.renderer?.dispose();
     this.renderer?.domElement?.remove();
     this.hud?.remove();
-    this.info?.remove();
+    this.weatherChip?.remove();
     this.ready = false;
   }
 }

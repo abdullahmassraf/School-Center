@@ -3723,10 +3723,10 @@ main#view-host,
 }
 
 /* =========================================================================
-   CAMPUS MAP WIDGET — Davis Campus
+   CAMPUS MAP WIDGET — Davis Campus (3D digital twin)
    Geometry lives in src/campus-map.js. Everything visual lives here.
    Rules: no emoji, no decorative colour beyond --accent, type inherits the
-   app font stack, and the plan is masked to a circle.
+   app font stack. The legacy 2D SVG plan styles were removed with the plan.
    ========================================================================= */
 .campus-map-card { padding: 18px; }
 
@@ -3744,154 +3744,6 @@ main#view-host,
   line-height: 1.45;
   color: var(--muted);
 }
-.cm-reset-btn { font-size: 0.75rem; padding: 6px 12px; min-height: 32px; flex-shrink: 0; }
-.cm-reset-btn[hidden] { display: none; }
-
-.cm-stage {
-  position: relative;
-  width: 100%;
-  max-width: 460px;
-  margin: 0 auto;
-}
-
-.campus-map-svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
-  font-family: inherit;
-}
-
-/* ---- Site surfaces ---- */
-.cm-site { fill: rgba(255, 255, 255, 0.055); }
-.cm-road { fill: rgba(255, 255, 255, 0.11); }
-.cm-drive { stroke: rgba(255, 255, 255, 0.09); stroke-width: 24; fill: none; stroke-linecap: round; }
-.cm-drive-thin { stroke: rgba(255, 255, 255, 0.07); stroke-width: 11; fill: none; stroke-linecap: round; }
-.cm-roundabout { fill: none; stroke: rgba(255, 255, 255, 0.09); stroke-width: 20; }
-.cm-cutout-ring {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.11);
-  stroke-width: 2;
-}
-
-/* ---- Type ---- */
-.cm-road-label,
-.cm-lot-label,
-.cm-minor-label,
-.cm-site-label,
-.cm-badge-text,
-.cm-north-text {
-  font-family: inherit;
-  pointer-events: none;
-}
-.cm-road-label { fill: var(--muted-dim); font-size: 19px; font-weight: 600; letter-spacing: 0.02em; }
-.cm-site-label { fill: var(--muted-dim); font-size: 22px; font-weight: 600; letter-spacing: 0.08em; }
-.cm-lot-label { fill: var(--muted); font-size: 19px; font-weight: 600; transition: opacity 0.25s ease; }
-.cm-minor-label { fill: var(--muted-dim); font-size: 16px; font-weight: 600; transition: opacity 0.25s ease; }
-.cm-shuttle-label { fill: var(--muted); }
-
-/* ---- Parking ---- */
-.cm-lot-rect {
-  fill: rgba(255, 255, 255, 0.04);
-  stroke: rgba(255, 255, 255, 0.1);
-  stroke-width: 1.5;
-  transition: opacity 0.25s ease;
-}
-
-/* ---- Buildings ---- */
-.cm-building { cursor: pointer; outline: none; }
-.cm-building-shape {
-  fill: rgba(var(--accent-rgb), 0.28);
-  stroke: rgba(var(--accent-rgb), 0.6);
-  stroke-width: 2;
-  stroke-linejoin: round;
-  transition: fill 0.22s ease, stroke 0.22s ease, opacity 0.22s ease, filter 0.22s ease;
-}
-.cm-building:hover .cm-building-shape { fill: rgba(var(--accent-rgb), 0.42); }
-.cm-building:focus-visible .cm-building-shape { stroke: var(--accent); stroke-width: 3; }
-
-.cm-badge-disc {
-  fill: rgba(10, 11, 16, 0.86);
-  stroke: rgba(255, 255, 255, 0.18);
-  stroke-width: 1.5;
-  transition: opacity 0.22s ease;
-}
-.cm-badge-text { fill: var(--ink); font-size: 25px; font-weight: 700; }
-
-/* Residence, Union Central, child care — present but visually secondary. */
-.cm-minor-shape {
-  fill: rgba(var(--accent-rgb), 0.16);
-  stroke: rgba(var(--accent-rgb), 0.34);
-  stroke-width: 1.5;
-}
-
-/* ---- Shuttle ---- */
-.cm-shuttle-pin { fill: var(--accent-3); }
-.cm-shuttle-pin-hole { fill: rgba(10, 11, 16, 0.9); }
-.cm-shuttle { transition: opacity 0.25s ease; }
-
-/* ---- North ---- */
-.cm-north-arrow { fill: rgba(255, 255, 255, 0.28); }
-.cm-north-text { fill: var(--muted-dim); font-size: 19px; font-weight: 700; letter-spacing: 0.04em; }
-
-/* ---- Selection: spotlight one building, recede everything else ---- */
-.cm-building.cm-dimmed .cm-building-shape { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.1); }
-.cm-building.cm-dimmed .cm-badge-disc { opacity: 0.35; }
-.cm-building.cm-dimmed .cm-badge-text { opacity: 0.35; }
-.cm-lot.cm-dimmed .cm-lot-rect,
-.cm-lot.cm-dimmed .cm-lot-label,
-.cm-minor.cm-dimmed,
-.cm-shuttle.cm-dimmed { opacity: 0.3; }
-
-.cm-building.cm-active .cm-building-shape {
-  fill: rgba(var(--accent-rgb), 0.55);
-  stroke: var(--accent);
-  stroke-width: 3;
-  filter: drop-shadow(0 0 12px rgba(var(--accent-rgb), 0.5));
-}
-.cm-building.cm-active .cm-badge-disc { stroke: var(--accent); }
-
-/* ---- Location marker ---- */
-.cm-pin[hidden] { display: none; }
-.cm-pin-body { fill: var(--accent); }
-.cm-pin-hole { fill: rgba(10, 11, 16, 0.92); }
-.cm-pin-ring {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-  opacity: 0;
-  transform-origin: center;
-  animation: cmPinPulse 2s ease-out infinite;
-}
-.cm-pin-ring-b { animation-delay: 1s; }
-@keyframes cmPinPulse {
-  0%   { transform: scale(0.25); opacity: 0.7; }
-  100% { transform: scale(1);    opacity: 0; }
-}
-
-/* ---- Legend ---- */
-.cm-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hairline);
-  font-size: 0.72rem;
-  color: var(--muted-dim);
-}
-.cm-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.cm-key {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  flex: 0 0 auto;
-}
-.cm-key-building { background: rgba(var(--accent-rgb), 0.55); box-shadow: inset 0 0 0 1px var(--accent); }
-.cm-key-lot { background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
-.cm-key-minor { background: rgba(var(--accent-rgb), 0.2); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.4); }
-.cm-key-shuttle { background: var(--accent-3); border-radius: 50%; }
-
 /* ---- "Show location" inline button ---- */
 .cm-show-location-btn {
   display: inline-flex;
@@ -3995,25 +3847,28 @@ main#view-host,
 
 
 /* CAMPUS MAP 3D — v1.8.0 --------------------------------------------------- */
-.cm-mode-toggle{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.10);flex-shrink:0}
-.cm-mode-btn{min-width:46px;min-height:30px;padding:4px 12px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);font:600 .74rem/1 var(--font-body,inherit);cursor:pointer;transition:background .16s ease,color .16s ease,border-color .16s ease}
-.cm-mode-btn:hover{color:var(--ink);background:rgba(255,255,255,.07)}
-.cm-mode-3d-active,.cm-mode-2d-active{color:var(--ink);background:rgba(var(--accent-rgb,124,140,255),.16);border-color:rgba(var(--accent-rgb,124,140,255),.35)}
+/* (3D/Plan toggle retired - the 3D digital twin is the map; the SVG plan is
+   an automatic no-WebGL fallback with no user-facing switch.) */
 .cm-stage-3d{position:relative;width:100%;max-width:700px;margin:0 auto;border-radius:20px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,rgba(138,112,237,.18),transparent 58%),linear-gradient(145deg,#121524,#0a0c14 72%);border:1px solid rgba(138,112,237,.24);box-shadow:0 24px 55px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.08)}
 .cm3d-mount:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(6,182,212,.06),transparent 42%),linear-gradient(180deg,rgba(255,255,255,.035),transparent 24%);z-index:1}
 .cm3d-mount{position:relative;width:100%;aspect-ratio:930/640;min-height:320px;max-height:560px;cursor:grab;touch-action:none}
 .cm3d-mount:active{cursor:grabbing}
 .cm3d-canvas{display:block;width:100%!important;height:100%!important}
 .cm3d-loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:.85rem;background:rgba(16,23,53,.5);pointer-events:none}
-.cm3d-info{position:absolute;top:14px;left:14px;z-index:4;width:min(290px,calc(100% - 92px));display:grid;gap:6px;padding:14px 15px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(18,21,36,.78);backdrop-filter:blur(14px);box-shadow:0 12px 28px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.1);pointer-events:none}
-.cm3d-info-tag{display:flex;align-items:center;gap:7px;color:#a99dfc;font-size:.62rem;font-weight:800;letter-spacing:.14em}
-.cm3d-pulse{width:7px;height:7px;border-radius:50%;background:#8a70ed;box-shadow:0 0 0 4px rgba(138,112,237,.14),0 0 12px rgba(138,112,237,.8)}
-.cm3d-info-title{color:#f1f5f9;font-size:1rem;line-height:1.2;letter-spacing:-.01em}
-.cm3d-info-copy{color:#c0c7da;font-size:.72rem;line-height:1.45}
-.cm3d-info-route{padding-top:7px;border-top:1px solid rgba(255,255,255,.09);color:#67e8f9;font-size:.66rem;font-weight:650;line-height:1.3}
+.cm3d-weather{position:absolute;top:12px;left:12px;z-index:4;display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(18,21,36,.72);backdrop-filter:blur(12px);box-shadow:0 8px 20px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.08);color:var(--ink);pointer-events:none}
+.cm3d-weather-icon{display:inline-flex;color:#67e8f9}
+.cm3d-weather-icon svg{width:15px;height:15px}
+.cm3d-weather-temp{font-family:'Space Grotesk',var(--font-body,inherit);font-size:.78rem;font-weight:700;letter-spacing:.01em;line-height:1}
 .cm3d-hud{position:absolute;top:14px;right:14px;display:flex;gap:8px;z-index:4}
 .cm3d-hud button{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;border:1px solid rgba(255,255,255,.14);background:rgba(16,23,53,.72);color:var(--ink);cursor:pointer;backdrop-filter:blur(6px);transition:background .16s ease,transform .16s ease}
 .cm3d-hud button:hover{background:rgba(16,23,53,.9);transform:translateY(-1px)}
 .cm3d-hud button svg{width:17px;height:17px}
 .cm3d-hud button.is-off{opacity:.45}
-@media(max-width:720px){.cm3d-mount{min-height:260px}.cm3d-hud button{width:34px;height:34px}.cm3d-info{top:10px;left:10px;width:min(240px,calc(100% - 84px));padding:11px 12px}.cm3d-info-copy{font-size:.66rem}.cm3d-info-route{font-size:.6rem}}
+/* No-WebGL fallback message (the legacy 2D plan no longer exists) */
+.cm3d-unavailable{display:grid;justify-items:center;gap:6px;min-height:280px;place-content:center;text-align:center;padding:26px 30px;color:var(--muted)}
+.cm3d-unavailable svg{width:34px;height:34px;color:#8a70ed;opacity:.8}
+.cm3d-unavailable p{margin:0;font-size:.8rem;line-height:1.5;max-width:34ch}
+.cm3d-unavailable p:first-of-type{color:var(--ink);font-weight:700}
+.cm3d-unavailable p:last-of-type{font-size:.72rem;color:var(--muted-dim, var(--muted))}
+
+@media(max-width:720px){.cm3d-mount{min-height:260px}.cm3d-hud button{width:34px;height:34px}.cm3d-weather{top:10px;left:10px;padding:6px 10px;gap:6px}.cm3d-weather-icon svg{width:13px;height:13px}.cm3d-weather-temp{font-size:.72rem}}
