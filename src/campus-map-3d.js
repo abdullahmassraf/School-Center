@@ -670,8 +670,13 @@ export class CampusMap3DManager {
     const THREE = this.THREE;
     const g = new THREE.CircleGeometry(468, 72);
     /* Lifted, semi-glossy surface: catches sky/sun so it reads as a lit
-     * plaza instead of a black void, and carries real-time sun shadows. */
-    const m = new THREE.MeshStandardMaterial({ color: 0x2b3766, roughness: 0.58, metalness: 0.28 });
+     * plaza instead of a black void, and carries real-time sun shadows.
+     * Hue follows the live theme accent (refreshAccent re-derives it). */
+    this._groundBase = new THREE.Color(0x232c54);   // neutral dark-blue base
+    const m = new THREE.MeshStandardMaterial({
+      color: this._groundBase.clone().lerp(this.accentHex || new THREE.Color(this.accentColor || '#7c8cff'), 0.26),
+      roughness: 0.58, metalness: 0.28
+    });
     this.groundMat = m;
     this.ground = new THREE.Mesh(g, m);
     this.ground.rotation.x = -Math.PI / 2;
@@ -680,22 +685,43 @@ export class CampusMap3DManager {
     this.scene.add(this.ground);
     this._track(g, m);
 
-    /* Minimal blueprint grid: barely-there lines over the plaza surface. */
-    const grid = new THREE.GridHelper(936, 52, 0x55679f, 0x3c4c85);
+    /* Minimal blueprint grid: barely-there lines over the plaza surface,
+     * rebuilt from the live accent on theme change. */
+    this._rebuildGrid();
+
+    const ringG = new THREE.RingGeometry(462, 468, 96);
+    const ringM = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(PALETTE.groundRing).lerp(this.accentHex || new THREE.Color(this.accentColor || '#7c8cff'), 0.5),
+      side: THREE.DoubleSide
+    });
+    this.ringMat = ringM;
+    this.ring = new THREE.Mesh(ringG, ringM);
+    this.ring.rotation.x = -Math.PI / 2;
+    this.ring.position.set(WORLD.w / 2, 0.1, WORLD.h / 2);
+    this.scene.add(this.ring);
+    this._track(ringG, ringM);
+  }
+
+  /* Grid lines tinted from the live accent; rebuilt (not mutated) because
+   * GridHelper bakes colors into vertex attributes. Disposal is explicit. */
+  _rebuildGrid() {
+    const THREE = this.THREE;
+    if (this.grid) {
+      this.scene.remove(this.grid);
+      this.grid.geometry?.dispose();
+      this.grid.material?.dispose();
+      this._owned = this._owned.filter((o) => o !== this.grid);
+    }
+    const a = this.accentHex || new THREE.Color(this.accentColor || '#7c8cff');
+    const center = a.clone().lerp(new THREE.Color(0xffffff), 0.22).getHex();
+    const minor = a.clone().lerp(new THREE.Color(0x3c4c85), 0.55).getHex();
+    const grid = new THREE.GridHelper(936, 52, center, minor);
     grid.material.transparent = true;
     grid.material.opacity = 0.22;
     grid.position.set(WORLD.w / 2, -0.25, WORLD.h / 2);
     this.scene.add(grid);
     this.grid = grid;
     this._owned.push(grid);
-
-    const ringG = new THREE.RingGeometry(462, 468, 96);
-    const ringM = new THREE.MeshBasicMaterial({ color: PALETTE.groundRing, side: THREE.DoubleSide });
-    this.ring = new THREE.Mesh(ringG, ringM);
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.position.set(WORLD.w / 2, 0.1, WORLD.h / 2);
-    this.scene.add(this.ring);
-    this._track(ringG, ringM);
   }
 
   /* --- Campus infrastructure: roads, parking lots, glowing transit marker -- */
@@ -2122,6 +2148,14 @@ export class CampusMap3DManager {
     if (this.skyUniforms) this.skyUniforms.uAccent.value.copy(this.accentHex);
     if (this.poolMat) this.poolMat.color.set(this.accentHex).lerp(new this.THREE.Color(0xffc27a), 0.5);
     if (this.focusRing) this.focusRing.material.color.set(this.accentHex);
+    /* Floor / grid / rim ring follow the theme too: the plaza keeps a dark
+     * neutral base tinted toward the accent so glass buildings, the route
+     * and shadows keep their contrast on any theme. */
+    if (this.groundMat && this._groundBase) {
+      this.groundMat.color.set(this._groundBase).lerp(this.accentHex, 0.26);
+    }
+    if (this.ringMat) this.ringMat.color.set(PALETTE.groundRing).lerp(this.accentHex, 0.5);
+    if (this.grid) this._rebuildGrid();
   }
 
   /* --- Public API ---------------------------------------------------------- */

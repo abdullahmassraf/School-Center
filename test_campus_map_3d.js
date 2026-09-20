@@ -287,17 +287,21 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   const accentTest = await evaluate(`(() => {
     const mgr = window.__SC_CAMPUS_MAP_3D__;
     const before = '#' + mgr.meshById.get('H').material.color.getHexString();
+    const beforeGround = '#' + mgr.groundMat.color.getHexString();
     document.documentElement.style.setProperty('--accent', '#e23b3b');
     mgr.refreshAccent();
     const after = {
       glassH: '#' + mgr.meshById.get('H').material.color.getHexString(),
       glassJ: '#' + mgr.meshById.get('J').material.color.getHexString(),
       focusEmis: '#' + (mgr.focusId ? mgr.meshById.get(mgr.focusId).material.emissive.getHexString() : 'none'),
-      accentStored: '#' + mgr.accentHex.getHexString()
+      accentStored: '#' + mgr.accentHex.getHexString(),
+      ground: '#' + mgr.groundMat.color.getHexString(),
+      ring: '#' + mgr.ringMat.color.getHexString(),
+      grid: (() => { const c = mgr.grid.geometry.attributes.color; return '#' + new mgr.THREE.Color(c.getX(0), c.getY(0), c.getZ(0)).getHexString(); })()
     };
     document.documentElement.style.setProperty('--accent', mgr._prevAccent || before);
     mgr.refreshAccent();
-    return { before, after };
+    return { before, beforeGround, after };
   })()`);
   /* Glass = accent lerped toward white (linear-space), so assert the red
    * hue family rather than an exact hex. */
@@ -307,7 +311,17 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   const b = parseInt(hex.slice(4, 6), 16);
   if (!(r > b + 40 && r > g + 40)) throw new Error(`Glass did not follow red accent: ${JSON.stringify(accentTest)}`);
   if (accentTest.before === accentTest.after.glassH) throw new Error(`Accent refresh produced no color change: ${JSON.stringify(accentTest)}`);
-  console.log(`ACCENT: glass ${accentTest.before} -> red-theme ${accentTest.after.glassH} (live re-tint works)`);
+  /* Floor / grid / rim ring must follow the theme as well. */
+  const hueOf = (h) => { const n = parseInt(h.replace('#', ''), 16); const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx === mn) return -1; let hh = mx === r ? ((g - b) / (mx - mn)) % 6 : mx === g ? (b - r) / (mx - mn) + 2 : (r - g) / (mx - mn) + 4; return ((hh * 60) + 360) % 360; };
+  /* Circular hue distance: red 350deg is 10deg from 0, not 350. */
+  const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+  const redHue = 0, purpleHue = 265;
+  if (hueDist(hueOf(accentTest.after.ground), redHue) > 40) throw new Error(`Ground did not follow red accent: ${JSON.stringify(accentTest.after)}`);
+  if (hueDist(hueOf(accentTest.after.ring), redHue) > 40) throw new Error(`Rim ring did not follow red accent: ${JSON.stringify(accentTest.after)}`);
+  /* GridHelper bakes colors into vertex attributes; material.color is unused. */
+  if (hueDist(hueOf(accentTest.after.grid), redHue) > 40) throw new Error(`Grid did not follow red accent: ${JSON.stringify(accentTest.after)}`);
+  if (hueDist(hueOf(accentTest.beforeGround), purpleHue) > 45) throw new Error(`Ground was not accent-tinted before the switch: ${accentTest.beforeGround}`);
+  console.log(`ACCENT: glass ${accentTest.before} -> red-theme ${accentTest.after.glassH}; ground ${accentTest.beforeGround} -> ${accentTest.after.ground}; grid/ring follow`);
   const focusBtn = await evaluate(`(() => ({
     segments: Number(document.querySelector('#cm3d-mount')?.dataset.pathSegments || 0),
     btnHidden: document.querySelector('.cm3d-path-toggle')?.classList.contains('is-hidden') ?? null
