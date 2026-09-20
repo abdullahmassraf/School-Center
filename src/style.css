@@ -397,7 +397,9 @@ body {
   border-radius: 50%;
   padding: 0;
   background: transparent;
-  box-shadow: none;
+  /* The crest ships on a black square: the hairline ring reads it as an
+   * intentional coin and lifts it off the header background. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10), 0 2px 8px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
 

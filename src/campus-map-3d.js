@@ -635,7 +635,7 @@ export class CampusMap3DManager {
       cells.forEach((cell, i) => {
         m4.makeTranslation(cell.x, cell.y, cell.z);
         inst.setMatrixAt(i, m4);
-        inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x05070d).multiplyScalar(cell.bright));
+        inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x10141f).multiplyScalar(cell.bright));
       });
       inst.raycast = () => {};
       this.scene.add(inst);
@@ -644,7 +644,10 @@ export class CampusMap3DManager {
       this.windowGlow.push(inst);
       this._nightWindows.push({
         inst, wm, cells,
-        timers: cells.map((c) => (c.on ? -1 : 8 + Math.random() * 30))
+        /* First flip per window: 4-44s in, then every 10-44s — the campus
+         * never synchronizes. Cross-fades: {i, fromOn, toOn, t0}. */
+        timers: cells.map(() => 4 + Math.random() * 40),
+        fades: []
       });
 
       /* Outward facade glow: a soft additive halo rising off the lit wall
@@ -2091,16 +2094,37 @@ export class CampusMap3DManager {
           if (nf > 0.02) {
             let dirty = false;
             b.timers.forEach((timer, i) => {
-              if (t > Math.abs(timer)) {
-                b.cells[i].on = timer < 0 ? b.cells[i].on : !b.cells[i].on;
-                b.timers[i] = (b.cells[i].on ? -1 : 1) * (t + 10 + Math.random() * 34);
+              if (t > timer) {
+                /* Flip BOTH ways (the old keep-on branch meant every window
+                 * converged to permanently-lit). Each flip starts a ~0.8s
+                 * cross-fade so lights ease on/off like real interiors. */
+                b.cells[i].on = !b.cells[i].on;
+                b.timers[i] = t + 10 + Math.random() * 34;
+                b.fades.push({ i, fromOn: !b.cells[i].on, toOn: b.cells[i].on, t0: t });
                 dirty = true;
               }
             });
             if (dirty) {
+              const fading = new Set(b.fades.map((f) => f.i));
               b.cells.forEach((c, i) => {
-                col.setHex(c.on ? c.tint : 0x10141f);
+                if (fading.has(i)) return; /* the fade loop owns this color */
+                col.setHex(c.on ? c.tint : 0x10141f).multiplyScalar(c.bright);
                 b.inst.setColorAt(i, col);
+              });
+              b.inst.instanceColor.needsUpdate = true;
+            }
+            /* Individual window cross-fades: the random on/off life of the
+             * campus at night, eased per window. */
+            if (b.fades.length) {
+              b.fades = b.fades.filter((f) => {
+                const k = Math.min(1, (t - f.t0) / 0.8);
+                const e = k * k * (3 - 2 * k);
+                const c = b.cells[f.i];
+                col.setHex(f.fromOn ? c.tint : 0x10141f).lerp(
+                  this._tmpColB || (this._tmpColB = new this.THREE.Color()).setHex(f.toOn ? c.tint : 0x10141f), e
+                ).multiplyScalar(c.bright);
+                b.inst.setColorAt(f.i, col);
+                return k < 1;
               });
               b.inst.instanceColor.needsUpdate = true;
             }

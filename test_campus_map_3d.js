@@ -317,6 +317,92 @@ if (!hit && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 200)}`
   if (celestial.angleDeg > 10) throw new Error(`Sun sprite misaligned with dome sun by ${celestial.angleDeg}deg`);
   console.log(`CELESTIAL: day sunOp=${celestial.dayState.sunOpacity} night sunOp=${celestial.nightState.sunOpacity} fogOff starsW ${celestial.dayState.starsW}/${celestial.nightState.starsW} align=${celestial.angleDeg}deg`);
 
+  /* --- Logo: vector crest loads in header + favicon wired ----------------- */
+  const logo = await evaluate(`(async () => {
+    const img = document.querySelector('.app-brand-mark img');
+    const iconSvg = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
+    const iconPng = document.querySelector('link[rel="icon"][type="image/png"]');
+    const touch = document.querySelector('link[rel="apple-touch-icon"]');
+    let svgOk = false, pngOk = false;
+    try { svgOk = (await fetch('assets/logo.svg', { cache: 'no-store' })).ok; } catch {}
+    try { pngOk = (await fetch('assets/logo.png', { cache: 'no-store' })).ok; } catch {}
+    return {
+      headerSrc: img?.getAttribute('src') || null,
+      headerLoaded: !!(img && img.complete && img.naturalWidth > 0),
+      iconSvg: iconSvg?.getAttribute('href') || null,
+      iconPng: iconPng?.getAttribute('href') || null,
+      touch: touch?.getAttribute('href') || null,
+      svgOk, pngOk
+    };
+  })()`);
+  if (!logo.headerLoaded || !logo.headerSrc?.includes('logo.svg')) throw new Error(`Header logo missing/broken: ${JSON.stringify(logo)}`);
+  if (!logo.iconSvg || !logo.iconPng || !logo.touch) throw new Error(`Favicon links missing: ${JSON.stringify(logo)}`);
+  if (!logo.svgOk || !logo.pngOk) throw new Error(`Logo assets not served: ${JSON.stringify(logo)}`);
+  console.log(`LOGO: header vector crest loaded (${logo.headerSrc.split('/').pop()}), favicon svg+png+touch wired`);
+
+  /* --- Nightlife: individual windows flip BOTH ways -----------------------
+   * The old bug: ON windows never toggled off (monotonic all-on). Advancing
+   * the scene clock past every timer must produce on->off AND off->on flips,
+   * with per-window cross-fades converging to the flipped state. */
+  const nightlife = await evaluate(`(async () => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    mgr._solarOverride = { elevationDeg: -32, azimuthDeg: 305 };
+    mgr._applyTimeOfDay();
+    const b0 = mgr._nightWindows[0];
+    const t = mgr.clockUniform.value;
+    /* Deterministic both-ways proof: force 3 ON + 3 OFF, schedule flips. */
+    const subject = [];
+    for (let k = 0; k < 6; k++) {
+      const i = k; /* first six cells */
+      const wantOn = k < 3; /* first 3 ON, last 3 OFF */
+      b0.cells[i].on = wantOn;
+      b0.timers[i] = t + 0.2;
+      subject.push({ i, before: wantOn });
+    }
+    const write = () => {
+      const col = new mgr.THREE.Color();
+      b0.cells.forEach((c, i) => { col.setHex(c.on ? c.tint : 0x10141f).multiplyScalar(c.bright); b0.inst.setColorAt(i, col); });
+      b0.inst.instanceColor.needsUpdate = true;
+    };
+    write();
+    mgr.clockUniform.value += 0.5;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));
+    let onToOff = 0, offToOn = 0;
+    for (const sRec of subject) {
+      const now = b0.cells[sRec.i].on;
+      if (sRec.before && !now) onToOff++;
+      if (!sRec.before && now) offToOn++;
+    }
+    /* Fades converge through the real tick (dt is capped, so poll). */
+    for (let n = 0; n < 40 && b0.fades.length; n++) await new Promise((r) => setTimeout(r, 200));
+    const fadesDone = b0.fades.length === 0;
+    /* Restore steady-state scheduling for the subject cells. */
+    const t2 = mgr.clockUniform.value;
+    subject.forEach((sRec) => { b0.timers[sRec.i] = t2 + 10 + Math.random() * 34; });
+    mgr._solarOverride = null;
+    mgr._applyTimeOfDay();
+    return { onToOff, offToOn, fadesDone, fadesLeft: subject.length };
+  })()`);
+  if (nightlife.onToOff < 1 || nightlife.offToOn < 1) throw new Error(`Windows do not flip both ways: ${JSON.stringify(nightlife)}`);
+  if (!nightlife.fadesDone) throw new Error('Window cross-fades never converge');
+  console.log(`NIGHTLIFE: flips on->off ${nightlife.onToOff}, off->on ${nightlife.offToOn} (bldg1), fades converge`);
+
+  /* --- Live weather ingestion: environment reacts to fresh data ----------- */
+  const wx = await evaluate(`(() => {
+    const mgr = window.__SC_CAMPUS_MAP_3D__;
+    const orig = { w: mgr.weather, c: mgr.weatherCondition };
+    mgr._ingestWeather({ current: { temperature_2m: 4, weather_code: 63, cloud_cover: 90, is_day: 1, wind_speed_10m: 18, precipitation: 1.2, snowfall: 0 } });
+    const rain = { cond: mgr.weatherCondition, particles: mgr._particleMode, chip: mgr.weatherChip?.dataset.condition };
+    mgr._ingestWeather({ current: { temperature_2m: 19, weather_code: 0, cloud_cover: 10, is_day: 1, wind_speed_10m: 7, precipitation: 0, snowfall: 0 } });
+    const clear = { cond: mgr.weatherCondition, particles: mgr._particleMode };
+    mgr.weather = orig.w; mgr.weatherCondition = orig.c;
+    mgr._applyWeatherEnvironment();
+    return { rain, clear };
+  })()`);
+  if (wx.rain.cond !== 'rain' || wx.rain.particles !== 'rain') throw new Error(`Rain ingestion failed: ${JSON.stringify(wx.rain)}`);
+  if (wx.clear.cond !== 'clear' || wx.clear.particles !== 'none') throw new Error(`Clear ingestion failed: ${JSON.stringify(wx.clear)}`);
+  console.log(`WEATHER LIVE: ingest rain -> particles rain, chip '${wx.rain.chip}'; ingest clear -> particles none`);
+
   /* --- Theme accent follows --accent ----------------------------------------
    * Simulate switching the theme to red and confirm every glass body,
    * emissive and the selection color re-tint live (not fixed purple). */

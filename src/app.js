@@ -1092,7 +1092,7 @@ export const PORTFOLIO_URL = 'https://abdullahmassraf.github.io/Portfolio/';
 /** Official app logo mark (authoritative reference asset, keeps the coin
  * look in header badge, favicon, and print). Keep in sync with assets/logo.png. */
 function renderLogoMark() {
-  return `<img class="sc-logo-svg" src="./assets/logo.png?v=v1.8.0" alt="" width="128" height="128" decoding="sync" fetchpriority="high">`;
+  return `<img class="sc-logo-svg" src="./assets/logo.svg?v=v1.10.11" alt="" width="128" height="128" decoding="sync" fetchpriority="high">`;
 }
 
 function renderHeader() {
