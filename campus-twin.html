@@ -55,11 +55,6 @@
 
   /* panel */
   #panelBtn{top:calc(14px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
-  #fullscreenBtn{position:absolute;top:calc(66px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px;display:grid;place-items:center;z-index:6}
-  #fullscreenBtn:hover{background:rgba(255,255,255,.11);transform:translateY(-1px)}
-  #fullscreenBtn:active{transform:translateY(0) scale(.98)}
-  #fullscreenBtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
-  #fullscreenBtn i{pointer-events:none}
 
   #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s}
   #panel.closed{opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
@@ -122,7 +117,6 @@
     #compass,#hint{display:none}
   }
   body.embed #title,body.embed #dock,body.embed #hint,body.embed #compass,body.embed #info,body.embed #panelBtn,body.embed #panel,body.embed #loader,body.embed #fatal{display:none!important}
-  body.embed #fullscreenBtn{display:grid!important}
   body.embed #loader p,body.embed #loader .bar{display:none}
   @media (prefers-reduced-motion:reduce){ #info{animation:none} #loader{transition:none} }
 </style>
@@ -141,8 +135,6 @@
   </header>
 
   <button id="panelBtn" class="hud glass" aria-label="Environment controls" aria-expanded="false"><i class="fa-solid fa-sliders"></i></button>
-
-  <button id="fullscreenBtn" class="hud glass" type="button" aria-label="Enter fullscreen" title="Enter fullscreen"><i class="fa-solid fa-expand"></i></button>
 
   <aside id="panel" class="hud glass closed" aria-label="Environment controls">
     <section>
@@ -993,26 +985,6 @@ function actualFullscreen() {
   try { return !!(parent !== window ? parent.document.fullscreenElement : document.fullscreenElement); }
   catch { return !!document.fullscreenElement; }
 }
-function syncFullscreenUI(active = actualFullscreen()) {
-  const b = $('fullscreenBtn'); if (!b) return;
-  b.innerHTML = `<i class="fa-solid fa-${active ? 'compress' : 'expand'}"></i>`;
-  b.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
-  b.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
-  b.setAttribute('aria-pressed', String(active));
-}
-async function toggleFullscreen() {
-  try {
-    if (actualFullscreen()) {
-      const d = parent !== window ? parent.document : document;
-      if (d.exitFullscreen) await d.exitFullscreen();
-      return;
-    }
-    const d = parent !== window ? parent.document : document;
-    if (d.documentElement?.requestFullscreen) await d.documentElement.requestFullscreen();
-  } catch (_) {
-    /* Fullscreen is optional; unsupported/restricted browsers simply do nothing. */
-  } finally { syncFullscreenUI(); }
-}
 
 function resetCinematicEnvelope() {
   interaction.yawPhase = 0; interaction.panPhase = 0; interaction.elevationPhase = 0; interaction.breathPhase = 0;
@@ -1242,8 +1214,6 @@ function setTime(v) { if (v === 'live') { clock.mode = 'live'; clock.speed = 1; 
 function syncClock() { const d = new Date(clock.t); $('timeLabel').textContent = clockFmt.format(d); if (!sliderDrag) $('timeRange').value = tzMinutes(d); $('btnLive').classList.toggle('on', clock.mode === 'live'); }
 function wireUI() {
   $('panelBtn').onclick = () => { markUserInteraction(); panel($('panel').classList.contains('closed')); };
-  $('fullscreenBtn').onclick = () => { markUserInteraction(); void toggleFullscreen(); };
-  syncFullscreenUI();
   try {
     const ownerDoc = parent !== window ? parent.document : document;
     ownerDoc.addEventListener('fullscreenchange', onFullscreenChange);
@@ -1316,9 +1286,7 @@ async function boot() {
   if (DEBUG) console.info('Davis twin ready', { tier: tierName, pr });
 }
 function onFullscreenChange() {
-  const active = actualFullscreen();
-  syncFullscreenUI(active);
-  if (!active && drive.on) void toggleDrive();
+  if (!actualFullscreen() && drive.on) void toggleDrive();
 }
 const post = m => { try { if (parent !== window) parent.postMessage({ source: 'davis-twin', ...m }, HOST_ORIGIN); } catch {} };
 addEventListener('davis:select', e => post({ type: 'select', id: e.detail.id }));
@@ -1343,7 +1311,7 @@ addEventListener('message', e => {
   else if (d.type === 'campus:accent' && typeof d.value === 'string') setAccent(d.value);
   else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
   else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; markUserInteraction(); }
-  else if (d.type === 'campus:fullscreen-state') { syncFullscreenUI(!!d.value); if (!d.value && drive.on) void toggleDrive(); }
+  else if (d.type === 'campus:fullscreen-state') { if (!d.value && drive.on) void toggleDrive(); }
   else if (d.type === 'campus:weather' && typeof d.value === 'string') setWeather(d.value);
   else if (d.type === 'campus:season' && typeof d.value === 'string') setSeason(d.value);
   else if (d.type === 'campus:time') setTime(d.value);
