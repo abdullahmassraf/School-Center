@@ -1410,7 +1410,7 @@ addEventListener('visibilitychange', () => {
   if (!frameId) frameId = requestAnimationFrame(frame);
 });
 addEventListener('pagehide', disposeTwin, { once: true });
-if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
+if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, driveCamera, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
 frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
 
