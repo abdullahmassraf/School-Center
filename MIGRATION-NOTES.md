@@ -122,3 +122,18 @@ Real-device items still require Chrome desktop, Chrome Android and Safari iOS ac
 ## Rollback
 
 The immediate rollback target is the merge commit for this migration. The previous renderer is preserved verbatim as `src/campus-map-3d.legacy.js`. To restore the previous scene, restore that file to `src/campus-map-3d.js` and remove the twin/adapter changes. No `index.html` Supabase metadata was changed.
+
+
+## Fullscreen / Drive Easter Egg / Cinematic Idle Upgrade
+
+### Fullscreen
+The fullscreen control is added to the existing host-side `.cm3d-hud`, so it receives the same glass/border/spacing/hover treatment as the reset and route controls. It calls `document.documentElement.requestFullscreen()` and `document.exitFullscreen()` in the host document, and its icon/ARIA label are synchronized from the real `document.fullscreenElement` state. A `fullscreenchange` handler runs the existing resize path and repeats it inside `requestAnimationFrame()` to avoid stretched intermediate frames.
+
+### Hidden Drive activation
+No mobile or touchscreen Drive UI was added. A physical `keydown` with `code === 'KeyD'` activates the existing twin Drive system only when the actual parent document has a fullscreen element. `repeat` and editable targets are ignored. Once Drive is active, `D` remains the existing steering-right input. Escape disables Drive, while any fullscreen exit also disables Drive through both the parent event and validated host protocol.
+
+### Cinematic idle camera
+The twin no longer uses `OrbitControls.autoRotate` for idle presentation. A custom low-frequency cinematic layer tracks real interaction time and smoothly ramps after 1.5s of inactivity, with a 0.45s response envelope. It applies small yaw velocity variation, bounded target drift, subtle elevation modulation and ±0.8% camera breathing. For a selected building the pivot is the building's visual center plus 35% of its primary mass height. Drive, tours, active fly-to transitions, reduced-motion mode, and hidden rendering suppress cinematic motion. User interaction marks are emitted only for actual pointer/keyboard/HUD input rather than stationary hover.
+
+### Acceptance status
+The requested source-level integration is complete. Browser/device measurements and screenshots still require a real browser/device execution environment; no FPS/draw-call numbers are fabricated.
