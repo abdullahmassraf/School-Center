@@ -29,7 +29,7 @@ const PALETTE = {
   ground: 0x101735,
   groundRing: 0x232b52,
   road: 0x1b2347,
-  lot: 0x151d3f,
+  lot: 0x283252,
   academic: 0x8b7cf6,
   academicTop: 0xa99dfc,
   athletic: 0x34d1bf,
@@ -443,6 +443,67 @@ export class CampusMap3DManager {
     this._track(null, this.sunSprite.material);
 
     this._buildSky();
+    /* Image-based lighting: PMREM-processed sky so glass, the plaza and the
+     * lots actually REFLECT the live sky/sun instead of relying on the flat
+     * ambient. Scene materials pick it up automatically (envMapIntensity
+     * values are tuned per material). */
+    this._envAllowed = !this.softwareGpu;
+    this._envForceOnce = false;
+    if (this._envAllowed) {
+      const T0 = this.THREE;
+      this._pmrem = new T0.PMREMGenerator(this.renderer);
+      this._pmrem.compileEquirectangularShader();
+      this._scheduleEnvRebuild();
+    }
+  }
+
+  /* --- Dynamic IBL environment ---------------------------------------------
+   * PMREM the live sky dome so glass, the plaza and the lots REFLECT the
+   * real sky/sun instead of a flat ambient. The dome is a raw ShaderMaterial
+   * so Three can't auto-PMREM it: borrow it into a bare env scene (the cube
+   * camera sits at the dome's center, so the BackSide faces are exactly what
+   * it sees), capture, and return it. Rebuilt only when lighting actually
+   * changes (time of day / weather), debounced — never per frame. The capture
+   * is infrequent enough that it stays cheap even on software renderers. */
+  _buildEnvironment() {
+    if (!this._pmrem || this.disposed || !this.sky) return;
+    if (!this._envAllowed && !this._envForceOnce) return;
+    const THREE = this.THREE;
+    if (!this._envScene) this._envScene = new THREE.Scene();
+    this._envScene.add(this.sky);                 /* borrow the dome */
+    let rt = null;
+    try { rt = this._pmrem.fromScene(this._envScene, 0, 0.1, 4200); }
+    catch (_) { rt = null; }
+    if (!this.disposed && this.sky) this.scene.add(this.sky);  /* return it */
+    if (rt) {
+      this.scene.environment = rt.texture;
+      if (this._envRT) this._envRT.dispose();
+      this._envRT = rt;
+    }
+    /* Per-material reflection strength (envMapIntensity applies only when
+     * scene.environment exists — r160 has no scene.environmentIntensity). */
+    this._applyEnvIntensities();
+  }
+
+  _applyEnvIntensities() {
+    if (!this.scene?.environment) return;
+    if (this.groundMat) this.groundMat.envMapIntensity = 0.9;
+    if (this.lotMat) this.lotMat.envMapIntensity = 0.85;
+    /* Glass keeps its material default (1.0): the accent tint already
+     * carries its look, extra env boost made it washed out in day frames. */
+  }
+
+  /* Debounced environment refresh: time-of-day and weather both call this.
+   * The sun's per-minute drift is imperceptible; a full cube capture only
+   * fires 1.5s after the LAST change. */
+  _scheduleEnvRebuild() {
+    if (!this._pmrem) return;
+    if (!this._envAllowed && !this._envForceOnce) return;
+    if (this._envRebuildTimer) clearTimeout(this._envRebuildTimer);
+    this._envRebuildTimer = setTimeout(() => {
+      this._envRebuildTimer = null;
+      if (!this.disposed) this._buildEnvironment();
+    }, 1500);
   }
 
   /* --- Sky dome ------------------------------------------------------------
@@ -565,15 +626,8 @@ export class CampusMap3DManager {
     this.lightPools = [];
     this.facadeGlows = [];
     this._nightWindows = [];
-    /* Warm light pools on the ground under each building: this is what makes
-     * a night city read from a high camera — panels alone are 2-3px specks
-     * at overview distance, pools carry the glow. */
-    if (!this._spriteTex) this._spriteTex = this._makeSpriteTexture();
-    this.poolMat = new THREE.MeshBasicMaterial({
-      map: this._spriteTex, color: 0xffc27a, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false
-    });
-    this._track(null, this.poolMat);
+    this.poolMats = [];
+    if (!this._shaftTex) this._shaftTex = this._makeShaftTexture();
 
     for (const mesh of this.buildingMeshes) {
       const id = mesh.userData.buildingId || 'X';
@@ -652,9 +706,12 @@ export class CampusMap3DManager {
         inst.setMatrixAt(i, m4);
         inst.setColorAt(i, col.setHex(cell.on ? cell.tint : 0x10141f).multiplyScalar(cell.bright));
       });
+      /* One draw call per building; instance bounds can't cover the whole
+       * campus, so never let the renderer cull the mesh away (windows
+       * vanished when a focused building's cell cluster left the frustum). */
+      inst.frustumCulled = false;
       inst.raycast = () => {};
       this.scene.add(inst);
-      this._track(wg, wm);
       this._owned.push(inst);
       this.windowGlow.push(inst);
       this._nightWindows.push({
@@ -665,36 +722,37 @@ export class CampusMap3DManager {
         fades: []
       });
 
-      /* Outward facade glow: a soft additive halo rising off the lit wall
-       * into the map — the "light spills out of the windows" read. */
-      const fw = Math.min(box.max.x - box.min.x + 46, 190);
-      const fh = Math.min(box.max.y - box.min.y + 26, 120);
-      const glowGeo = new THREE.PlaneGeometry(fw, fh);
-      const glowMat = new THREE.MeshBasicMaterial({
-        map: this._spriteTex, color: 0xffc98a, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-      });
-      const glow = new THREE.Mesh(glowGeo, glowMat);
-      glow.position.set((box.min.x + box.max.x) / 2, (y0 + y1) / 2 + 4, box.max.z + 14);
-      glow.renderOrder = 3;
-      glow.raycast = () => {};
-      this.scene.add(glow);
-      this._track(glowGeo, glowMat);
-      this._owned.push(glow);
-      this.facadeGlows.push(glow);
-
-      /* One soft pool hugging the building's projected footprint. */
-      const span = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
-      const pg = new THREE.PlaneGeometry(span * 1.9, span * 1.9);
-      const pool = new THREE.Mesh(pg, this.poolMat);
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set((box.min.x + box.max.x) / 2, 1.6, (box.min.z + box.max.z) / 2 + 6);
-      pool.renderOrder = 2;
-      pool.raycast = () => {};
-      this.scene.add(pool);
-      this._track(pg);
-      this._owned.push(pool);
-      this.lightPools.push(pool);
+      /* Facade light shaft: a trapezoid wash rising off the lit wall —
+       * bright at the wall base, leaning outward, edges cut by a flat-top
+       * horizontal profile. Reads as clean volumetric spill, not a blob. */
+      const boxW = box.max.x - box.min.x, boxH = box.max.y - box.min.y;
+      /* One true volumetric shaft per facade: a tapered curtain of light
+       * that starts at the lit windows and falls all the way to the ground,
+       * widening as it travels. The additive gradient (bright at the wall,
+       * transparent at the tip) plus the scene fog gives the real light-ray
+       * read — and haze (cloud/fog weather) makes it read stronger, like a
+       * beam catching mist. Subtle by design: 0.2-0.3 opacity on a clear
+       * night, up to ~0.45 in fog. */
+      const throwD = Math.min(30 + boxH * 0.6, 96);
+      const yWin = Math.min(34, boxH * 0.55);
+      const shaft = new THREE.Mesh(
+        this._makeBeamGeometry(boxW * 0.94, boxW * 1.5, yWin, throwD),
+        (() => {
+          const m = new THREE.MeshBasicMaterial({
+            map: this._shaftTex, color: 0xffcf9a, transparent: true, opacity: 0,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+          });
+          m.userData.litF = cells.filter((c) => c.on).length / cells.length;
+          this._track(null, m);
+          return m;
+        })()
+      );
+      shaft.position.set((box.min.x + box.max.x) / 2, 0, box.max.z + 0.4);
+      shaft.renderOrder = 3;
+      shaft.raycast = () => {};
+      this.scene.add(shaft);
+      this._owned.push(shaft);
+      this.facadeGlows.push(shaft);
     }
   }
 
@@ -771,6 +829,20 @@ export class CampusMap3DManager {
     const grid = new THREE.GridHelper(936, 52, center, minor);
     grid.material.transparent = true;
     grid.material.opacity = 0.22;
+    /* Circular cutout: the grid is a 936-unit square whose corners extend
+     * past the circular map ring into the void. Radial alpha keeps the grid
+     * at full strength inside the ring, then lets it fade out slowly beyond
+     * the ring so the plaza reads as an island instead of a square sheet.
+     * (Local xz radius: the grid spans +/-468 around its own center, so
+     * length(position.xz) is the true distance from the plaza center.) */
+    grid.material.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\n  varying float vRadial;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRadial = length(position.xz);');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\n  varying float vRadial;')
+        .replace('#include <dithering_fragment>', 'gl_FragColor.a *= 1.0 - smoothstep(468.0, 560.0, vRadial);\n  #include <dithering_fragment>');
+    };
     grid.position.set(WORLD.w / 2, -0.25, WORLD.h / 2);
     this.scene.add(grid);
     this.grid = grid;
@@ -799,8 +871,13 @@ export class CampusMap3DManager {
       this._track(g);
     }
 
-    const lotMat = new THREE.MeshStandardMaterial({ color: PALETTE.lot, roughness: 0.9, metalness: 0.05 });
+    /* Reflective asphalt: mid-roughness so sun/sky/window light and the
+     * theme tint actually read on the surface (a 0.9-roughness near-black
+     * lot reflects nothing). */
+    const lotMat = new THREE.MeshStandardMaterial({ color: PALETTE.lot, roughness: 0.42, metalness: 0.06, envMapIntensity: 0.85 });
     const lotEdgeMat = new THREE.LineBasicMaterial({ color: 0x40508f, transparent: true, opacity: 0.55 });
+    this.lotMat = lotMat;
+    this._lotRough = 0.42;
     this._track(null, lotMat);
     this._track(null, lotEdgeMat);
     for (const lot of (infra.lots || [])) {
@@ -1017,6 +1094,7 @@ export class CampusMap3DManager {
     this.scene.add(this.wetPlane);
     this._track(wg, this.wetMat);
     this.wetness = 0;
+    this._haze = 0;   /* 0 clear .. 1 dense overcast/fog: drives volumetric shaft strength */
 
     /* Roof snow/wet caps share the blanket/wet materials. */
     this.roofCaps = [];
@@ -1368,6 +1446,92 @@ export class CampusMap3DManager {
     return tex;
   }
 
+  /* Crisp projected window-grid light texture: one bright column per lit
+   * window position, sharp at the wall (canvas bottom = near wall), easing
+   * out over the throw distance, with flat-top side profile. */
+  _makeWindowPoolTexture(box, cells, winW) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    const ctx = c.getContext('2d');
+    const boxW = Math.max(1, box.max.x - box.min.x);
+    const colW = Math.max(3, (winW / boxW) * c.width);
+    for (const cell of cells) {
+      if (!cell.on) continue;
+      const x = ((cell.x - box.min.x) / boxW) * c.width - colW / 2;
+      const g = ctx.createLinearGradient(0, c.height, 0, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0.95)');
+      g.addColorStop(0.22, 'rgba(255,255,255,0.5)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.16)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, 0, colW, c.height);
+    }
+    /* Flat-top horizontal profile: kill only the outer 7% per side so the
+     * projected columns stay crisp edge-to-edge in the middle. */
+    ctx.globalCompositeOperation = 'destination-in';
+    const hx = ctx.createLinearGradient(0, 0, c.width, 0);
+    hx.addColorStop(0, 'rgba(255,255,255,0)');
+    hx.addColorStop(0.07, 'rgba(255,255,255,1)');
+    hx.addColorStop(0.93, 'rgba(255,255,255,1)');
+    hx.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hx;
+    ctx.fillRect(0, 0, c.width, c.height);
+    /* Depth fade at the far end (canvas top = far from wall). */
+    const vy = ctx.createLinearGradient(0, c.height * 0.55, 0, c.height);
+    vy.addColorStop(0, 'rgba(255,255,255,1)');
+    vy.addColorStop(1, 'rgba(255,255,255,0.85)');
+    ctx.fillStyle = vy;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = 'source-over';
+    const tex = new this.THREE.CanvasTexture(c);
+    tex.anisotropy = 4;
+    this._track(null, tex);
+    return tex;
+  }
+
+  /* Light-shaft texture: vertical gradient (bright at wall base), flat-top
+   * horizontal profile — the clean game-style spill wash. */
+  _makeShaftTexture() {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0, c.height, 0, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0.6)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.28)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = 'destination-in';
+    const hx = ctx.createLinearGradient(0, 0, c.width, 0);
+    hx.addColorStop(0, 'rgba(255,255,255,0)');
+    hx.addColorStop(0.18, 'rgba(255,255,255,1)');
+    hx.addColorStop(0.82, 'rgba(255,255,255,1)');
+    hx.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hx;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = 'source-over';
+    const tex = new this.THREE.CanvasTexture(c);
+    this._track(null, tex);
+    return tex;
+  }
+
+  /* Volumetric window-beam geometry: a tilted quad whose top edge sits at
+   * the lit window band on the wall and whose bottom edge lands on the
+   * ground "drop" units outward — light falls from the windows to the
+   * plaza, widening as it travels. Bright at the window, faded to nothing
+   * at the tip (texture v: 0 at the window, 1 at the ground). */
+  _makeBeamGeometry(wb, wt, h, drop) {
+    const THREE = this.THREE;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      -wb / 2, h, 0,   wb / 2, h, 0,   wt / 2, 0, drop,   -wt / 2, 0, drop
+    ], 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  }
+
   _buildAmbientDust() {
     /* Always-on drifting motes: the "living air" layer that separates a
      * static render from a scene. Cheaper than the weather systems. */
@@ -1520,20 +1684,29 @@ export class CampusMap3DManager {
       this.skyUniforms.uDayF.value = dayF;
       this.skyUniforms.uHorizonF.value = horizonF * (el > -8 ? 1 : 0);
       this.skyUniforms.uOvercast.value = { clear: 0, cloudy: 0.25, overcast: 0.75, fog: 0.6, rain: 0.6, snow: 0.5, thunder: 0.85 }[this.weatherCondition] ?? 0;
+      this._haze = this.skyUniforms.uOvercast.value;
     }
 
     /* Ground light pools + window materials follow real darkness: invisible
      * in daylight, full glow at night (the daylight-glow bug fix). */
-    if (this.poolMat && !this.disposed) this.poolMat.opacity = 0.45 * this._nightF;
-    /* Windows shed light outward only at night. */
+    if (this.poolMats?.length && !this.disposed) {
+      for (const m of this.poolMats) m.opacity = 0.45 * this._nightF * (0.55 + 0.45 * (m.userData.litF ?? 1));
+    }
+    /* Volumetric window shafts: subtle light rays on a clear night, and
+     * visibly stronger when haze (cloud/fog) gives the beams something to
+     * catch — the classic volumetric-fog read. */
     if (this.facadeGlows?.length && !this.disposed) {
-      const g = 0.34 * this._nightF;
-      for (const glow of this.facadeGlows) glow.material.opacity = g;
+      const haze = this._haze ?? 0;
+      const g = (0.26 + 0.2 * haze) * this._nightF;
+      for (const glow of this.facadeGlows) {
+        glow.material.opacity = g * (0.75 + 0.25 * (glow.material.userData.litF ?? 1));
+      }
     }
 
     /* Flag the on-demand (software-tier) shadow map: lighting just changed. */
     if (this.sun?.shadow && !this.sun.shadow.autoUpdate) this.sun.shadow.needsUpdate = true;
     this._pendingShadowRefresh = true;
+    this._scheduleEnvRebuild();
   }
 
   /* --- Live weather integration ------------------------------------------- */
@@ -1651,6 +1824,7 @@ export class CampusMap3DManager {
       this.mount.dataset.weatherTemp = this.weather && Number.isFinite(this.weather.temperature_2m)
         ? String(Math.round(this.weather.temperature_2m)) : '';
     }
+    this._scheduleEnvRebuild();
   }
 
   /* --- Camera rig + GSAP state machine ------------------------------------ */
@@ -1670,7 +1844,7 @@ export class CampusMap3DManager {
   _overviewPose() {
     /* Cinematic 3/4 view (~37 deg elevation). Keeps the user's current
      * bearing — reset eases back to the map center without yaw snap. */
-    return { dist: 1560, pitch: 0.65, yaw: this.sph?.yaw ?? Math.PI / 4 };
+    return { dist: 1140, pitch: 0.7, yaw: this.sph?.yaw ?? Math.PI / 4 };
   }
 
   _focusPose(mesh) {
@@ -2092,13 +2266,14 @@ export class CampusMap3DManager {
         const raining = this._particleMode === 'rain';
         this.wetness = Math.min(1, (this.wetness || 0) + (raining ? dt / 20 : -dt / 45));
         if (this.wetness <= 0.001) {
-          if (this.wetPlane.visible) { this.wetPlane.visible = false; this.groundMat.roughness = this._groundRough ?? 0.38; this.roadMat.roughness = 0.95; }
+          if (this.wetPlane.visible) { this.wetPlane.visible = false; this.groundMat.roughness = this._groundRough ?? 0.38; this.roadMat.roughness = 0.95; if (this.lotMat) this.lotMat.roughness = this._lotRough ?? 0.42; }
         } else {
           this.wetPlane.visible = true;
           this.wetMat.opacity = this.wetness * 0.16;
           /* Wet surfaces are darker + shinier: pull roughness down. */
           this.groundMat.roughness = (this._groundRough ?? 0.38) - this.wetness * 0.16;
           this.roadMat.roughness = 0.95 - this.wetness * 0.6;
+          if (this.lotMat) this.lotMat.roughness = (this._lotRough ?? 0.42) - this.wetness * 0.28;
         }
       }
       /* Nightlife: random windows toggle on/off on their own timers. All
@@ -2246,7 +2421,9 @@ export class CampusMap3DManager {
     if (this._pathTint) this._pathTint.copy(this.accentHex).lerp(new this.THREE.Color(0xffffff), 0.1);
     if (this.pathPucks?.[0]) this.pathPucks[0].material.color.set(this.accentHex).lerp(new this.THREE.Color(0xffffff), 0.25);
     if (this.skyUniforms) this.skyUniforms.uAccent.value.copy(this.accentHex);
-    if (this.poolMat) this.poolMat.color.set(this.accentHex).lerp(new this.THREE.Color(0xffc27a), 0.5);
+    for (const m of this.poolMats || []) m.color.set(this.accentHex).lerp(new this.THREE.Color(0xffc27a), 0.5);
+    for (const glow of this.facadeGlows || []) glow.material.color.set(this.accentHex).lerp(new this.THREE.Color(0xffcf9a), 0.62);
+    if (this.lotMat) this.lotMat.color.set(PALETTE.lot).lerp(this.accentHex, 0.22);
     if (this.focusRing) this.focusRing.material.color.set(this.accentHex);
     /* Floor / grid / rim ring follow the theme too: the plaza keeps a dark
      * neutral base tinted toward the accent so glass buildings, the route
@@ -2287,6 +2464,11 @@ export class CampusMap3DManager {
     });
     this._spriteTex?.dispose();
     this.composer?.dispose?.();
+    if (this._envRebuildTimer) { clearTimeout(this._envRebuildTimer); this._envRebuildTimer = null; }
+    try { if (this.scene) this.scene.environment = null; } catch (_) {}
+    try { this._envRT?.dispose(); } catch (_) {}
+    try { this._pmrem?.dispose(); } catch (_) {}
+    this._envRT = null; this._pmrem = null; this._envScene = null;
     this.renderer?.dispose();
     this.renderer?.domElement?.remove();
     this.hud?.remove();

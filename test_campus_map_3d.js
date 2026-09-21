@@ -179,6 +179,9 @@ if (!hitOk() && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 20
     if (!viaControl) throw new Error('Could not calculate a projected building hit point and no Show location control exists');
     hit = viaControl;
   }
+  /* Freeze the idle showcase spin for the click: autoOrbit drifts the
+   * projected point between projection and dispatch. */
+  await evaluate(`window.__SC_CAMPUS_MAP_3D__.autoOrbit = false;`);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: hit.x, y: hit.y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hit.x, y: hit.y, button: 'left', clickCount: 1 });
   await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -192,6 +195,7 @@ if (!hitOk() && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 20
       pathSegments: Number(mount?.dataset.pathSegments || 0)
     };
   })()`);
+  await evaluate(`window.__SC_CAMPUS_MAP_3D__.autoOrbit = true;`);
   if (focus.cameraMode !== 'focus' || focus.focusBuilding !== 'J') throw new Error(`Building selection/camera focus failed: ${JSON.stringify(focus)}`);
   /* Reference look: focused building solid, others translucent glass. */
   const opac = await evaluate(`(() => {
@@ -666,10 +670,10 @@ if (!hitOk() && hitErr) console.log(`HIT-EVAL-ERR: ${hitErr.message?.slice(0, 20
       return { dist: Math.round(mgr.sph.dist), lookCenter: Math.abs(c.x - W.w / 2) < 4 && Math.abs(c.z - W.h / 2) < 4,
         pitch: +mgr.sph.pitch.toFixed(2), solarElev: mgr._solarElevation != null ? Math.round(mgr._solarElevation) : null };
     })()`);
-    if (rig.lookCenter && rig.dist > 1300 && rig.dist < 1800) break;
+    if (rig.lookCenter && rig.dist > 1000 && rig.dist < 1300) break;
   }
   if (!rig.lookCenter) throw new Error(`Reset does not re-center the map: ${JSON.stringify(rig)}`);
-  if (!(rig.dist > 1300 && rig.dist < 1800)) throw new Error(`Reset distance wrong: ${JSON.stringify(rig)}`);
+  if (!(rig.dist > 1000 && rig.dist < 1300)) throw new Error(`Reset distance wrong: ${JSON.stringify(rig)}`);
   if (rig.solarElev == null) throw new Error(`Solar engine not reporting elevation: ${JSON.stringify(rig)}`);
   console.log(`RIG: overview dist=${rig.dist} pitch=${rig.pitch} look=center solarElev=${rig.solarElev}deg`);
 
