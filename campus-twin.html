@@ -977,7 +977,8 @@ const interaction = {
   prevPanZ: 0,
   prevPitch: 0,
   prevBreath: 1,
-  initialized: false
+  initialized: false,
+  pivotId: null
 };
 const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinUp = new V3(0, 1, 0), cinQ = new THREE.Quaternion();
 
@@ -1025,6 +1026,7 @@ function updateCinematicCamera(dt, now) {
   interaction.breathPhase += dt * 0.11;
 
   const selected = ST.sel && BG[ST.sel] ? BG[ST.sel] : null;
+  interaction.pivotId = selected ? ST.sel : null;
   if (selected) {
     cinPivot.copy(selected.center);
     cinPivot.y += (selected.masses?.[0]?.h || 16) * 0.35;
@@ -1306,7 +1308,8 @@ addEventListener('message', e => {
   if (e.source !== parent || e.origin !== HOST_ORIGIN) return;
   const d = e.data;
   if (!d || typeof d !== 'object' || typeof d.type !== 'string') return;
-  if (d.type === 'campus:select' || d.type === 'davis:select') select(d.id ? String(d.id).toUpperCase() : null);
+  if (d.type === 'campus:user-interaction') markUserInteraction();
+  else if (d.type === 'campus:select' || d.type === 'davis:select') select(d.id ? String(d.id).toUpperCase() : null);
   else if (d.type === 'campus:reset') select(null);
   else if (d.type === 'campus:accent' && typeof d.value === 'string') setAccent(d.value);
   else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
