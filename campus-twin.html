@@ -1215,6 +1215,7 @@ function setAccent(hex) {
 function setTime(v) { if (v === 'live') { clock.mode = 'live'; clock.speed = 1; $('speed').value = '1'; } else { clock.t = new Date(v).getTime(); clock.mode = 'manual'; } envDirty = true; syncClock(); }
 function syncClock() { const d = new Date(clock.t); $('timeLabel').textContent = clockFmt.format(d); if (!sliderDrag) $('timeRange').value = tzMinutes(d); $('btnLive').classList.toggle('on', clock.mode === 'live'); }
 function wireUI() {
+  document.addEventListener('pointerdown', markUserInteraction, true);
   $('panelBtn').onclick = () => { markUserInteraction(); panel($('panel').classList.contains('closed')); };
   try {
     const ownerDoc = parent !== window ? parent.document : document;
@@ -1295,6 +1296,7 @@ addEventListener('davis:select', e => post({ type: 'select', id: e.detail.id }))
 window.DavisTwin = window.CampusTwin = { select: id => select(id ? String(id).toUpperCase() : null), showRoute: id => select(String(id).toUpperCase()), reset: () => select(null), setAccent, setTime, setWeather: n => setWeather(n), setSeason: s => setSeason(s), drive: toggleDrive, buildings: BUILDINGS.map(b => b.id), on: (ev, fn) => addEventListener('davis:' + ev, e => fn(e.detail)) };
 let renderPaused = false, frameId = 0;
 const disposeTwin = () => {
+  document.removeEventListener('pointerdown', markUserInteraction, true);
   try {
     const ownerDoc = parent !== window ? parent.document : document;
     ownerDoc.removeEventListener('fullscreenchange', onFullscreenChange);
