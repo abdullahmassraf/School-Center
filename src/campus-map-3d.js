@@ -91,6 +91,7 @@ export class CampusMap3DManager {
     this.fullscreenBtn.setAttribute('aria-pressed',String(active));
   }
   async _toggleFullscreen(){
+    this._post({type:'campus:user-interaction'});
     try{
       if(document.fullscreenElement){if(document.exitFullscreen)await document.exitFullscreen();}
       else if(document.documentElement?.requestFullscreen){await document.documentElement.requestFullscreen();}
