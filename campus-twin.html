@@ -979,7 +979,7 @@ const interaction = {
   prevBreath: 1,
   initialized: false
 };
-const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinQ = new THREE.Quaternion();
+const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinUp = new V3(0, 1, 0), cinQ = new THREE.Quaternion();
 
 function actualFullscreen() {
   try { return !!(parent !== window ? parent.document.fullscreenElement : document.fullscreenElement); }
@@ -1045,7 +1045,7 @@ function updateCinematicCamera(dt, now) {
   /* Cinematic orbit: a slowly varying velocity, not OrbitControls.autoRotate. */
   cinOffset.copy(camera.position).sub(cinPivot);
   const yawDelta = (0.0063 + 0.0017 * Math.sin(interaction.yawPhase * 0.13 + now * 0.00019)) * s * dt;
-  cinQ.setFromAxisAngle(new V3(0, 1, 0), yawDelta); cinOffset.applyQuaternion(cinQ);
+  cinQ.setFromAxisAngle(cinUp, yawDelta); cinOffset.applyQuaternion(cinQ);
 
   const wantPitch = Math.sin(interaction.elevationPhase) * (0.015 * s);
   const pitchDelta = wantPitch - interaction.prevPitch;
