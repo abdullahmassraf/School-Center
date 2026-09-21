@@ -5,6 +5,9 @@ const IDS = new Set(['J','H','M','B','C','A']);
 const WEATHER = new Set(['clear','cloudy','overcast','rain','snow','fog','live']);
 const idOf = v => v == null ? null : (IDS.has(String(v).toUpperCase()) ? String(v).toUpperCase() : null);
 const weatherOf = v => WEATHER.has(String(v)) ? String(v) : null;
+const fullscreenSvg = (active) => active
+  ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>'
+  : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 
 const ICONS = {
   clear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -47,6 +50,7 @@ export class CampusMap3DManager {
     document.addEventListener('visibilitychange',this._onVisibility);
     this._onFullscreenChange=()=>{
       const active=!!document.fullscreenElement;
+      this._syncFullscreenState(active);
       this._post({type:'campus:fullscreen-state',value:active});
       requestAnimationFrame(()=>this._post({type:'campus:resize'}));
     };
@@ -79,10 +83,26 @@ export class CampusMap3DManager {
     this.weatherChip.dataset.condition=c;
   }
 
+  _syncFullscreenState(active=!!document.fullscreenElement){
+    if(!this.fullscreenBtn)return;
+    this.fullscreenBtn.innerHTML=fullscreenSvg(active);
+    this.fullscreenBtn.setAttribute('aria-label',active?'Exit fullscreen':'Enter fullscreen');
+    this.fullscreenBtn.title=active?'Exit fullscreen':'Enter fullscreen';
+    this.fullscreenBtn.setAttribute('aria-pressed',String(active));
+  }
+  async _toggleFullscreen(){
+    try{
+      if(document.fullscreenElement){if(document.exitFullscreen)await document.exitFullscreen();}
+      else if(document.documentElement?.requestFullscreen){await document.documentElement.requestFullscreen();}
+    }catch(_){}
+    this._syncFullscreenState();
+  }
+
   _installLegacyHud(){
     const hud=document.createElement('div');hud.className='cm3d-hud';
-    hud.innerHTML='<button class="cm3d-reset" type="button" title="Reset view" aria-label="Reset campus view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button><button class="cm3d-path-toggle is-hidden" type="button" title="Toggle wayfinding paths" aria-label="Toggle wayfinding paths"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h4"/></svg></button>';
-    this.mount.appendChild(hud);this.resetBtn=hud.querySelector('.cm3d-reset');this.pathBtn=hud.querySelector('.cm3d-path-toggle');
+    hud.innerHTML='<button class="cm3d-reset" type="button" title="Reset view" aria-label="Reset campus view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button><button class="cm3d-path-toggle is-hidden" type="button" title="Toggle wayfinding paths" aria-label="Toggle wayfinding paths"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h4"/></svg></button><button class="cm3d-fullscreen" type="button" title="Enter fullscreen" aria-label="Enter fullscreen" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>';
+    this.mount.appendChild(hud);this.resetBtn=hud.querySelector('.cm3d-reset');this.pathBtn=hud.querySelector('.cm3d-path-toggle');this.fullscreenBtn=hud.querySelector('.cm3d-fullscreen');
+    this.fullscreenBtn.onclick=e=>{e.stopPropagation();void this._toggleFullscreen()};this._syncFullscreenState();
     this.resetBtn.onclick=e=>{e.stopPropagation();this.reset()};
     this.pathBtn.onclick=e=>{e.stopPropagation();this._routeVisible=!this._routeVisible;this._post({type:'campus:routeVisible',value:this._routeVisible});this.pathBtn.classList.toggle('is-off',!this._routeVisible)};
     const w=document.createElement('div');w.className='cm3d-weather';w.setAttribute('aria-label','Campus weather');w.innerHTML='<span class="cm3d-weather-icon" aria-hidden="true"></span><span class="cm3d-weather-temp">—°</span>';
@@ -94,6 +114,7 @@ export class CampusMap3DManager {
   select(id){id==null?this.reset():this.focus(id)}
   reset(){this.focusId=null;this.camMode='overview';this._routeVisible=false;this.pathBtn?.classList.add('is-hidden');this._post({type:'campus:reset'})}
   autoOrbit(on){this.autoOrbit=Boolean(on)&&!matchMedia?.('(prefers-reduced-motion: reduce)').matches;this._post({type:'campus:autoorbit',value:this.autoOrbit})}
+  toggleFullscreen(){return this._toggleFullscreen()}
   resize(){this._post({type:'campus:resize'})}
   refreshAccent(){const value=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();if(value)this._post({type:'campus:accent',value});this._post({type:'campus:theme',value:document.documentElement.dataset.theme||(matchMedia?.('(prefers-color-scheme: light)').matches?'light':'dark')})}
   setWeather(value){const v=weatherOf(value);if(!v)return;this._weatherCondition=v;this._updateWeatherChip();this._post({type:'campus:weather',value:v})}
