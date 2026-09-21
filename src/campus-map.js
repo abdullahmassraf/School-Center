@@ -212,6 +212,7 @@ export async function initCampusMap3d() {
       return;
     }
     console.warn('[campus-3d] unavailable:', err && (err.stack || err.message));
+    window.__cm3dErr = String(err && (err.stack || err.message));
     campus3dManager = null;
     manager?.dispose();
     show3dUnavailable(stage);

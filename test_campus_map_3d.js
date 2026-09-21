@@ -7,7 +7,9 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname));
 const PORT = 8951;
 const DEBUG_PORT = 9251;
 const CHROME = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'].find((candidate) => {
-  try { execFileSync('which', [candidate], { stdio: 'ignore' }); return true; } catch { return false; }
+  try { execFileSync('which', [candidate], { stdio: 'ignore' });
+process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch (_) {} });
+process.on('uncaughtException', (e) => { console.error('FATAL', e && e.message); try { chrome.kill('SIGKILL'); } catch (_) {} server.close(); process.exit(2); }); return true; } catch { return false; }
 });
 if (!CHROME) throw new Error('Chromium is required');
 
@@ -17,12 +19,14 @@ const server = http.createServer((req, res) => {
   if (requestPath === '/') requestPath = '/index.html';
   const file = path.resolve(path.join(ROOT, requestPath));
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store, must-revalidate' });
   fs.createReadStream(file).pipe(res);
 });
 await new Promise((resolve) => server.listen(PORT, resolve));
 
 const profile = `/tmp/school-center-map-${Date.now()}`;
+/* PURGE-STALE: killed runs leak their profile; remove leftovers before starting. */
+try { for (const d of fs.readdirSync('/tmp')) if (d.startsWith('school-center-map-')) fs.rmSync(require('path').join('/tmp', d), { recursive: true, force: true }); } catch {}
 const browser = spawn(CHROME, [
   '--headless', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
   /* SwiftShader software WebGL: do not use --disable-gpu, which prevents the
