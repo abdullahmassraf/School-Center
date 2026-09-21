@@ -66,19 +66,19 @@ const dOutsideAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__
 if(dOutside||dOutsideAfter)throw new Error(`D activated Drive outside fullscreen: ${dOutsideAfter}`);
 console.log('DRIVE OUTSIDE FULLSCREEN: blocked');
 
-await clickSelectorInFrame('.cm3d-fullscreen');
+await clickSelector('.cm3d-fullscreen');
 await sleep(600);
 let fs=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.camera.aspect,expected:innerWidth/innerHeight,calls:f.renderer.info.render.calls}})()`);
 if(!fs.host||!fs.twin||fs.label!=='Exit fullscreen'||Math.abs(fs.aspect-f.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fs)}`);
 console.log('FULLSCREEN ENTER',JSON.stringify(fs));
 
-await clickSelectorInFrame('.cm3d-fullscreen');
+await clickSelector('.cm3d-fullscreen');
 await sleep(500);
 fs=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')}))()`);
 if(fs.host||fs.label!=='Enter fullscreen')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fs)}`);
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fs));
 
-await clickSelectorInFrame('.cm3d-fullscreen');
+await clickSelector('.cm3d-fullscreen');
 await sleep(400);
 await key('KeyD');
 await sleep(700);
