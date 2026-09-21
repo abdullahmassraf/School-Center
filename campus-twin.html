@@ -55,6 +55,12 @@
 
   /* panel */
   #panelBtn{top:calc(14px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
+  #fullscreenBtn{position:absolute;top:calc(66px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px;display:grid;place-items:center;z-index:6}
+  #fullscreenBtn:hover{background:rgba(255,255,255,.11);transform:translateY(-1px)}
+  #fullscreenBtn:active{transform:translateY(0) scale(.98)}
+  #fullscreenBtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  #fullscreenBtn i{pointer-events:none}
+
   #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s}
   #panel.closed{opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
   #panel h3{margin:0 0 7px;font-size:11.5px;font-weight:600;color:var(--ink-dim);display:flex;justify-content:space-between;align-items:center}
@@ -116,6 +122,7 @@
     #compass,#hint{display:none}
   }
   body.embed #title,body.embed #dock,body.embed #hint,body.embed #compass,body.embed #info,body.embed #panelBtn,body.embed #panel,body.embed #loader,body.embed #fatal{display:none!important}
+  body.embed #fullscreenBtn{display:grid!important}
   body.embed #loader p,body.embed #loader .bar{display:none}
   @media (prefers-reduced-motion:reduce){ #info{animation:none} #loader{transition:none} }
 </style>
@@ -134,6 +141,8 @@
   </header>
 
   <button id="panelBtn" class="hud glass" aria-label="Environment controls" aria-expanded="false"><i class="fa-solid fa-sliders"></i></button>
+
+  <button id="fullscreenBtn" class="hud glass" type="button" aria-label="Enter fullscreen" title="Enter fullscreen"><i class="fa-solid fa-expand"></i></button>
 
   <aside id="panel" class="hud glass closed" aria-label="Environment controls">
     <section>
@@ -959,10 +968,147 @@ function updateRoute(dt) {
   for (const m of [R.ribM, R.beam.material, ...R.rings.map(r => r.material)]) m.uniforms.uA.value = f;
 }
 const OV = { pos: [238, 226, 344], tgt: [-8, 0, 8] };
-let idleT = 0; const REDUCED_MOTION = matchMedia?.('(prefers-reduced-motion: reduce)').matches === true; const AUTO = { on: !REDUCED_MOTION && Q.has('embed') && Q.get('autoorbit') !== '0', delay: 14 };
-function flyTo(pos, tgt, dur = 2.2) { idleT = 0; Tw.kill(camera.position); Tw.kill(controls.target); Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power3.inOut' }); Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power3.inOut' }); }
-controls.addEventListener('start', () => { idleT = 0; Tw.kill(camera.position); Tw.kill(controls.target); tour.on = false; $('btnTour').classList.remove('on'); });
+const REDUCED_MOTION = matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+const AUTO = { on: !REDUCED_MOTION && Q.has('embed') && Q.get('autoorbit') !== '0' };
+const interaction = {
+  lastInput: performance.now(),
+  idleDelay: 1500,
+  cameraTransition: false,
+  controlsActive: false,
+  idleStrength: 0,
+  targetStrength: 0,
+  yawPhase: 0,
+  panPhase: 0,
+  elevationPhase: 0,
+  breathPhase: 0,
+  prevPanX: 0,
+  prevPanZ: 0,
+  prevPitch: 0,
+  prevBreath: 1,
+  initialized: false
+};
+const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinQ = new THREE.Quaternion();
+
+function actualFullscreen() {
+  try { return !!(parent !== window ? parent.document.fullscreenElement : document.fullscreenElement); }
+  catch { return !!document.fullscreenElement; }
+}
+function syncFullscreenUI(active = actualFullscreen()) {
+  const b = $('fullscreenBtn'); if (!b) return;
+  b.innerHTML = `<i class="fa-solid fa-${active ? 'compress' : 'expand'}"></i>`;
+  b.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+  b.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
+  b.setAttribute('aria-pressed', String(active));
+}
+async function toggleFullscreen() {
+  try {
+    if (actualFullscreen()) {
+      const d = parent !== window ? parent.document : document;
+      if (d.exitFullscreen) await d.exitFullscreen();
+      return;
+    }
+    const d = parent !== window ? parent.document : document;
+    if (d.documentElement?.requestFullscreen) await d.documentElement.requestFullscreen();
+  } catch (_) {
+    /* Fullscreen is optional; unsupported/restricted browsers simply do nothing. */
+  } finally { syncFullscreenUI(); }
+}
+
+function resetCinematicEnvelope() {
+  interaction.yawPhase = 0; interaction.panPhase = 0; interaction.elevationPhase = 0; interaction.breathPhase = 0;
+  interaction.prevPanX = interaction.prevPanZ = interaction.prevPitch = 0; interaction.prevBreath = 1;
+  interaction.initialized = true;
+}
+function markUserInteraction(now = performance.now()) {
+  interaction.lastInput = now;
+  interaction.targetStrength = 0;
+  if (!interaction.controlsActive) {
+    /* A new input becomes the latest camera base. Existing cinematic motion is
+     * allowed to decay naturally via idleStrength rather than snapping. */
+    if (interaction.idleStrength < 0.002) resetCinematicEnvelope();
+  }
+}
+function smooth01(x, a, b) {
+  const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t);
+}
+function updateCinematicCamera(dt, now) {
+  if (renderPaused || drive.on || tour.on || interaction.cameraTransition || !AUTO.on || REDUCED_MOTION) {
+    interaction.targetStrength = 0;
+  } else {
+    const idle = (now - interaction.lastInput) / 1000;
+    interaction.targetStrength = idle >= 1.5 ? smooth01(idle, 1.5, 3.0) : 0;
+  }
+  const response = 1 - Math.exp(-dt / 0.45);
+  interaction.idleStrength += (interaction.targetStrength - interaction.idleStrength) * response;
+  if (interaction.idleStrength < 0.0005) {
+    interaction.idleStrength = 0;
+    interaction.prevPanX = interaction.prevPanZ = interaction.prevPitch = 0; interaction.prevBreath = 1;
+    return;
+  }
+  if (!interaction.initialized) resetCinematicEnvelope();
+  const s = interaction.idleStrength;
+  interaction.yawPhase += dt * (0.0063 + 0.0017 * Math.sin(interaction.yawPhase * 0.13 + now * 0.00031)) * s;
+  interaction.panPhase += dt * 0.17;
+  interaction.elevationPhase += dt * 0.23;
+  interaction.breathPhase += dt * 0.11;
+
+  const selected = ST.sel && BG[ST.sel] ? BG[ST.sel] : null;
+  if (selected) {
+    cinPivot.copy(selected.center);
+    cinPivot.y += (selected.masses?.[0]?.h || 16) * 0.35;
+  } else {
+    cinPivot.copy(controls.target);
+    cinPivot.x -= interaction.prevPanX; cinPivot.z -= interaction.prevPanZ;
+  }
+
+  /* Bound the lateral target drift. It is applied as a delta so manual pan
+   * remains responsive and no cumulative drift is introduced. */
+  const wantPanX = Math.sin(interaction.panPhase * 1.0) * 1.2 * s;
+  const wantPanZ = Math.cos(interaction.panPhase * 0.76) * 0.8 * s;
+  const panDX = wantPanX - interaction.prevPanX, panDZ = wantPanZ - interaction.prevPanZ;
+  camera.position.x += panDX; camera.position.z += panDZ;
+  controls.target.x += panDX; controls.target.z += panDZ;
+  interaction.prevPanX = wantPanX; interaction.prevPanZ = wantPanZ;
+
+  /* Cinematic orbit: a slowly varying velocity, not OrbitControls.autoRotate. */
+  cinOffset.copy(camera.position).sub(cinPivot);
+  const yawDelta = (0.0063 + 0.0017 * Math.sin(interaction.yawPhase * 0.13 + now * 0.00019)) * s * dt;
+  cinQ.setFromAxisAngle(new V3(0, 1, 0), yawDelta); cinOffset.applyQuaternion(cinQ);
+
+  const wantPitch = Math.sin(interaction.elevationPhase) * (0.015 * s);
+  const pitchDelta = wantPitch - interaction.prevPitch;
+  if (Math.abs(pitchDelta) > 1e-6) {
+    cinRight.set(cinOffset.z, 0, -cinOffset.x);
+    if (cinRight.lengthSq() > 1e-8) { cinRight.normalize(); cinQ.setFromAxisAngle(cinRight, pitchDelta); cinOffset.applyQuaternion(cinQ); }
+  }
+  interaction.prevPitch = wantPitch;
+
+  /* Subconscious breathing: preserve the current manual radius, then apply a
+   * bounded +/-0.8% envelope that returns to 1.0 as idle influence fades. */
+  const wantBreath = 1 + Math.sin(interaction.breathPhase) * 0.008 * s;
+  const breathRatio = wantBreath / interaction.prevBreath;
+  cinOffset.multiplyScalar(breathRatio); interaction.prevBreath = wantBreath;
+  camera.position.copy(cinPivot).add(cinOffset);
+  camera.lookAt(controls.target);
+}
+
+function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
+  interaction.cameraTransition = true;
+  markUserInteraction();
+  Tw.kill(camera.position); Tw.kill(controls.target);
+  const done = () => { interaction.cameraTransition = false; markUserInteraction(); onComplete?.(); };
+  Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power3.inOut' });
+  Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power3.inOut', onComplete: done });
+}
+controls.addEventListener('start', () => {
+  interaction.controlsActive = true; markUserInteraction();
+  interaction.cameraTransition = false; Tw.kill(camera.position); Tw.kill(controls.target);
+  tour.on = false; $('btnTour').classList.remove('on');
+});
+controls.addEventListener('change', () => { if (interaction.controlsActive) markUserInteraction(); });
+controls.addEventListener('end', () => { interaction.controlsActive = false; markUserInteraction(); });
 function select(id, fly = true) {
+  markUserInteraction();
   if (id && !BLD[id]) return; ST.sel = id;
   for (const k in BG) Tw.to(BG[k].edgeMat, { opacity: k === id ? .95 : 0, duration: .45 });
   document.querySelectorAll('#dock [data-id]').forEach(b => b.classList.toggle('on', b.dataset.id === id)); applyGlass();
@@ -974,7 +1120,9 @@ function select(id, fly = true) {
 }
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let ptr = null, dXY = null, dT = 0;
 const pick = (x, y) => { const r = $('scene').getBoundingClientRect(); ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(pickables, false); return h.length ? h[0].object.userData.bid : null; };
-$('scene').addEventListener('pointermove', e => { if (!e.buttons) ptr = [e.clientX, e.clientY]; });
+$('scene').addEventListener('pointermove', e => { if (!e.buttons) ptr = [e.clientX, e.clientY]; else markUserInteraction(); });
+$('scene').addEventListener('pointerdown', () => markUserInteraction());
+$('scene').addEventListener('wheel', () => markUserInteraction(), { passive: true });
 $('scene').addEventListener('pointerleave', () => { ptr = null; });
 $('scene').addEventListener('pointerdown', e => { dXY = [e.clientX, e.clientY]; dT = performance.now(); $('scene').classList.add('grabbing'); });
 addEventListener('pointerup', e => { $('scene').classList.remove('grabbing'); if (dXY && e.target === $('scene') && Math.hypot(e.clientX - dXY[0], e.clientY - dXY[1]) < 5 && performance.now() - dT < 450) { const id = pick(e.clientX, e.clientY); if (id) select(id); } dXY = null; });
@@ -1064,7 +1212,22 @@ function updateVehicleLighting(dt,now) {
   }
 }
 
-addEventListener('keydown', e => { if (!drive.on) return; const m = { KeyW: 'w', ArrowUp: 'w', KeyS: 's', ArrowDown: 's', KeyA: 'a', ArrowLeft: 'a', KeyD: 'd', ArrowRight: 'd', Space: 'space' }[e.code]; if (m) { drive.keys[m] = true; e.preventDefault(); } if (e.code === 'Escape') toggleDrive(); });
+function editableTarget(el) {
+  return !!el && (/INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable === true);
+}
+addEventListener('keydown', e => {
+  markUserInteraction();
+  if (e.repeat || editableTarget(e.target)) return;
+  /* Hidden easter egg: only the first D while the browser is actually in
+   * fullscreen activates Drive. Once Drive is on, D is ordinary steering. */
+  if (!drive.on && e.code === 'KeyD' && actualFullscreen()) {
+    e.preventDefault(); void toggleDrive(); return;
+  }
+  if (!drive.on) return;
+  const m = { KeyW: 'w', ArrowUp: 'w', KeyS: 's', ArrowDown: 's', KeyA: 'a', ArrowLeft: 'a', KeyD: 'd', ArrowRight: 'd', Space: 'space' }[e.code];
+  if (m) { drive.keys[m] = true; e.preventDefault(); }
+  if (e.code === 'Escape') void toggleDrive();
+});
 addEventListener('keyup', e => { const m = { KeyW: 'w', ArrowUp: 'w', KeyS: 's', ArrowDown: 's', KeyA: 'a', ArrowLeft: 'a', KeyD: 'd', ArrowRight: 'd', Space: 'space' }[e.code]; if (m) drive.keys[m] = false; });
 
 /* ═══════════ 10 · UI · TIME · LOOP · BOOT ═══════════ */
@@ -1078,7 +1241,15 @@ function setAccent(hex) {
 function setTime(v) { if (v === 'live') { clock.mode = 'live'; clock.speed = 1; $('speed').value = '1'; } else { clock.t = new Date(v).getTime(); clock.mode = 'manual'; } envDirty = true; syncClock(); }
 function syncClock() { const d = new Date(clock.t); $('timeLabel').textContent = clockFmt.format(d); if (!sliderDrag) $('timeRange').value = tzMinutes(d); $('btnLive').classList.toggle('on', clock.mode === 'live'); }
 function wireUI() {
-  $('panelBtn').onclick = () => panel($('panel').classList.contains('closed'));
+  $('panelBtn').onclick = () => { markUserInteraction(); panel($('panel').classList.contains('closed')); };
+  $('fullscreenBtn').onclick = () => { markUserInteraction(); void toggleFullscreen(); };
+  syncFullscreenUI();
+  try {
+    const ownerDoc = parent !== window ? parent.document : document;
+    ownerDoc.addEventListener('fullscreenchange', onFullscreenChange);
+    if (ownerDoc !== document) document.addEventListener('fullscreenchange', onFullscreenChange);
+  } catch {}
+
   $('timeRange').addEventListener('pointerdown', () => sliderDrag = true); addEventListener('pointerup', () => sliderDrag = false);
   $('timeRange').oninput = e => { clock.mode = 'manual'; clock.t = dateAtMinutes(new Date(clock.t), +e.target.value).getTime(); envDirty = true; syncClock(); };
   $('btnLive').onclick = () => setTime('live'); $('speed').onchange = e => { clock.mode = +e.target.value === 1 && clock.mode === 'live' ? 'live' : 'sim'; clock.speed = +e.target.value; syncClock(); };
@@ -1091,7 +1262,15 @@ function wireUI() {
   $('btnRoute').onclick = () => { R.grp.visible = !R.grp.visible; $('btnRoute').innerHTML = `<i class="fa-solid fa-route"></i> ${R.grp.visible ? 'Hide' : 'Show'} route`; };
   const dock = $('dock'); dock.innerHTML = '<button data-ov>Overview</button><span class="sep"></span>' + BUILDINGS.map(b => `<button data-id="${b.id}" title="${b.name}">${b.id}</button>`).join('') + '<span class="sep"></span><button data-bus><i class="fa-solid fa-bus"></i> Bus stop</button>';
   dock.onclick = e => { const t = e.target.closest('button'); if (!t) return; if (t.dataset.id) select(t.dataset.id); else if (t.hasAttribute('data-ov')) select(null); else if (t.hasAttribute('data-bus')) { select(null, false); flyTo([-100, 55, -80], [-58, 0, -122]); } };
-  addEventListener('keydown', e => { if (Q.has('embed') || drive.on || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return; if (e.key === 'Escape') select(null); if (e.key.toLowerCase() === 'g') $('btnGlass').click(); if (e.key.toLowerCase() === 'c') toggleDrive(); });
+  addEventListener('keydown', e => {
+  if (editableTarget(e.target)) return;
+  if (e.repeat) return;
+  markUserInteraction();
+  if (drive.on || Q.has('embed')) return;
+  if (e.key === 'Escape') select(null);
+  if (e.key.toLowerCase() === 'g') $('btnGlass').click();
+  if (e.key.toLowerCase() === 'c') toggleDrive();
+});
   new MutationObserver(() => { const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); if (v && v.toLowerCase() !== '#' + ST.accent.getHexString()) setAccent(v); }).observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] });
   if (innerWidth > 720 && !Q.has('embed')) panel(true);
 }
@@ -1103,8 +1282,8 @@ function frame(now) {
   frameId = requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
   camDist = camera.position.distanceTo(controls.target);
-  idleT += dt; controls.autoRotate = AUTO.on && !ST.sel && !drive.on && !tour.on && idleT > AUTO.delay; controls.autoRotateSpeed = .35;
   if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
+  updateCinematicCamera(dt, now);
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
   if (frameNo++ % FX.se === 0) { updateShadow(); renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd–4th frame
@@ -1136,11 +1315,21 @@ async function boot() {
   flyTo(OV.pos, OV.tgt, 3.4); if (CFG.building && BLD[String(CFG.building).toUpperCase()]) setTimeout(() => select(String(CFG.building).toUpperCase()), 1800);
   if (DEBUG) console.info('Davis twin ready', { tier: tierName, pr });
 }
+function onFullscreenChange() {
+  const active = actualFullscreen();
+  syncFullscreenUI(active);
+  if (!active && drive.on) void toggleDrive();
+}
 const post = m => { try { if (parent !== window) parent.postMessage({ source: 'davis-twin', ...m }, HOST_ORIGIN); } catch {} };
 addEventListener('davis:select', e => post({ type: 'select', id: e.detail.id }));
 window.DavisTwin = window.CampusTwin = { select: id => select(id ? String(id).toUpperCase() : null), showRoute: id => select(String(id).toUpperCase()), reset: () => select(null), setAccent, setTime, setWeather: n => setWeather(n), setSeason: s => setSeason(s), drive: toggleDrive, buildings: BUILDINGS.map(b => b.id), on: (ev, fn) => addEventListener('davis:' + ev, e => fn(e.detail)) };
 let renderPaused = false, frameId = 0;
 const disposeTwin = () => {
+  try {
+    const ownerDoc = parent !== window ? parent.document : document;
+    ownerDoc.removeEventListener('fullscreenchange', onFullscreenChange);
+    if (ownerDoc !== document) document.removeEventListener('fullscreenchange', onFullscreenChange);
+  } catch {}
   try { if (envRT) envRT.dispose(); } catch {}
   try { pmrem.dispose(); } catch {}
   try { renderer.dispose(); } catch {}
@@ -1153,7 +1342,8 @@ addEventListener('message', e => {
   else if (d.type === 'campus:reset') select(null);
   else if (d.type === 'campus:accent' && typeof d.value === 'string') setAccent(d.value);
   else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
-  else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; idleT = 0; }
+  else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; markUserInteraction(); }
+  else if (d.type === 'campus:fullscreen-state') { syncFullscreenUI(!!d.value); if (!d.value && drive.on) void toggleDrive(); }
   else if (d.type === 'campus:weather' && typeof d.value === 'string') setWeather(d.value);
   else if (d.type === 'campus:season' && typeof d.value === 'string') setSeason(d.value);
   else if (d.type === 'campus:time') setTime(d.value);
@@ -1163,10 +1353,13 @@ addEventListener('message', e => {
 });
 addEventListener('visibilitychange', () => {
   renderPaused = document.hidden;
-  if (!renderPaused && !frameId) frameId = requestAnimationFrame(frame);
+  if (renderPaused) return;
+  markUserInteraction();
+  interaction.cameraTransition = false;
+  if (!frameId) frameId = requestAnimationFrame(frame);
 });
 addEventListener('pagehide', disposeTwin, { once: true });
-if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, updateEnv, updatePrecip, resize };
+if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
 frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
 
