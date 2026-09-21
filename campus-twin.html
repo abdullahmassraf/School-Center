@@ -1217,8 +1217,8 @@ function driveStep(dt) {
     driveCamera.distance=clamp(camera.position.distanceTo(d.anchor),driveCamera.minDistance,driveCamera.maxDistance);
   }
 
-  controls.target.copy(d.anchor);
   const shouldChase=d.on && moving && !driveCamera.userRotating && now-driveCamera.releaseAt>=180;
+  if (!shouldChase) controls.target.copy(d.anchor);
   const desiredStrength=shouldChase?1:0;
   driveCamera.chaseStrength += (desiredStrength-driveCamera.chaseStrength) * (1-Math.exp(-dt*4));
   if (driveCamera.chaseStrength>0.0005) {
