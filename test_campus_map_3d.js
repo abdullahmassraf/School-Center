@@ -22,8 +22,8 @@ await send('Page.enable');await send('Runtime.enable');await send('Log.enable');
 let ready=false;for(let i=0;i<120&&!ready;i++){await new Promise(r=>setTimeout(r,500));ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin`)}
 if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 
-const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return {embed:new URL(m.frame.src).searchParams.get('embed'),ui:['#title','#panel','#dock','#info','#compass','#hint'].map(s=>[s,!!f.document.querySelector(s)]),ids:f.DavisTwin.buildings,ready:m.ready}})()`);
-if(boot.embed!=='1'||boot.ui.some(x=>x[1]))throw new Error(`embed UI leaked: ${JSON.stringify(boot)}`);
+const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,hidden=s=>getComputedStyle(f.document.querySelector(s)).display==='none';return {embed:new URL(m.frame.src).searchParams.get('embed'),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,hidden(s)]),ids:f.DavisTwin.buildings,ready:m.ready}})()`);
+if(boot.embed!=='1'||boot.ui.some(x=>!x[1]))throw new Error(`embed UI not hidden: ${JSON.stringify(boot)}`);
 for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Error(`missing building ${id}`);
 console.log('BOOT',JSON.stringify(boot));
 
