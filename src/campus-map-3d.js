@@ -24,6 +24,7 @@ export class CampusMap3DManager {
     this.mount=mount; this.opts=opts; this.disposed=false; this.ready=false;
     this.focusId=null; this.camMode='overview'; this._listeners=new Set(); this._queue=[];
     this._origin=location.origin; this._routeVisible=false; this._weatherCondition='clear';
+    this.fullscreenRoot=mount.closest('#cm-stage-3d')||mount;
     this._weatherTemp=null; this.autoOrbit=!matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
     const q=new URLSearchParams({embed:'1',autoorbit:this.autoOrbit?'1':'0'});
@@ -39,7 +40,7 @@ export class CampusMap3DManager {
     this._onMessage=e=>{
       if(this.disposed||e.source!==f.contentWindow||e.origin!==this._origin) return;
       const d=e.data; if(!d||d.source!=='davis-twin'||typeof d.type!=='string') return;
-      if(d.type==='ready'){this.ready=true;this.refreshAccent();this._post({type:'campus:autoorbit',value:this.autoOrbit});this._post({type:'campus:fullscreen-state',value:!!document.fullscreenElement});for(const m of this._queue.splice(0))this._post(m);this._resolveReady?.(true);this._resolveReady=null;}
+      if(d.type==='ready'){this.ready=true;this.refreshAccent();this._post({type:'campus:autoorbit',value:this.autoOrbit});this._post({type:'campus:fullscreen-state',value:document.fullscreenElement===this.fullscreenRoot});for(const m of this._queue.splice(0))this._post(m);this._resolveReady?.(true);this._resolveReady=null;}
       else if(d.type==='select'){const id=idOf(d.id);this.focusId=id;this.camMode=id?'focus':'overview';this._routeVisible=!!id;this.pathBtn?.classList.toggle('is-hidden',!id);this._listeners.forEach(fn=>{try{fn(id)}catch(err){console.error(err)}});}
       else if(d.type==='fullscreen-request'){try{if(!document.fullscreenElement&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen();else if(document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen();}catch{}}
       else if(d.type==='weather'){const w=weatherOf(d.value);if(w){this._weatherCondition=w;if(Number.isFinite(Number(d.temp)))this._weatherTemp=Number(d.temp);this._updateWeatherChip();}}
@@ -49,10 +50,19 @@ export class CampusMap3DManager {
     this._onVisibility=()=>this._post({type:'campus:visibility',value:!document.hidden});
     document.addEventListener('visibilitychange',this._onVisibility);
     this._onFullscreenChange=()=>{
-      const active=!!document.fullscreenElement;
+      const active=document.fullscreenElement===this.fullscreenRoot;
       this._syncFullscreenState(active);
       this._post({type:'campus:fullscreen-state',value:active});
       requestAnimationFrame(()=>this._post({type:'campus:resize'}));
+      document.documentElement.classList.toggle('cm-map-fullscreen',active);
+      const previousOverflow=this._pageOverflowBeforeFullscreen;
+      if(active){
+        if(previousOverflow===undefined)this._pageOverflowBeforeFullscreen=document.body.style.overflow;
+        document.body.style.overflow='hidden';
+      }else{
+        document.body.style.overflow=previousOverflow??this._pageOverflowBeforeFullscreen??'';
+        this._pageOverflowBeforeFullscreen=undefined;
+      }
     };
     document.addEventListener('fullscreenchange',this._onFullscreenChange);
     this._mo=new MutationObserver(()=>this.refreshAccent());
@@ -93,10 +103,13 @@ export class CampusMap3DManager {
   async _toggleFullscreen(){
     this._post({type:'campus:user-interaction'});
     try{
-      if(document.fullscreenElement){if(document.exitFullscreen)await document.exitFullscreen();}
-      else if(document.documentElement?.requestFullscreen){await document.documentElement.requestFullscreen();}
+      if(document.fullscreenElement===this.fullscreenRoot){
+        if(document.exitFullscreen) await document.exitFullscreen();
+      }else if(this.fullscreenRoot?.requestFullscreen){
+        await this.fullscreenRoot.requestFullscreen();
+      }
     }catch(_){}
-    this._syncFullscreenState();
+    this._syncFullscreenState(document.fullscreenElement===this.fullscreenRoot);
   }
 
   _installLegacyHud(){

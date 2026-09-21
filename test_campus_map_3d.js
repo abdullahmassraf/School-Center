@@ -55,8 +55,8 @@ let ready=false;
 for(let i=0;i<120&&!ready;i++){await sleep(500);ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`)}
 if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 
-const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{ready:m.ready,embed:new URL(m.frame.src).searchParams.get('embed'),ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!document.querySelector('.cm3d-fullscreen'),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
-if(boot.embed!=='1'||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
+const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen');return{ready:m.ready,embed:new URL(m.frame.src).searchParams.get('embed'),ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
+if(boot.embed!=='1'||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
 for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Error(`missing building ${id}`);
 console.log('BOOT',JSON.stringify(boot));
 
@@ -74,15 +74,15 @@ console.log('FULLSCREEN ENTER',JSON.stringify(fs));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(500);
-fs=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')}))()`);
-if(fs.host||fs.label!=='Enter fullscreen')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fs)}`);
+fs=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
+if(fs.host||fs.label!=='Enter fullscreen'||fs.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fs)}`);
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fs));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(400);
 await key('KeyD');
 await sleep(700);
-let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d}}})()`);
+let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance}})()`);
 if(!drive.on||!drive.fs)throw new Error(`fullscreen D easter egg failed: ${JSON.stringify(drive)}`);
 await key('KeyD');
 const steer=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on`);
@@ -96,7 +96,24 @@ if(afterEsc.fs||afterEsc.drive)throw new Error(`Escape did not leave a non-drivi
 console.log('ESCAPE EXIT',JSON.stringify(afterEsc));
 
 await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
+await sleep(300);
+
+/* Smart Drive chase: the existing Drive physics is reused. Hold forward long
+ * enough to move, then verify automatic rear alignment engages. */
+await clickSelector('.cm3d-fullscreen'); await sleep(400); await key('KeyD'); await sleep(500);
+await key('KeyW',false); await sleep(1600);
+const moving=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const p=d.drive.body.linvel();return{speed:Math.hypot(p.x,p.z),chase:d.driveCamera.chaseStrength,rotating:d.driveCamera.userRotating}})()`);
+await key('KeyW');
+if(moving.speed<0.5||moving.rotating||moving.chase<0.2)throw new Error(`smart drive chase did not engage: ${JSON.stringify(moving)}`);
+const distanceBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.distance`);
+await sleep(700);
+const chaseAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.chaseStrength`);
+if(chaseAfter<.45)throw new Error(`smart drive chase did not sustain: ${chaseAfter}`);
+console.log('SMART DRIVE CHASE',JSON.stringify({moving,distanceBefore,chaseAfter}));
+await key('Escape'); await sleep(800);
+await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
 await sleep(5000);
+
 const idleOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition}})()`);
 if(idleOverview.sel!==null||idleOverview.pivot!==null||idleOverview.strength<.08||idleOverview.transition)throw new Error(`overview cinematic idle failed: ${JSON.stringify(idleOverview)}`);
 console.log('CINEMATIC OVERVIEW',JSON.stringify(idleOverview));
