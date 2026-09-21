@@ -36,14 +36,21 @@ export class CampusMap3DManager {
     this._onMessage=e=>{
       if(this.disposed||e.source!==f.contentWindow||e.origin!==this._origin) return;
       const d=e.data; if(!d||d.source!=='davis-twin'||typeof d.type!=='string') return;
-      if(d.type==='ready'){this.ready=true;this.refreshAccent();this._post({type:'campus:autoorbit',value:this.autoOrbit});for(const m of this._queue.splice(0))this._post(m);this._resolveReady?.(true);this._resolveReady=null;}
+      if(d.type==='ready'){this.ready=true;this.refreshAccent();this._post({type:'campus:autoorbit',value:this.autoOrbit});this._post({type:'campus:fullscreen-state',value:!!document.fullscreenElement});for(const m of this._queue.splice(0))this._post(m);this._resolveReady?.(true);this._resolveReady=null;}
       else if(d.type==='select'){const id=idOf(d.id);this.focusId=id;this.camMode=id?'focus':'overview';this._routeVisible=!!id;this.pathBtn?.classList.toggle('is-hidden',!id);this._listeners.forEach(fn=>{try{fn(id)}catch(err){console.error(err)}});}
+      else if(d.type==='fullscreen-request'){try{if(!document.fullscreenElement&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen();else if(document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen();}catch{}}
       else if(d.type==='weather'){const w=weatherOf(d.value);if(w){this._weatherCondition=w;if(Number.isFinite(Number(d.temp)))this._weatherTemp=Number(d.temp);this._updateWeatherChip();}}
       else if(d.type==='status'&&typeof this.opts.onStatus==='function')this.opts.onStatus(String(d.value));
     };
     addEventListener('message',this._onMessage);
     this._onVisibility=()=>this._post({type:'campus:visibility',value:!document.hidden});
     document.addEventListener('visibilitychange',this._onVisibility);
+    this._onFullscreenChange=()=>{
+      const active=!!document.fullscreenElement;
+      this._post({type:'campus:fullscreen-state',value:active});
+      requestAnimationFrame(()=>this._post({type:'campus:resize'}));
+    };
+    document.addEventListener('fullscreenchange',this._onFullscreenChange);
     this._mo=new MutationObserver(()=>this.refreshAccent());
     this._mo.observe(document.documentElement,{attributes:true,attributeFilter:['style','class','data-theme']});
     window.__SC_CAMPUS_MAP_3D__=this;
@@ -94,7 +101,7 @@ export class CampusMap3DManager {
   setSeason(v){this._post({type:'campus:season',value:String(v)})}
   setTime(v){if(v==='live')this._post({type:'campus:time',value:'live'});else{const d=new Date(v);if(!Number.isNaN(d.getTime()))this._post({type:'campus:time',value:d.toISOString()})}}
   onSelect(fn){if(typeof fn!=='function')return()=>{};this._listeners.add(fn);return()=>this._listeners.delete(fn)}
-  dispose(){if(this.disposed)return;this.disposed=true;this.ready=false;clearTimeout(this._readyTimeout);this._resolveReady?.(false);this._resolveReady=null;removeEventListener('message',this._onMessage);document.removeEventListener('visibilitychange',this._onVisibility);this._mo?.disconnect();this._removeHud?.();this.frame?.remove();this._queue=[];if(window.__SC_CAMPUS_MAP_3D__===this)delete window.__SC_CAMPUS_MAP_3D__}
+  dispose(){if(this.disposed)return;this.disposed=true;this.ready=false;clearTimeout(this._readyTimeout);this._resolveReady?.(false);this._resolveReady=null;removeEventListener('message',this._onMessage);document.removeEventListener('visibilitychange',this._onVisibility);document.removeEventListener('fullscreenchange',this._onFullscreenChange);this._mo?.disconnect();this._removeHud?.();this.frame?.remove();this._queue=[];if(window.__SC_CAMPUS_MAP_3D__===this)delete window.__SC_CAMPUS_MAP_3D__}
   destroy(){this.dispose()}
 }
 export const mountCampusMap3D=(container,opts)=>new CampusMap3DManager(container,opts);
