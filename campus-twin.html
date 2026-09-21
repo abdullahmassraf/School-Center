@@ -227,6 +227,7 @@ const CFG = Object.assign({ accent: null, season: 'auto', weather: 'live', quali
 for (const k of ['accent', 'season', 'weather', 'quality', 'building', 'time']) if (Q.has(k)) CFG[k] = Q.get(k);
 if (CFG.quality === 'auto' && ls.get('davis-quality')) CFG.quality = ls.get('davis-quality');
 const DEBUG = Q.has('debug'); if (Q.has('embed')) document.body.classList.add('embed');
+const HOST_ORIGIN = location.origin;
 const $ = id => document.getElementById(id);
 
 const BUS_STOP = [-58, 0.22, -122];
@@ -466,7 +467,7 @@ const lotTex = (lot, ly) => { const px = 1024 / lot.w, hh = Math.round(lot.d * p
   g.save(); g.translate(w / 2, h / 2); g.fillStyle = 'rgba(255,255,255,.34)'; g.font = `700 ${Math.min(h * .2, 120)}px Inter,system-ui,sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(lot.name.toUpperCase(), 0, 0); g.restore(); }); };
 
 /* ═══════════ 4 · WORLD ═══════════ */
-const ST = { night: 0, day: 1, wet: 0, snow: 0, snowAcc: 0, season: 'summer', glass: 0, accent: new Col('#7c6cff'), sel: null, hover: null };
+const ST = { night: 0, day: 1, wet: 0, snow: 0, snowAcc: 0, season: 'summer', glass: 0, accent: new Col('#7c6cff'), sel: null, hover: null, theme: 'dark' };
 const W = { cloud: .05, over: 0, fog: 0, rain: 0, snow: 0 };            // live weather blend
 const snowU = { value: 0 }, envMats = [], wetMats = [];
 const reg = (m, env = 1, wet = false) => { m.userData.env = env; envMats.push(m); if (wet) wetMats.push({ m, r: m.roughness, c: m.color.clone() }); return m; };
@@ -887,8 +888,8 @@ function updateShadow() {
 }
 ST.wetMix = () => { for (const e of envMats) e.envMapIntensity = e.userData.env * (.55 + .45 * ST.day); for (const { m, r, c } of wetMats) { m.roughness = lerp(r, .3, ST.wet); m.color.copy(c).multiplyScalar(1 - .3 * ST.wet); m.envMapIntensity *= 1 + 1.8 * ST.wet; } };
 function setWeather(name, silent) {
-  if (name === 'live') { wxName = 'live'; fetch(`https://api.open-meteo.com/v1/forecast?latitude=${CAMPUS.lat}&longitude=${CAMPUS.lon}&current=weather_code,cloud_cover,temperature_2m`).then(r => r.json()).then(j => { const c = j.current.weather_code, k = c === 0 ? 'clear' : c <= 2 ? 'cloudy' : c === 3 ? 'overcast' : (c === 45 || c === 48) ? 'fog' : ((c >= 71 && c <= 77) || c === 85 || c === 86) ? 'snow' : c >= 51 ? 'rain' : 'clear'; Tw.to(W, { ...WX[k], duration: 3, ease: 'power2.inOut' }); $('timeSub').textContent = `Live · ${Math.round(j.current.temperature_2m)}°C ${k}`; }).catch(() => { $('timeSub').textContent = 'Live weather unavailable'; Tw.to(W, { ...WX.clear, duration: 2 }); }); }
-  else { wxName = name; $('timeSub').textContent = ''; Tw.kill(W); Tw.to(W, { ...WX[name], duration: silent ? .01 : 3.2, ease: 'power2.inOut' }); }
+  if (name === 'live') { wxName = 'live'; fetch(`https://api.open-meteo.com/v1/forecast?latitude=${CAMPUS.lat}&longitude=${CAMPUS.lon}&current=weather_code,cloud_cover,temperature_2m`).then(r => r.json()).then(j => { const c = j.current.weather_code, k = c === 0 ? 'clear' : c <= 2 ? 'cloudy' : c === 3 ? 'overcast' : (c === 45 || c === 48) ? 'fog' : ((c >= 71 && c <= 77) || c === 85 || c === 86) ? 'snow' : c >= 51 ? 'rain' : 'clear'; Tw.to(W, { ...WX[k], duration: 3, ease: 'power2.inOut' }); $('timeSub').textContent = `Live · ${Math.round(j.current.temperature_2m)}°C ${k}`; post({ type:'weather', value:k, temp:Math.round(j.current.temperature_2m) }); }).catch(() => { $('timeSub').textContent = 'Live weather unavailable'; Tw.to(W, { ...WX.clear, duration: 2 }); }); }
+  else { wxName = name; $('timeSub').textContent = ''; post({ type:'weather', value:name }); Tw.kill(W); Tw.to(W, { ...WX[name], duration: silent ? .01 : 3.2, ease: 'power2.inOut' }); }
   document.querySelectorAll('[data-weather]').forEach(b => b.classList.toggle('on', b.dataset.weather === wxName)); envDirty = true;
 }
 let seasonReq = 'auto';
@@ -958,7 +959,7 @@ function updateRoute(dt) {
   for (const m of [R.ribM, R.beam.material, ...R.rings.map(r => r.material)]) m.uniforms.uA.value = f;
 }
 const OV = { pos: [238, 226, 344], tgt: [-8, 0, 8] };
-let idleT = 0; const AUTO = { on: Q.has('embed') && Q.get('autoorbit') !== '0', delay: 14 };
+let idleT = 0; const REDUCED_MOTION = matchMedia?.('(prefers-reduced-motion: reduce)').matches === true; const AUTO = { on: !REDUCED_MOTION && Q.has('embed') && Q.get('autoorbit') !== '0', delay: 14 };
 function flyTo(pos, tgt, dur = 2.2) { idleT = 0; Tw.kill(camera.position); Tw.kill(controls.target); Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power3.inOut' }); Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power3.inOut' }); }
 controls.addEventListener('start', () => { idleT = 0; Tw.kill(camera.position); Tw.kill(controls.target); tour.on = false; $('btnTour').classList.remove('on'); });
 function select(id, fly = true) {
@@ -996,8 +997,8 @@ async function initPhysics() {
   P(new THREE.BoxGeometry(1.9, .7, 4.2), bm, 0, .7, 0); P(new THREE.BoxGeometry(1.6, .62, 2.1), gm, 0, 1.3, .3); P(new THREE.BoxGeometry(.9, .12, 1.2), bm, 0, 1.66, .3);
   const hl = new THREE.MeshStandardMaterial({color:'#403c34',roughness:.18,metalness:.08,emissive:'#ffe2b0',emissiveIntensity:0});drive.headLampMat=hl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.19,.045),hl,x,.78,-2.115));
   const tl = new THREE.MeshStandardMaterial({color:'#4a080b',roughness:.28,metalness:.04,emissive:'#ff1b24',emissiveIntensity:0});drive.tailLampMat=tl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.18,.045),tl,x,.78,2.115));
-
-  // v4: headlights are additive light-cone + ground-pool meshes (no SpotLights: those made *every* material loop over extra lights).  drive.beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uI: { value: 0 }, uCol: { value: new Col('#ffe4b5') } },
+  // v4: headlights are additive light-cone + ground-pool meshes (no SpotLights: those made *every* material loop over extra lights).
+  drive.beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uI: { value: 0 }, uCol: { value: new Col('#ffe4b5') } },
     vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv=uv; vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.); vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }',
     fragmentShader: 'uniform float uI; uniform vec3 uCol; varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ float f=pow(abs(dot(normalize(vN),normalize(vV))),1.5); gl_FragColor=vec4(uCol*pow(vUv.y,1.4)*f*.5*uI,1.); }' });
   for (const x of [-.64, .64]) { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.12, 3.4, 26, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, -13), drive.beamMat); cone.position.set(x, .8, -2.1); cone.frustumCulled = false; g.add(cone); }
@@ -1097,7 +1098,9 @@ function wireUI() {
 let last = performance.now(), fAcc = 0, fN = 0, lastAdj = 0, clkT = 0;
 let frameNo = 0, hoverT = 0, lastAz = 9; const needle = $('compassNeedle');
 function frame(now) {
-  requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
+  frameId = 0;
+  if (renderPaused) return;
+  frameId = requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
   camDist = camera.position.distanceTo(controls.target);
   idleT += dt; controls.autoRotate = AUTO.on && !ST.sel && !drive.on && !tour.on && idleT > AUTO.delay; controls.autoRotateSpeed = .35;
@@ -1133,11 +1136,38 @@ async function boot() {
   flyTo(OV.pos, OV.tgt, 3.4); if (CFG.building && BLD[String(CFG.building).toUpperCase()]) setTimeout(() => select(String(CFG.building).toUpperCase()), 1800);
   if (DEBUG) console.info('Davis twin ready', { tier: tierName, pr });
 }
-const post = m => { try { if (parent !== window) parent.postMessage({ source: 'davis-twin', ...m }, '*'); } catch {} };
+const post = m => { try { if (parent !== window) parent.postMessage({ source: 'davis-twin', ...m }, HOST_ORIGIN); } catch {} };
 addEventListener('davis:select', e => post({ type: 'select', id: e.detail.id }));
 window.DavisTwin = window.CampusTwin = { select: id => select(id ? String(id).toUpperCase() : null), showRoute: id => select(String(id).toUpperCase()), reset: () => select(null), setAccent, setTime, setWeather: n => setWeather(n), setSeason: s => setSeason(s), drive: toggleDrive, buildings: BUILDINGS.map(b => b.id), on: (ev, fn) => addEventListener('davis:' + ev, e => fn(e.detail)) };
-addEventListener('message', e => { const d = e.data; if (!d || typeof d !== 'object') return; if (d.type === 'campus:select' || d.type === 'davis:select') select(d.id ? String(d.id).toUpperCase() : null); if (d.type === 'campus:accent') setAccent(d.value); if (d.type === 'campus:autoorbit') { AUTO.on = !!d.value; idleT = 0; } if (d.type === 'campus:weather') setWeather(d.value); if (d.type === 'campus:season') setSeason(d.value); if (d.type === 'campus:time') setTime(d.value); });
-requestAnimationFrame(frame);
+let renderPaused = false, frameId = 0;
+const disposeTwin = () => {
+  try { if (envRT) envRT.dispose(); } catch {}
+  try { pmrem.dispose(); } catch {}
+  try { renderer.dispose(); } catch {}
+};
+addEventListener('message', e => {
+  if (e.source !== parent || e.origin !== HOST_ORIGIN) return;
+  const d = e.data;
+  if (!d || typeof d !== 'object' || typeof d.type !== 'string') return;
+  if (d.type === 'campus:select' || d.type === 'davis:select') select(d.id ? String(d.id).toUpperCase() : null);
+  else if (d.type === 'campus:reset') select(null);
+  else if (d.type === 'campus:accent' && typeof d.value === 'string') setAccent(d.value);
+  else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
+  else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; idleT = 0; }
+  else if (d.type === 'campus:weather' && typeof d.value === 'string') setWeather(d.value);
+  else if (d.type === 'campus:season' && typeof d.value === 'string') setSeason(d.value);
+  else if (d.type === 'campus:time') setTime(d.value);
+  else if (d.type === 'campus:routeVisible') { if (R.grp) R.grp.visible = !!d.value && !!R.curve; }
+  else if (d.type === 'campus:resize') resize();
+  else if (d.type === 'campus:visibility') { renderPaused = d.value === false; if (!renderPaused && !frameId) frameId = requestAnimationFrame(frame); }
+});
+addEventListener('visibilitychange', () => {
+  renderPaused = document.hidden;
+  if (!renderPaused && !frameId) frameId = requestAnimationFrame(frame);
+});
+addEventListener('pagehide', disposeTwin, { once: true });
+if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, updateEnv, updatePrecip, resize };
+frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
 
 
