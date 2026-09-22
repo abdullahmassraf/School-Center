@@ -1,0 +1,46 @@
+import { chromium } from 'playwright';
+import { spawn } from 'node:child_process';
+
+const server = spawn('python3',['-m','http.server','8787','--bind','127.0.0.1'],{stdio:'ignore'});
+try {
+  const browser = await chromium.launch({headless:true,args:['--use-gl=swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-dev-shm-usage']});
+  const page = await browser.newPage({viewport:{width:1365,height:900},deviceScaleFactor:1});
+  const errors=[];
+  page.on('pageerror',e=>errors.push('pageerror: '+e.message));
+  page.on('console',m=>{if(m.type()==='error')errors.push('console: '+m.text())});
+  await page.goto('http://127.0.0.1:8787/index.html?map-smoke=1&debug=1',{waitUntil:'domcontentloaded'});
+  const deadline=Date.now()+45000;
+  let state=null;
+  while(Date.now()<deadline){
+    state=await page.evaluate(()=>{
+      const m=window.__SC_CAMPUS_MAP_3D__, w=m?.frame?.contentWindow, d=w?.__DAVIS_TWIN_DEBUG__;
+      return {managerReady:!!m?.ready,frameReady:!!w?.DavisTwin,ids:w?.DavisTwin?.buildings||[],sceneChildren:d?.scene?.children?.length||0,renderCalls:d?.renderer?.info?.render?.calls||0,assets:d?.ASSET_STATE||null,trafficMode:d?.traffic?.mode||null,transitCount:d?.transit?.vehicles?.length||0};
+    });
+    if(state.managerReady&&state.frameReady&&state.sceneChildren>5&&state.renderCalls>0) break;
+    await page.waitForTimeout(500);
+  }
+  if(!state?.managerReady||!state?.frameReady||state.sceneChildren<=5||state.renderCalls<=0) throw new Error('map not render-ready: '+JSON.stringify(state));
+  for(const id of ['J','H','M','B','C','A']) if(!state.ids.includes(id)) throw new Error('missing building '+id);
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.focus('H')); await page.waitForTimeout(1200);
+  const focused=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.sel);
+  if(focused!=='H') throw new Error('focus failed');
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.showRoute('H')); await page.waitForTimeout(300);
+  const route=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.R.grp.visible);
+  if(!route) throw new Error('route failed');
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.reset()); await page.waitForTimeout(300);
+  const reset=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.sel);
+  if(reset!==null) throw new Error('reset failed');
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setAccent('#ff4fd8')); await page.waitForTimeout(150);
+  const accent=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.accent);
+  if(!accent) throw new Error('accent failed');
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setWeather('rain')); await page.waitForTimeout(150);
+  const rain=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.W.rain);
+  if(!(rain>0)) throw new Error('weather failed');
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(300);
+  const night=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night);
+  if(!(night>0.2)) throw new Error('time failed: '+night);
+  await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
+  console.log('MAP SMOKE PASS',JSON.stringify({state,focused,route,reset,accent,rain,night,errors}));
+  if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
+  await browser.close();
+} finally { server.kill('SIGTERM'); }
