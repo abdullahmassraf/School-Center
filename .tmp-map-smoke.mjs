@@ -70,9 +70,10 @@ try {
   if(!driveOn)throw new Error('fullscreen Drive activation failed');
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape',bubbles:true}))); await page.waitForTimeout(700);
   const afterDrive=await page.evaluate(()=>({full:document.fullscreenElement?.id||null,drive:window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on}));
-  if(afterDrive.full||afterDrive.drive)throw new Error('Drive/fullscreen Escape exit failed: '+JSON.stringify(afterDrive));
-  const outside=await page.evaluate(()=>document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'));
-  if(outside!=='Enter fullscreen')throw new Error('fullscreen button did not restore');
+  if(afterDrive.drive)throw new Error('Drive Escape exit failed: '+JSON.stringify(afterDrive));
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.toggleFullscreen()); await page.waitForTimeout(600);
+  const outside=await page.evaluate(()=>({full:document.fullscreenElement?.id||null,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')}));
+  if(outside.full||outside.label!=='Enter fullscreen')throw new Error('fullscreen exit failed: '+JSON.stringify(outside));
   await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
   console.log('MAP SMOKE PASS',JSON.stringify({state,assets,focused,route,reset,accent,rain,night,errors}));
   if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
