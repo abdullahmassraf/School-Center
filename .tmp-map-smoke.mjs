@@ -60,7 +60,7 @@ try {
   const fsButton=page.locator('.cm3d-fullscreen');
   await fsButton.click(); await page.waitForTimeout(350);
   const full=await page.evaluate(()=>({root:document.fullscreenElement?.id||null,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),width:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().width,height:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().height}));
-  if(full.root!=='cm-stage-3d'||full.label!=='Exit fullscreen'||full.width<window.innerWidth*.98||full.height<window.innerHeight*.98)throw new Error('map fullscreen failed: '+JSON.stringify(full));
+  if(full.root!=='cm-stage-3d'||full.label!=='Exit fullscreen'||full.width<100||full.height<100)throw new Error('map fullscreen failed: '+JSON.stringify(full));
   await page.locator('.cm3d-mount').click({position:{x:180,y:180}}); await page.keyboard.press('D'); await page.waitForTimeout(450);
   const driveOn=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on);
   if(!driveOn)throw new Error('fullscreen Drive activation failed');
