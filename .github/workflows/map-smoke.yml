@@ -25,3 +25,7 @@ jobs:
 
       - name: Run Davis map acceptance suite
         run: node test_campus_map_3d.js
+
+
+      - name: Run Davis light-quality probe
+        run: node probe_light_quality.mjs
