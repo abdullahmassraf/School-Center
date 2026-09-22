@@ -20,8 +20,26 @@ try{
  if(s.car!=='loaded'||s.bus!=='loaded'||s.schoolBus!=='loaded'||s.traffic!=='packed'||s.transit!==2)throw new Error('asset integration failed: '+JSON.stringify(s));
  const dims=await page.evaluate(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame;return {w:f.clientWidth,h:f.clientHeight}});
  if(dims.w<500||dims.h<400)throw new Error('map dimensions invalid: '+JSON.stringify(dims));
+
+ await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.DavisTwin.drive());
+ const driveDeadline=Date.now()+12000; let driveState=null;
+ while(Date.now()<driveDeadline){
+   driveState=await page.evaluate(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__; return {on:!!d?.drive?.on,packed:!!d?.drive?.packedCar,visible:!!d?.drive?.packedCar?.visible}});
+   if(driveState.on&&driveState.packed)break;
+   await page.waitForTimeout(250);
+ }
+ if(!driveState?.on||!driveState?.packed)throw new Error('packed drive car did not initialize: '+JSON.stringify(driveState));
+ const carBounds=await page.evaluate(()=>{
+   const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;
+   const box=new d.THREE.Box3().setFromObject(d.drive.packedCar), size=box.getSize(new d.THREE.Vector3()), center=box.getCenter(new d.THREE.Vector3());
+   return {size:{x:size.x,y:size.y,z:size.z},center:{x:center.x,y:center.y,z:center.z}};
+ });
+ const horizontal=Math.max(carBounds.size.x,carBounds.size.z), vertical=carBounds.size.y;
+ if(horizontal<2.0||horizontal>7.5||vertical<0.45||vertical>2.5)throw new Error('packed car dimensions invalid: '+JSON.stringify(carBounds));
+ await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.DavisTwin.drive());
+ await page.waitForTimeout(350);
  await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-assetfix.png'});
- console.log('ASSET MAP PASS',JSON.stringify({s,dims,errs}));
+ console.log('ASSET MAP PASS',JSON.stringify({s,dims,driveState,carBounds,errs}));
  if(errs.length)throw new Error(errs.join(' | '));
  await browser.close();
 }finally{server.kill('SIGTERM')}
