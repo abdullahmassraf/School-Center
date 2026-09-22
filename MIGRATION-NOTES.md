@@ -117,6 +117,13 @@ Real-device items still require Chrome desktop, Chrome Android and Safari iOS ac
 - [ ] draw-call measurements from `?debug`
 - [ ] screenshots for overview, J/H/M/B/C/A, night and rain
 - [ ] 20 open/close lifecycle cycle check
+
+### Vehicle/lifecycle follow-up verification
+
+- [x] Full browser sequence reaches native wheel mapping, Drive chase, cinematic overview/selection idle, manual interaction suppression, and zero console errors.
+- [x] Render-loop resume now cancels stale RAF handles before scheduling a new frame after visibility/fullscreen protocol events.
+- [x] Existing host HUD interactions use the validated `campus:user-interaction` protocol; child-side manual drag handling remains authoritative.
+
 - [ ] live GitHub Pages smoke test after merge
 
 ## Rollback
@@ -172,10 +179,10 @@ Added regression assertions for map-stage fullscreen geometry/overflow, compact 
 ## Supplied vehicle / public transport asset integration
 
 ### Asset paths
-- `assets/campus/cars/NormalCar1.json.gz.b64` — lightweight runtime representation of the supplied NormalCar1 asset.
-- `assets/campus/transit/Bus.json.gz.b64` — lightweight runtime representation of the supplied Bus asset.
-- `assets/campus/transit/SchoolBus.json.gz.b64` — lightweight runtime representation of the supplied SchoolBus asset.
-- `assets/campus/ASSET-SOURCES.md` — source/licensing and conversion notes.
+- `assets/campus/cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj` + `.mtl` — native road-car source.
+- `assets/campus/transit/Public Transport Pack - Feb 2017/OBJ/Bus.obj` + `.mtl` — native bus source.
+- `assets/campus/transit/Public Transport Pack - Feb 2017/OBJ/SchoolBus.obj` + `.mtl` — native school-bus source.
+- `assets/campus/ASSET-SOURCES.md` — source/licensing and hierarchy notes.
 
 ### Placement/orientation rules
 The supplied car model's front is local +Z, while the existing Drive physics uses local -Z. The player car visual is therefore rotated 180° relative to the physics body so its headlights remain at the front and taillights remain at the rear.
@@ -185,28 +192,26 @@ Parked cars reuse the existing traced parking-lot rows and yaw logic. Moving car
 The Bus and SchoolBus source models are length-oriented along +X. They are rotated ±90° around Y so their fronts align with the two directions of the campus bus corridor. Two vehicles are placed in opposite lanes and circulate between the north/south road limits, slowing/dwelling at the existing `BUS_STOP` location. No arbitrary traffic lights were inserted into the scene because the current environment has no appropriate signalized intersection for them; the pack's bus assets are used where they have a clear contextual role.
 
 ### Runtime format
-To preserve the repo's static GitHub Pages deployment and avoid a new build/dependency step, reduced vehicle geometry is stored as gzip-compressed base64 JSON and converted directly into Three.js BufferGeometry at runtime. A graceful procedural-car fallback remains for browsers that cannot decode the packed asset format.
+The production twin loads the authoritative OBJ/MTL files directly with Three.js `OBJLoader` and `MTLLoader`. No gzip/base64 conversion, triangle filtering, custom index reconstruction, or vertex sanitization is used. A graceful procedural-car fallback remains only for a failed optional asset request.
 
 ### Performance choice
-Parked and road cars are rendered through `THREE.InstancedMesh` primitives extracted from one shared NormalCar1 source scene, so many vehicles share GPU geometry/material state rather than creating one independent GLTF draw hierarchy per car. The player's Drive vehicle uses one cloned GLTF scene so its light materials can be animated independently.
+Traffic uses cloned vehicle hierarchies with shared underlying OBJ geometry/material resources. This intentionally avoids forcing the multi-material, hierarchy-dependent source model into `THREE.InstancedMesh`; correctness takes priority over a lower draw-call count. The player's Drive vehicle uses a separate cloned source hierarchy so its light materials can be animated independently.
 
-The supplied raycast-vehicle repository was used as an implementation reference for GLTF loading, model/wheel binding patterns and vehicle-camera/light concepts. Its Cannon vehicle implementation was not copied into School Center because the Davis twin already uses Rapier physics and an established control/camera system.
+The supplied raycast-vehicle repository was used as an implementation reference for raycast suspension, wheel transforms, braking, tire marks, and chase-camera/light concepts. Its Cannon vehicle implementation was not copied into School Center because the Davis twin already uses Rapier physics and an established control/camera system.
 
 
-## Map render recovery — 2026-09-22
+## Vehicle geometry correction — 2026-09-22
 
-The blank canvas seen after the vehicle asset deployment was traced to the new vehicle-loader integration being on the twin's top-level module path. The twin had a static GLTFLoader CDN import, which meant a loader/module failure could prevent the entire scene module from executing and leave the host iframe showing only its black canvas.
+The exploded-car pipeline was traced to the custom gzip/base64 vehicle conversion: `sanitizeAssetPart()` applied arbitrary coordinate/edge rejection and expanded accepted indexed triangles into a new unindexed `BufferGeometry`. That discarded valid source surfaces and made the runtime representation diverge from the supplied OBJ. The production twin now uses native Three.js `OBJLoader` + `MTLLoader` against the original repository assets and transforms only the loaded root hierarchy (scale, centering, grounding, and vehicle yaw).
 
-The recovery changes remove that top-level loader dependency. Campus vehicle assets are now shipped as small gzip+base64 JSON payloads derived from the supplied pack geometry, decoded only after the core scene has booted. The payload is converted into Three.js BufferGeometry meshes in the twin. This keeps asset failures isolated from the core renderer and preserves the previous procedural vehicle fallback.
+Production asset paths:
+- `assets/campus/cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj` + `.mtl`
+- `assets/campus/transit/Public Transport Pack - Feb 2017/OBJ/Bus.obj` + `.mtl`
+- `assets/campus/transit/Public Transport Pack - Feb 2017/OBJ/SchoolBus.obj` + `.mtl`
 
-Corrected runtime asset paths:
-- `assets/campus/cars/NormalCar1.json.gz.b64`
-- `assets/campus/transit/Bus.json.gz.b64`
-- `assets/campus/transit/SchoolBus.json.gz.b64`
-
-The source model geometry is normalized before packaging (centered on X/Z and grounded at Y=0). The bus source front is local -X; public transport placement therefore uses +90° for the +Z lane and -90° for the -Z lane so each vehicle faces its travel direction.
-
-The previously committed truncated `.glb.gz.b64` payloads were removed. They were incomplete text payloads and were not safe to keep as runtime assets.
+The source car is local +Z-front and is rotated 180° in the existing Drive visual because that physics body drives toward local -Z. Bus models are local X-length and are rotated ±90° to align each vehicle with the campus Z corridor.
+NormalCar1's native OBJ object groups are used for the player wheel visuals: `NormalCar1_FrontLeftWheel_Cube.007`, `NormalCar1_FrontRightWheel_Cube.008`, and `NormalCar1_BackWheels_Cube.011`. The two front groups receive independent steering plus rolling rotation; the shared rear group receives rolling rotation for both rear wheels. Each group is mounted through a center pivot derived from the loaded Object3D transform, so no vertex data is rewritten.
+The previously committed gzip/base64 JSON payloads remain only as historical recovered files and are not referenced by production runtime. They are not used for loading, conversion, or geometry reconstruction.
 
 
 ## Verified browser recovery

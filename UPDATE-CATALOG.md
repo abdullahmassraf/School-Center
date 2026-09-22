@@ -1,3 +1,29 @@
+## v1.5.6 — Davis campus native vehicle system and Drive lifecycle release
+
+**Date:** 2026-09-22 · **Time:** 15:44 EDT · **Release:** `feat/fix-davis-vehicle-assets`
+
+### What changed
+- Replaced the broken gzip/base64 vehicle geometry reconstruction with the original supplied OBJ/MTL assets loaded by Three.js `MTLLoader` + `OBJLoader`.
+- Road traffic now uses native `NormalCar1.obj`/`.mtl`; transit uses native `Bus.obj`/`.mtl` and `SchoolBus.obj`/`.mtl` with cloned Object3D roots instead of forced instancing.
+- Player Drive uses the real supplied car visual with the existing Rapier physics/control body and RaycastVehicle behavior reference for suspension, steering, rolling, grip and chase-camera integration.
+- Bound the native car groups `NormalCar1_FrontLeftWheel_Cube.007`, `NormalCar1_FrontRightWheel_Cube.008`, and `NormalCar1_BackWheels_Cube.011` to source-derived pivots. Front groups steer and roll; the shared rear group rolls both rear wheels.
+- Preserved supplied light materials for headlights and tail lights, with nighttime illumination and the existing Drive light-cone/brake-light behavior.
+- Fixed fullscreen body-overflow cleanup, stale RAF resumption after visibility/fullscreen changes, Drive warm-up timing, Escape cleanup, and cinematic-idle/manual-pointer interaction state.
+
+### Root cause
+The exploded polygons were introduced before the native-loader migration by custom gzip/base64 decoding followed by `sanitizeAssetPart()` coordinate/edge rejection and unindexed geometry reconstruction. The native OBJ topology was valid; the custom representation was not.
+
+### QA
+- Full desktop Chromium acceptance test passed with native asset HTTP 200 checks, traffic/transit motion, fullscreen, Drive, chase camera, source wheel mapping, wheel steering/rolling, cinematic idle, manual interaction suppression, and zero console errors.
+- Same acceptance sequence passed at 390×844.
+- JavaScript syntax checks passed.
+- Native wheel source audit confirmed the rear OBJ group contains both rear wheels and is correctly animated as one assembly.
+
+### Known limitation
+This recovered workspace does not have Playwright installed, so the Playwright smoke script and screenshot capture were unavailable. Headless Chromium acceptance and object-transform assertions were run instead; no production dependency was added.
+
+---
+
 ## v1.5.5 — Notes/assignments sync stall guard (the "note never reached my tablet" fix)
 
 **Date:** 2026-09-19 · **Supabase project:** vxsphvrvulhbyhqmoeex
