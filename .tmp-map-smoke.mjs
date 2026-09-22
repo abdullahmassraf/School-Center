@@ -54,7 +54,7 @@ try {
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setWeather('rain')); await page.waitForTimeout(900);
   const rain=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.W.rain);
   if(!(rain>0)) throw new Error('weather failed');
-  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(300);
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(2200);
   const night=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night);
   if(!(night>0.2)) throw new Error('time failed: '+night);
   await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
