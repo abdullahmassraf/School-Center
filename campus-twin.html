@@ -233,9 +233,15 @@ const $ = id => document.getElementById(id);
 
 const CAMPUS_ASSET_ROOT = 'assets/campus/';
 const CAMPUS_ASSETS = Object.freeze({
-  normalCar: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.glb.gz.b64.', chunks: 3 }),
-  bus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/Bus.glb.gz.b64.', chunks: 2 }),
-  schoolBus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.glb.gz.b64.', chunks: 2 })
+  normalCar: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.obj.gz.b64.', chunks: 8, palette: {
+    Black: '#11151a', Blue: '#4f83c4', Grey: '#747a82', Headlights: '#fff3a6', TailLights: '#d83a32', Windows: '#111a24'
+  }}),
+  bus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/Bus.obj.gz.b64.', chunks: 3, palette: {
+    Top: '#4d92d1', Bottom: '#35414d', Bumper: '#2b3138', Details: '#4b5964', Windows: '#173a4d', Material: '#e7ebef', Lights: '#fff0a0'
+  }}),
+  schoolBus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.obj.gz.b64.', chunks: 4, palette: {
+    Yellow: '#f2c51d', Wheel: '#20252b', Windows: '#173a4d', Bumper: '#2b3138', Details: '#4b5964', Lights: '#fff0a0'
+  }})
 });
 const ASSET_STATE = {
   format: 'gzip+base64-glb',
@@ -268,9 +274,17 @@ async function fetchAssetText(asset) {
       return res.text();
     }));
     return parts.join('');
-  } finally {
-    clearTimeout(timer);
+  } finally { clearTimeout(timer); }
+}
+function makeAssetMtl(asset) {
+  const lines = ['# Davis Campus runtime material map'];
+  for (const [name, color] of Object.entries(asset.palette || {})) {
+    const n = String(color).replace('#', '');
+    const r = parseInt(n.slice(0,2),16)/255, g = parseInt(n.slice(2,4),16)/255, b = parseInt(n.slice(4,6),16)/255;
+    lines.push(`newmtl ${name}`, 'Ns 64', 'Ka 1 1 1', `Kd ${r.toFixed(6)} ${g.toFixed(6)} ${b.toFixed(6)}`,
+      'Ks 0.25 0.25 0.25', `Ke ${name.toLowerCase().includes('light') ? r.toFixed(6) + ' ' + g.toFixed(6) + ' ' + b.toFixed(6) : '0 0 0'}`, 'd 1', 'illum 2', '');
   }
+  return lines.join('\n');
 }
 async function loadPackedModel(asset) {
   const key = asset.base;
@@ -278,12 +292,30 @@ async function loadPackedModel(asset) {
   const promise = (async () => {
     const packed = decodeBase64Bytes(await fetchAssetText(asset));
     const bytes = await unpackGzip(packed);
-    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-    const loader = new GLTFLoader();
-    const gltf = await new Promise((resolve, reject) => loader.parse(bytes, '', resolve, reject));
-    if (!gltf?.scene) throw new Error(`Invalid GLB scene payload: ${key}`);
-    preparePackedRoot(gltf.scene);
-    return gltf.scene;
+    const objText = new TextDecoder().decode(bytes);
+    const [{ OBJLoader }, { MTLLoader }] = await Promise.all([
+      import('three/addons/loaders/OBJLoader.js'),
+      import('three/addons/loaders/MTLLoader.js')
+    ]);
+    const materials = new MTLLoader().parse(makeAssetMtl(asset), '');
+    materials.preload();
+    const root = new OBJLoader().setMaterials(materials).parse(objText);
+    preparePackedRoot(root);
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(root), center = box.getCenter(new V3());
+    root.position.x -= center.x; root.position.z -= center.z; root.position.y -= box.min.y;
+    root.updateMatrixWorld(true);
+    root.traverse(m => {
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.filter(Boolean).forEach(mat => {
+        mat.needsUpdate = true;
+        if ('roughness' in mat) mat.roughness = /window/i.test(mat.name || '') ? .23 : .48;
+        if ('metalness' in mat) mat.metalness = /wheel|black|grey|bumper|details/i.test(mat.name || '') ? .35 : .08;
+        if ('emissiveIntensity' in mat && /light|head|tail/i.test(mat.name || '')) mat.emissiveIntensity = .9;
+      });
+    });
+    return root;
   })();
   packedCache.set(key, promise);
   try { return await promise; } catch (e) { packedCache.delete(key); throw e; }
