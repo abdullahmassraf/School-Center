@@ -49,20 +49,23 @@ export class CampusMap3DManager {
     addEventListener('message',this._onMessage);
     this._onVisibility=()=>this._post({type:'campus:visibility',value:!document.hidden});
     document.addEventListener('visibilitychange',this._onVisibility);
+    this._syncPageFullscreen=active=>{
+      document.documentElement.classList.toggle('cm-map-fullscreen',active);
+      if(active){
+        if(this._pageOverflowBeforeFullscreen===undefined)this._pageOverflowBeforeFullscreen=document.body.style.overflow;
+        document.body.style.overflow='hidden';
+      }else{
+        const restore=this._pageOverflowBeforeFullscreen===undefined?'':this._pageOverflowBeforeFullscreen;
+        document.body.style.overflow=restore;
+        this._pageOverflowBeforeFullscreen=undefined;
+      }
+    };
     this._onFullscreenChange=()=>{
       const active=document.fullscreenElement===this.fullscreenRoot;
       this._syncFullscreenState(active);
+      this._syncPageFullscreen(active);
       this._post({type:'campus:fullscreen-state',value:active});
       requestAnimationFrame(()=>this._post({type:'campus:resize'}));
-      document.documentElement.classList.toggle('cm-map-fullscreen',active);
-      const previousOverflow=this._pageOverflowBeforeFullscreen;
-      if(active){
-        if(previousOverflow===undefined)this._pageOverflowBeforeFullscreen=document.body.style.overflow;
-        document.body.style.overflow='hidden';
-      }else{
-        document.body.style.overflow=previousOverflow??this._pageOverflowBeforeFullscreen??'';
-        this._pageOverflowBeforeFullscreen=undefined;
-      }
     };
     document.addEventListener('fullscreenchange',this._onFullscreenChange);
     this._mo=new MutationObserver(()=>this.refreshAccent());
@@ -109,7 +112,10 @@ export class CampusMap3DManager {
         await this.fullscreenRoot.requestFullscreen();
       }
     }catch(_){}
-    this._syncFullscreenState(document.fullscreenElement===this.fullscreenRoot);
+    const active=document.fullscreenElement===this.fullscreenRoot;
+    this._syncFullscreenState(active);
+    this._syncPageFullscreen?.(active);
+    if(!active) requestAnimationFrame(()=>this._post({type:'campus:resize'}));
   }
 
   _installLegacyHud(){
