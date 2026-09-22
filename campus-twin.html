@@ -1503,7 +1503,7 @@ function setDrivePerformanceMode(active) {
   }
 }
 function fitNativeTransitWheels(root, kind) {
-  const bodyPattern = kind === 'school-bus' ? /SchoolBus_Cube\\.001/i : /Bus_Cube\\.001/i;
+  const bodyPattern = kind === 'school-bus' ? /SchoolBus_Cube\.001/i : /Bus_Cube\.001/i;
   let body = null; const wheelNodes = [];
   root.traverse(node => {
     if (!body && node.isMesh && bodyPattern.test(String(node.name || ''))) body = node;
@@ -1514,7 +1514,7 @@ function fitNativeTransitWheels(root, kind) {
   return wheelNodes.map((node, index) => {
     const pivot = createWheelPivot(node, node.name);
     const wheelBox = new THREE.Box3().setFromObject(node), wheelSize = wheelBox.getSize(new V3());
-    const nativeDiameter = Math.max(wheelSize.y, wheelSize.z);
+    const nativeDiameter = Math.max(wheelSize.x, wheelSize.y, wheelSize.z);
     const fit = nativeDiameter > .001 ? desiredDiameter / nativeDiameter : .25;
     pivot.scale.multiplyScalar(fit);
     pivot.userData.nativeWheelFit = fit;
@@ -1672,7 +1672,7 @@ function driveStep(dt) {
   const d = drive, k = d.keys, b = d.body, v = b.linvel(), r = b.rotation(); d.q.set(r.x, r.y, r.z, r.w); d.fwd.set(0, 0, -1).applyQuaternion(d.q);
   const sf0 = v.x * d.fwd.x + v.z * d.fwd.z, th = (k.w ? 1 : 0) - (k.s ? 1 : 0); let sf = sf0 + th * (th * sf0 < 0 ? 38 : 22) * dt; sf *= Math.exp(-(th ? .12 : .8) * dt); sf = clamp(sf, -9, 26);
   const lx = (v.x - d.fwd.x * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt), lz = (v.z - d.fwd.z * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt);
-  b.setLinvel({ x: d.fwd.x * sf + lx, y: v.y, z: d.fwd.z * sf + lz }, true); b.setAngvel({ x: 0, y: ((k.a ? 1 : 0) - (k.d ? 1 : 0)) * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
+  b.setLinvel({ x: d.fwd.x * sf + lx, y: v.y, z: d.fwd.z * sf + lz }, true);
   d.steer += ((((k.a ? 1 : 0) - (k.d ? 1 : 0)) * .42) - d.steer) * (1 - Math.exp(-dt * 10));
   b.setAngvel({ x: 0, y: d.steer * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
   d.acc += dt;
@@ -1697,10 +1697,19 @@ function driveStep(dt) {
     if (w.index < 2) w.pivot.rotateY(d.steer);
     w.pivot.rotateX(w.roll);
   });
-  d.props.forEach(({ im, bodies }) => { bodies.forEach((pb, i) => { const p = pb.translation(), q = pb.rotation(); d.m.compose(TV.set(p.x, p.y, p.z), TQ.set(q.x, q.y, q.z, q.w), d.sc); im.setMatrixAt(i, d.m); }); im.instanceMatrix.needsUpdate = true; });
+  d.props.forEach(({ im, bodies }) => {
+    let changed = false;
+    bodies.forEach((pb, i) => {
+      if (typeof pb.isSleeping === 'function' && pb.isSleeping()) return;
+      const p = pb.translation(), q = pb.rotation();
+      d.m.compose(TV.set(p.x, p.y, p.z), TQ.set(q.x, q.y, q.z, q.w), d.sc);
+      im.setMatrixAt(i, d.m); changed = true;
+    });
+    if (changed) im.instanceMatrix.needsUpdate = true;
+  });
   // Follow only by translating the orbit rig with the car. OrbitControls remains fully active, so dragging
   // spins around the vehicle and the wheel/pinch gesture zooms without fighting an auto-chase camera.
-  d.anchor.set(t.x,t.y+1.05,t.z);
+  d.anchor.set(d.renderPos.x,d.renderPos.y+1.05,d.renderPos.z);
   if (!d.orbitReady) { d.prevAnchor.copy(d.anchor); d.orbitReady=true; }
   driveCamera.delta.copy(d.anchor).sub(d.prevAnchor);
   camera.position.add(driveCamera.delta);
@@ -1720,9 +1729,9 @@ function driveStep(dt) {
     const effectiveDistance=clamp(driveCamera.distance+speedFactor*driveCamera.speedDistance,driveCamera.minDistance,driveCamera.maxDistance+driveCamera.speedDistance);
     d.fwd.normalize();
     driveCamera.desiredPos.copy(d.anchor).addScaledVector(d.fwd,-effectiveDistance);
-    driveCamera.desiredPos.y=t.y+3.5+effectiveDistance*.15;
+    driveCamera.desiredPos.y=d.renderPos.y+3.5+effectiveDistance*.15;
     driveCamera.desiredTarget.copy(d.anchor).addScaledVector(d.fwd,4.5);
-    driveCamera.desiredTarget.y=t.y+1.2;
+    driveCamera.desiredTarget.y=d.renderPos.y+1.2;
     const followAlpha=1-Math.exp(-dt*4.2),targetAlpha=1-Math.exp(-dt*6.2);
     camera.position.lerp(driveCamera.desiredPos,followAlpha*driveCamera.chaseStrength);
     controls.target.lerp(driveCamera.desiredTarget,targetAlpha*driveCamera.chaseStrength);
@@ -1857,7 +1866,7 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, T.dpr);
+  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, drivePerf.active ? drivePerf.maxPr : T.dpr);
     if (now - lastAdj > 2000) {
       if (avg > 1 / 38) { if (pr > .7) { pr = Math.max(.7, pr - .2); resize(); } else if (FX.bloom) FX.bloom = false; else if (FX.dof > 0) FX.dof = 0; else FX.se = Math.min(6, FX.se + 1); lastAdj = now; }   // degrade gracefully
       else if (avg < 1 / 57 && pr < cap - .01) { pr = Math.min(cap, pr + .1); resize(); lastAdj = now; }
@@ -1950,7 +1959,7 @@ addEventListener('visibilitychange', () => {
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, drive, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  interaction, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
