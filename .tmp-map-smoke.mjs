@@ -21,6 +21,24 @@ try {
   }
   if(!state?.managerReady||!state?.frameReady||state.sceneChildren<=5||state.renderCalls<=0) throw new Error('map not render-ready: '+JSON.stringify(state));
   for(const id of ['J','H','M','B','C','A']) if(!state.ids.includes(id)) throw new Error('missing building '+id);
+
+  const assetDeadline=Date.now()+12000;
+  let assets=null;
+  while(Date.now()<assetDeadline){
+    assets=await page.evaluate(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{car:d?.ASSET_STATE?.car,bus:d?.ASSET_STATE?.transit?.bus,schoolBus:d?.ASSET_STATE?.transit?.schoolBus,traffic:d?.traffic?.mode,transit:d?.transit?.vehicles?.length||0}});
+    if(assets.car==='loaded'&&assets.bus==='loaded'&&assets.schoolBus==='loaded'&&assets.traffic==='packed'&&assets.transit===2) break;
+    await page.waitForTimeout(250);
+  }
+  if(!assets||assets.car!=='loaded'||assets.bus!=='loaded'||assets.schoolBus!=='loaded'||assets.traffic!=='packed'||assets.transit!==2)
+    throw new Error('asset integration failed: '+JSON.stringify(assets));
+
+  for(const id of ['J','H','M','B','C','A']){
+    await page.evaluate(id=>window.__SC_CAMPUS_MAP_3D__.focus(id),id); await page.waitForTimeout(550);
+    const picked=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.sel);
+    if(picked!==id) throw new Error('building selection failed for '+id+': '+picked);
+  }
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.reset()); await page.waitForTimeout(300);
+
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.focus('H')); await page.waitForTimeout(1200);
   const focused=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.sel);
   if(focused!=='H') throw new Error('focus failed');
@@ -30,9 +48,9 @@ try {
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.reset()); await page.waitForTimeout(300);
   const reset=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.sel);
   if(reset!==null) throw new Error('reset failed');
-  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setAccent('#ff4fd8')); await page.waitForTimeout(150);
-  const accent=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.accent);
-  if(!accent) throw new Error('accent failed');
+  await page.evaluate(()=>{document.documentElement.style.setProperty('--accent','#ff4fd8'); window.__SC_CAMPUS_MAP_3D__.refreshAccent();}); await page.waitForTimeout(150);
+  const accent=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.accent?.getHexString?.() || null);
+  if(accent!=='ff4fd8') throw new Error('accent failed: '+accent);
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setWeather('rain')); await page.waitForTimeout(150);
   const rain=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.W.rain);
   if(!(rain>0)) throw new Error('weather failed');
@@ -40,7 +58,7 @@ try {
   const night=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night);
   if(!(night>0.2)) throw new Error('time failed: '+night);
   await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
-  console.log('MAP SMOKE PASS',JSON.stringify({state,focused,route,reset,accent,rain,night,errors}));
+  console.log('MAP SMOKE PASS',JSON.stringify({state,assets,focused,route,reset,accent,rain,night,errors}));
   if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
   await browser.close();
 } finally { server.kill('SIGTERM'); }
