@@ -1130,7 +1130,7 @@ function updateEnv(dt) {
   if (Math.abs(ST.wet - (ST._w || 0)) > .004 || Math.abs(ST.day - (ST._d || 0)) > .004) { ST._w = ST.wet; ST._d = ST.day; ST.wetMix(); }
   ST.lampPool && (ST.lampPool.opacity = ST.night * .55, ST.lampHead.color.setRGB(2.6, 2.1, 1.3).multiplyScalar(.25 + .75 * ST.night));
   for (const id in BG) { const bd = BG[id]; bd.halo.material.opacity = ST.night * .55; }
-  if (traffic) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
+  if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
 function updateShadow() {
