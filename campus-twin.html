@@ -1380,13 +1380,18 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
   interaction.targetStrength = 0;
   resetCinematicEnvelope();
   Tw.kill(camera.position); Tw.kill(controls.target);
+  let settled = false;
+  let timer = 0;
   const done = () => {
-    if (interaction.transitionToken !== token || !interaction.cameraTransition) return;
+    if (settled || interaction.transitionToken !== token) return;
+    settled = true;
+    clearTimeout(timer);
     interaction.cameraTransition = false;
     onComplete?.();
   };
-  Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power2.inOut' });
-  Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power2.inOut', onComplete: done });
+  timer = setTimeout(done, Math.max(0, dur) * 1000 + 160);
+  Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power2.inOut', onComplete: done });
+  Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power2.inOut' });
 }
 controls.addEventListener('start', () => {
   interaction.controlsActive = true; markUserInteraction();
