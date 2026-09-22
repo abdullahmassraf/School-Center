@@ -1,0 +1,26 @@
+name: Davis vehicle asset smoke test
+
+on:
+  push:
+    branches:
+      - fix/campus-vehicle-indexing
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.52.0
+      - run: npx playwright install --with-deps chromium
+      - run: node .tmp-map-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: davis-assetfix
+          path: /tmp/davis-assetfix.png
