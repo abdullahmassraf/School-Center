@@ -800,7 +800,7 @@ async function buildCars() {
       for (let k = 0; k < 3; k++) moving.push({ ...ln, t: r(), v: 11 + r() * 6, col: CAR_COLS[(li * 3 + k) % CAR_COLS.length], y: 0.02, scale: .96 + r() * .05 });
     });
     const vehicles = parked.concat(moving);
-    const set = makePackedInstanceSet(gltf.scene, vehicles);
+    const set = makePackedInstanceSet(gltf, vehicles);
     set.vehicles = vehicles;
     traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles };
     setAssetState('car', 'loaded');
@@ -843,7 +843,7 @@ async function buildPublicTransport() {
     const loaded = await Promise.all(specs.map(async spec => ({ spec, gltf: await loadPackedModel(spec.url) })));
     transit = { vehicles: [] };
     loaded.forEach(({ spec, gltf }) => {
-      const root = clonePackedRoot(gltf.scene);
+      const root = clonePackedRoot(gltf);
       root.position.set(spec.x, 0.04, spec.z);
       root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
       root.scale.setScalar(spec.scale);
@@ -1431,7 +1431,7 @@ async function initPhysics() {
   // rotated 180° in-place to keep headlights/taillights on the correct ends.
   try {
     const gltf = await loadPackedModel(CAMPUS_ASSETS.normalCar);
-    const packed = clonePackedRoot(gltf.scene);
+    const packed = clonePackedRoot(gltf);
     packed.rotation.y = Math.PI;
     packed.position.set(0, 0, 0);
     g.add(packed);
