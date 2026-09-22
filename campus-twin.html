@@ -1317,11 +1317,18 @@ function updateCinematicCamera(dt, now) {
   camera.lookAt(controls.target);
 }
 
+let flyToken = 0;
 function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
+  const token = ++flyToken;
   interaction.cameraTransition = true;
   markUserInteraction();
   Tw.kill(camera.position); Tw.kill(controls.target);
-  const done = () => { interaction.cameraTransition = false; markUserInteraction(); onComplete?.(); };
+  const done = () => {
+    if (token !== flyToken) return;
+    interaction.cameraTransition = false;
+    markUserInteraction();
+    onComplete?.();
+  };
   Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power3.inOut' });
   Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power3.inOut', onComplete: done });
 }
