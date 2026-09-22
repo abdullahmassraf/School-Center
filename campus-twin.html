@@ -776,7 +776,7 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
-    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; } });
+    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = true; } });
     scene.add(root);
     return root;
   });
@@ -833,6 +833,7 @@ async function buildCars() {
     const set = makeVehicleInstanceSet(sources, vehicles);
     set.vehicles = vehicles;
     traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles, modelCount: sources.length, modelNames: CAMPUS_ASSETS.carVariants.map(([name]) => name) };
+    if (drivePerf.active) setDriveVehicleShadowMode(false);
     setAssetState('car', 'loaded');
   } catch (e) {
     setAssetState('car', 'fallback', e);
@@ -875,8 +876,11 @@ async function buildPublicTransport() {
       root.position.y += 0.04;
       root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
       root.scale.multiplyScalar(spec.scale);
+      const wheelRigs = fitNativeTransitWheels(root, spec.key === 'schoolBus' ? 'school-bus' : 'bus');
+      root.userData.nativeWheelRigs = wheelRigs;
       scene.add(root);
-      transit.vehicles.push({ root, ...spec, stopTimer: 0, servedStop: false });
+      transit.vehicles.push({ root, wheelRigs, ...spec, stopTimer: 0, servedStop: false });
+      if (drivePerf.active) setDriveVehicleShadowMode(false);
       setAssetState(spec.key, 'loaded');
     });
   } catch (e) {
@@ -915,6 +919,14 @@ function updatePublicTransport(dt) {
     /* Source buses are modeled front-first along +X. The campus corridor is
      * along Z, so +/-90° keeps headlights/front end facing travel direction. */
     v.root.rotation.y = v.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    if (v.wheelRigs?.length) {
+      const rollDistance = -v.dir * v.speed * dt;
+      for (const rig of v.wheelRigs) {
+        rig.roll += rollDistance / Math.max(rig.radius, .08);
+        rig.pivot.rotation.set(rig.baseX, rig.baseY, rig.baseZ);
+        rig.pivot.rotateX(rig.roll);
+      }
+    }
   });
 }
 
@@ -1155,6 +1167,19 @@ function updateEnv(dt) {
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
+const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0 };
+function maybeUpdateShadow(now, force = false) {
+  const minInterval = drive.on ? 110 : 340;
+  if (!force && now - shadowTrack.at < minInterval) return;
+  const targetMoved = controls.target.distanceToSquared(shadowTrack.target) > (drive.on ? 9 : 36);
+  const dirMoved = keyDir.distanceToSquared(shadowTrack.dir) > .0009;
+  if (!force && !targetMoved && !dirMoved) return;
+  updateShadow();
+  renderer.shadowMap.needsUpdate = true;
+  shadowTrack.target.copy(controls.target);
+  shadowTrack.dir.copy(keyDir);
+  shadowTrack.at = now;
+}
 function updateShadow() {
   const S = clamp(camDist * .8, 60, 300), cam = keyLight.shadow.camera; if (Math.abs(cam.right - S) > 2) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 10; cam.far = 1300; cam.updateProjectionMatrix(); }
   const ts = 2 * S / T.sh, tx = Math.round(controls.target.x / ts) * ts, tz = Math.round(controls.target.z / ts) * ts; keyLight.target.position.set(tx, 0, tz); keyLight.position.copy(keyDir).multiplyScalar(560).add(keyLight.target.position);
@@ -1280,8 +1305,13 @@ function smooth01(x, a, b) {
   const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t);
 }
 function updateCinematicCamera(dt, now) {
-  if (renderPaused || drive.on || tour.on || interaction.cameraTransition || !AUTO.on || REDUCED_MOTION) {
+  const suppressed = renderPaused || drive.on || tour.on || interaction.cameraTransition || !AUTO.on || REDUCED_MOTION;
+  if (suppressed) {
     interaction.targetStrength = 0;
+    interaction.idleStrength = 0;
+    interaction.prevPanX = interaction.prevPanZ = interaction.prevPitch = 0;
+    interaction.prevBreath = 1;
+    return;
   } else {
     const idle = (now - interaction.lastInput) / 1000;
     interaction.targetStrength = idle >= 1.5 ? smooth01(idle, 1.5, 3.0) : 0;
@@ -1346,15 +1376,17 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
   interaction.transitionToken = (interaction.transitionToken || 0) + 1;
   const token = interaction.transitionToken;
   markUserInteraction();
+  interaction.idleStrength = 0;
+  interaction.targetStrength = 0;
+  resetCinematicEnvelope();
   Tw.kill(camera.position); Tw.kill(controls.target);
   const done = () => {
-    if (interaction.transitionToken !== token) return;
+    if (interaction.transitionToken !== token || !interaction.cameraTransition) return;
     interaction.cameraTransition = false;
     onComplete?.();
   };
-  setTimeout(done, dur * 1000 + 120);
-  Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power3.inOut' });
-  Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power3.inOut', onComplete: done });
+  Tw.to(camera.position, { x: pos[0], y: pos[1], z: pos[2], duration: dur, ease: 'power2.inOut' });
+  Tw.to(controls.target, { x: tgt[0], y: tgt[1], z: tgt[2], duration: dur, ease: 'power2.inOut', onComplete: done });
 }
 controls.addEventListener('start', () => {
   interaction.controlsActive = true; markUserInteraction();
@@ -1421,7 +1453,8 @@ function updateHover() {
 }
 function hover(id) { if (ST.hover && ST.hover !== ST.sel) Tw.to(BG[ST.hover].edgeMat, { opacity: 0, duration: .3 }); ST.hover = id; if (id && id !== ST.sel) Tw.to(BG[id].edgeMat, { opacity: .55, duration: .25 }); $('scene').classList.toggle('hover', !!id); }
 /* ═══════════ 9 · PHYSICS · DRIVE MODE (Rapier) ═══════════ */
-const drive = { on: false, R: null, world: null, body: null, car: null, packedCar: null, wheels: [], props: [], keys: {}, acc: 0, cam: new V3(), q: new THREE.Quaternion(), fwd: new V3(), m: new THREE.Matrix4(), sc: new V3(1, 1, 1), lights: [], beams: [], tailGlow: [], dust: null, dustBase: null, headLampMat: null, tailLampMat: null, packHeadMats: [], packTailMats: [], packBodyMats: [], objWheels: [], anchor: new V3(), prevAnchor: new V3(), orbitReady: false, initPromise: null };
+const drive = { on: false, R: null, world: null, body: null, car: null, packedCar: null, wheels: [], props: [], keys: {}, acc: 0, fixedStep: 1 / 60, steer: 0, physicsPrevPos: new V3(), physicsCurrPos: new V3(), physicsPrevQuat: new THREE.Quaternion(), physicsCurrQuat: new THREE.Quaternion(), renderPos: new V3(), renderQuat: new THREE.Quaternion(), cam: new V3(), q: new THREE.Quaternion(), fwd: new V3(), m: new THREE.Matrix4(), sc: new V3(1, 1, 1), lights: [], beams: [], tailGlow: [], dust: null, dustBase: null, headLampMat: null, tailLampMat: null, packHeadMats: [], packTailMats: [], packBodyMats: [], objWheels: [], anchor: new V3(), prevAnchor: new V3(), orbitReady: false, initPromise: null };
+const drivePerf = { active: false, savedPr: 0, savedDof: 0, savedBloom: false, maxPr: 1, lodDistSq: 320 * 320, lodEvery: 4 };
 const driveCamera = {
   userRotating: false,
   chaseStrength: 0,
@@ -1436,6 +1469,59 @@ const driveCamera = {
   delta: new V3()
 };
 const TV = new V3(), TQ = new THREE.Quaternion(), driveForward = new V3();
+function setDriveVehicleShadowMode(cast) {
+  const roots = traffic?.set?.roots || [];
+  roots.forEach(root => root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
+  transit?.vehicles?.forEach(vehicle => vehicle.root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
+}
+function setDriveTrafficVisibility(visible) {
+  const roots = traffic?.set?.roots || [];
+  roots.forEach(root => { root.visible = visible; });
+}
+function setDrivePerformanceMode(active) {
+  if (active === drivePerf.active) return;
+  if (active) {
+    drivePerf.savedPr = pr;
+    drivePerf.savedDof = FX.dof;
+    drivePerf.savedBloom = FX.bloom;
+    drivePerf.maxPr = tierName === 'high' ? 1.35 : tierName === 'medium' ? 1.12 : 1;
+    const nextPr = Math.min(pr, drivePerf.maxPr);
+    // Driving is a near-camera experience. Keep native geometry/material detail
+    // intact while disabling the costly blur stack and distant vehicle shadows.
+    FX.dof = 0;
+    FX.bloom = false;
+    drivePerf.active = true;
+    setDriveVehicleShadowMode(false);
+    if (nextPr !== pr) { pr = nextPr; resize(); }
+  } else {
+    drivePerf.active = false;
+    FX.dof = drivePerf.savedDof;
+    FX.bloom = drivePerf.savedBloom;
+    setDriveTrafficVisibility(true);
+    setDriveVehicleShadowMode(true);
+    if (pr !== drivePerf.savedPr) { pr = drivePerf.savedPr; resize(); }
+  }
+}
+function fitNativeTransitWheels(root, kind) {
+  const bodyPattern = kind === 'school-bus' ? /SchoolBus_Cube\\.001/i : /Bus_Cube\\.001/i;
+  let body = null; const wheelNodes = [];
+  root.traverse(node => {
+    if (!body && node.isMesh && bodyPattern.test(String(node.name || ''))) body = node;
+    if (node.isMesh && /(?:BackWheels|FrontWheels)_Cylinder/i.test(String(node.name || ''))) wheelNodes.push(node);
+  });
+  const bodyBox = new THREE.Box3().setFromObject(body || root), bodySize = bodyBox.getSize(new V3());
+  const desiredDiameter = clamp(bodySize.y * .26, .72, 1.35);
+  return wheelNodes.map((node, index) => {
+    const pivot = createWheelPivot(node, node.name);
+    const wheelBox = new THREE.Box3().setFromObject(node), wheelSize = wheelBox.getSize(new V3());
+    const nativeDiameter = Math.max(wheelSize.y, wheelSize.z);
+    const fit = nativeDiameter > .001 ? desiredDiameter / nativeDiameter : .25;
+    pivot.scale.multiplyScalar(fit);
+    pivot.userData.nativeWheelFit = fit;
+    pivot.userData.nativeWheelDiameter = nativeDiameter * fit;
+    return { node, pivot, index, radius: Math.max(.08, nativeDiameter * fit * .5), baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z, roll: 0 };
+  });
+}
 function createWheelPivot(node, name) {
   const parent=node.parent;
   if(!parent) return node;
@@ -1529,13 +1615,9 @@ async function initPhysics() {
       return found;
     }).filter(Boolean).map((node, index) => {
       const pivot=createWheelPivot(node, node.name);
-      // The supplied wheel meshes are physically thin but correctly placed. A
-      // modest source-pivot scale keeps the real tire geometry readable in the
-      // chase camera without detaching it or changing any vertex positions.
-      pivot.scale.setScalar(1.80);
-      pivot.position.y += .12;
-      if (Math.abs(pivot.position.x) > .2) pivot.position.x += Math.sign(pivot.position.x) * .14;
-      return { node, pivot, index, baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z };
+      const wheelBox=new THREE.Box3().setFromObject(node), wheelSize=wheelBox.getSize(new V3());
+      const radius=Math.max(.08, Math.max(wheelSize.y, wheelSize.z) * .5);
+      return { node, pivot, index, radius, roll: 0, baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z };
     });
 
     g.children.forEach(m => {
@@ -1570,6 +1652,9 @@ async function initPhysics() {
 
   g.visible = false; scene.add(g); drive.car = g; drive.prevAnchor.set(-150,2.2,138);
   drive.body = w.createRigidBody(RAP.RigidBodyDesc.dynamic().setTranslation(-150, 1.2, 138).setRotation({ x: 0, y: -Math.SQRT1_2, z: 0, w: Math.SQRT1_2 }).enabledRotations(false, true, false).setLinearDamping(.2).setAngularDamping(3).setCcdEnabled(true));
+  const initPos = drive.body.translation(), initRot = drive.body.rotation();
+  drive.physicsPrevPos.set(initPos.x, initPos.y, initPos.z); drive.physicsCurrPos.set(initPos.x, initPos.y, initPos.z); drive.renderPos.set(initPos.x, initPos.y, initPos.z);
+  drive.physicsPrevQuat.set(initRot.x, initRot.y, initRot.z, initRot.w); drive.physicsCurrQuat.copy(drive.physicsPrevQuat); drive.renderQuat.copy(drive.physicsPrevQuat);
   w.createCollider(RAP.ColliderDesc.cuboid(.95, .5, 2.1).setTranslation(0, .5, 0).setMass(900).setFriction(.3).setRestitution(.05), drive.body);
   // physical props: cones, crates, balls
   const spec = [], add = (kind, x, y, z) => spec.push({ kind, x, y, z });
@@ -1588,13 +1673,29 @@ function driveStep(dt) {
   const sf0 = v.x * d.fwd.x + v.z * d.fwd.z, th = (k.w ? 1 : 0) - (k.s ? 1 : 0); let sf = sf0 + th * (th * sf0 < 0 ? 38 : 22) * dt; sf *= Math.exp(-(th ? .12 : .8) * dt); sf = clamp(sf, -9, 26);
   const lx = (v.x - d.fwd.x * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt), lz = (v.z - d.fwd.z * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt);
   b.setLinvel({ x: d.fwd.x * sf + lx, y: v.y, z: d.fwd.z * sf + lz }, true); b.setAngvel({ x: 0, y: ((k.a ? 1 : 0) - (k.d ? 1 : 0)) * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
-  d.acc += dt; let n = 0; while (d.acc >= 1 / 60 && n++ < 4) { d.world.step(); d.acc -= 1 / 60; }
-  const t = b.translation(); d.car.position.set(t.x, t.y, t.z); d.car.quaternion.copy(d.q);
+  d.steer += ((((k.a ? 1 : 0) - (k.d ? 1 : 0)) * .42) - d.steer) * (1 - Math.exp(-dt * 10));
+  b.setAngvel({ x: 0, y: d.steer * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
+  d.acc += dt;
+  let n = 0;
+  while (d.acc >= d.fixedStep && n++ < 4) {
+    d.physicsPrevPos.copy(d.physicsCurrPos);
+    d.physicsPrevQuat.copy(d.physicsCurrQuat);
+    d.world.step();
+    const pt = b.translation(), prt = b.rotation();
+    d.physicsCurrPos.set(pt.x, pt.y, pt.z);
+    d.physicsCurrQuat.set(prt.x, prt.y, prt.z, prt.w);
+    d.acc -= d.fixedStep;
+  }
+  const alpha = clamp(d.acc / d.fixedStep, 0, 1);
+  d.renderPos.lerpVectors(d.physicsPrevPos, d.physicsCurrPos, alpha);
+  d.renderQuat.copy(d.physicsPrevQuat).slerp(d.physicsCurrQuat, alpha);
+  d.car.position.copy(d.renderPos); d.car.quaternion.copy(d.renderQuat);
   d.wheels.forEach(w => w.rotation.x += sf * dt / .44);
-  const wheelRoll = sf * dt / .44;
-  const steerAngle = ((k.a ? 1 : 0) - (k.d ? 1 : 0)) * .42;
-  d.objWheels.forEach(({ pivot, index, baseX, baseY, baseZ }) => {
-    pivot.rotation.set(baseX + wheelRoll, baseY + (index < 2 ? steerAngle : 0), baseZ);
+  d.objWheels.forEach(w => {
+    w.roll += sf * dt / Math.max(w.radius, .08);
+    w.pivot.rotation.set(w.baseX, w.baseY, w.baseZ);
+    if (w.index < 2) w.pivot.rotateY(d.steer);
+    w.pivot.rotateX(w.roll);
   });
   d.props.forEach(({ im, bodies }) => { bodies.forEach((pb, i) => { const p = pb.translation(), q = pb.rotation(); d.m.compose(TV.set(p.x, p.y, p.z), TQ.set(q.x, q.y, q.z, q.w), d.sc); im.setMatrixAt(i, d.m); }); im.instanceMatrix.needsUpdate = true; });
   // Follow only by translating the orbit rig with the car. OrbitControls remains fully active, so dragging
@@ -1603,6 +1704,7 @@ function driveStep(dt) {
   if (!d.orbitReady) { d.prevAnchor.copy(d.anchor); d.orbitReady=true; }
   driveCamera.delta.copy(d.anchor).sub(d.prevAnchor);
   camera.position.add(driveCamera.delta);
+  controls.target.add(driveCamera.delta);
 
   const moving=Math.abs(sf0)>0.65;
   const now=performance.now();
@@ -1611,7 +1713,6 @@ function driveStep(dt) {
   }
 
   const shouldChase=d.on && moving && !driveCamera.userRotating && now-driveCamera.releaseAt>=180;
-  if (!shouldChase) controls.target.copy(d.anchor);
   const desiredStrength=shouldChase?1:0;
   driveCamera.chaseStrength += (desiredStrength-driveCamera.chaseStrength) * (1-Math.exp(-dt*4));
   if (driveCamera.chaseStrength>0.0005) {
@@ -1622,7 +1723,7 @@ function driveStep(dt) {
     driveCamera.desiredPos.y=t.y+3.5+effectiveDistance*.15;
     driveCamera.desiredTarget.copy(d.anchor).addScaledVector(d.fwd,4.5);
     driveCamera.desiredTarget.y=t.y+1.2;
-    const followAlpha=1-Math.exp(-dt*2.5),targetAlpha=1-Math.exp(-dt*4);
+    const followAlpha=1-Math.exp(-dt*4.2),targetAlpha=1-Math.exp(-dt*6.2);
     camera.position.lerp(driveCamera.desiredPos,followAlpha*driveCamera.chaseStrength);
     controls.target.lerp(driveCamera.desiredTarget,targetAlpha*driveCamera.chaseStrength);
   }
@@ -1632,7 +1733,7 @@ function driveStep(dt) {
 async function toggleDrive() {
   const bt = $('btnDrive');
   if (drive.on) {
-    drive.on = false; controls.enabled = true; controls.enablePan = true; controls.minDistance=25; controls.maxDistance=780; controls.minPolarAngle=.12; controls.maxPolarAngle=1.45;
+    drive.on = false; setDrivePerformanceMode(false); controls.enabled = true; controls.enablePan = true; controls.minDistance=25; controls.maxDistance=780; controls.minPolarAngle=.12; controls.maxPolarAngle=1.45;
     // Deliberately keep drive.car visible: overview/building cameras now show it at its last driven position.
     bt.classList.remove('on'); driveCamera.userRotating=false; driveCamera.chaseStrength=0; driveCamera.zoomUntil=0; $('hint').textContent = 'Drag to orbit · Right-drag to pan · Scroll to zoom';
     const ownerDoc=parent!==window ? parent.document : document;
@@ -1642,8 +1743,14 @@ async function toggleDrive() {
   try { bt.disabled = true; if (!drive.world) await initPhysics(); } catch (e) { console.warn('Rapier failed to load', e); bt.innerHTML = '<i class="fa-solid fa-car-side"></i> Offline'; setTimeout(() => { bt.innerHTML = '<i class="fa-solid fa-car-side"></i> Drive'; }, 2500); bt.disabled = false; return; }
   bt.disabled = false; select(null, false); tour.on = false; drive.on = true; drive.car.visible = true; controls.enabled = true; controls.enablePan=false; controls.minDistance=4.8; controls.maxDistance=42; controls.minPolarAngle=.18; controls.maxPolarAngle=1.46;
   Tw.kill(camera.position); Tw.kill(controls.target);
-  const p=drive.body.translation(), qr=drive.body.rotation(); drive.q.set(qr.x,qr.y,qr.z,qr.w); drive.anchor.set(p.x,p.y+1.05,p.z); drive.prevAnchor.copy(drive.anchor); drive.orbitReady=true;
+  const p=drive.body.translation(), qr=drive.body.rotation();
+  drive.q.set(qr.x,qr.y,qr.z,qr.w);
+  drive.physicsPrevPos.set(p.x,p.y,p.z); drive.physicsCurrPos.set(p.x,p.y,p.z); drive.renderPos.set(p.x,p.y,p.z);
+  drive.physicsPrevQuat.copy(drive.q); drive.physicsCurrQuat.copy(drive.q); drive.renderQuat.copy(drive.q);
+  drive.acc=0; drive.steer=0; drive.objWheels.forEach(w => { w.roll=0; });
+  drive.anchor.set(p.x,p.y+1.05,p.z); drive.prevAnchor.copy(drive.anchor); drive.orbitReady=true;
   driveCamera.userRotating=false; driveCamera.chaseStrength=0; driveCamera.releaseAt=performance.now(); driveCamera.zoomUntil=0;
+  setDrivePerformanceMode(true);
   controls.target.copy(drive.anchor); camera.position.copy(new V3(0,6.7,13.5).applyQuaternion(drive.q).add(drive.anchor)); controls.update();
   driveCamera.distance=clamp(camera.position.distanceTo(drive.anchor),driveCamera.minDistance,driveCamera.maxDistance);
   bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
@@ -1738,12 +1845,12 @@ function frame(now) {
   if (renderPaused) return;
   frameId = requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
-  camDist = camera.position.distanceTo(controls.target);
   if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
+  camDist = camera.position.distanceTo(controls.target);
   updateCinematicCamera(dt, now);
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
-  if (frameNo++ % FX.se === 0) { updateShadow(); renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd–4th frame
+  maybeUpdateShadow(now);
   updateTraffic(dt); updatePublicTransport(dt); updateRoute(dt); if ((hoverT += dt) > .08) { hoverT = 0; updateHover(); }
   if (ST.monument) ST.monument.material.emissiveIntensity = .9 + .5 * Math.sin(now * .002) + ST.night;
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
