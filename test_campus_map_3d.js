@@ -73,6 +73,13 @@ const waitFor=async(expression,timeout=10000,interval=120)=>{
   while(Date.now()-started<timeout){last=await ev(expression);if(last) return last;await sleep(interval);}
   throw new Error(`timeout waiting for ${expression}; last=${JSON.stringify(last)}`);
 };
+const QA_DIR=path.join(ROOT,'qa-artifacts');fs.mkdirSync(QA_DIR,{recursive:true});
+const screenshot=async name=>{
+  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+  const out=path.join(QA_DIR,name+'.png');
+  fs.writeFileSync(out,Buffer.from(shot.result.data,'base64'));
+  console.log('SCREENSHOT',out);
+};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const clickSelectorInFrame=async selector=>{
   const p=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame,fb=f.getBoundingClientRect(),b=f.contentWindow.document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:fb.left+b.left+b.width/2,y:fb.top+b.top+b.height/2}})()`);
@@ -136,6 +143,13 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
+await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');const p=v.root.position;d.camera.position.set(p.x+15,7,p.z+13);d.controls.target.set(p.x,1.4,p.z);d.controls.update();return true})()");
+await sleep(1000);await screenshot('transit-bus-close');
+await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');const p=v.root.position;d.camera.position.set(p.x+95,65,p.z+95);d.controls.target.set(p.x,1,p.z);d.controls.update();return true})()");
+await sleep(1000);await screenshot('transit-bus-far');
+await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='schoolBus');const p=v.root.position;d.camera.position.set(p.x+16,7,p.z+12);d.controls.target.set(p.x,1.4,p.z);d.controls.update();return true})()");
+await sleep(1000);await screenshot('transit-schoolbus-close');
+const transitBefore=await ev
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
@@ -173,6 +187,7 @@ const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.conten
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
 console.log("DRIVE PERFORMANCE MODE",JSON.stringify(drivePerf));
 console.log('PLAYER APPEARANCE',JSON.stringify(playerAppearance));
+await sleep(1000);await screenshot('drive-native-wheels-chase');
 const wheelMapping=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({node,pivot})=>({node:node.name,pivot:pivot.name}))`);
 const wheelLayout=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,car=d.drive.packedCar;car.updateMatrixWorld(true);let body=null;car.traverse(o=>{if(!body&&o.isMesh&&/NormalCar1_Cube/i.test(o.name||""))body=o});const bb=new d.THREE.Box3().setFromObject(body),out=d.drive.objWheels.map(w=>{const wb=new d.THREE.Box3().setFromObject(w.node),c=wb.getCenter(new d.THREE.Vector3()),l=car.worldToLocal(c.clone());return{name:w.node.name,scale:[w.pivot.scale.x,w.pivot.scale.y,w.pivot.scale.z],local:[l.x,l.y,l.z],box:wb.getSize(new d.THREE.Vector3()).toArray()}});return{body:bb.getSize(new d.THREE.Vector3()).toArray(),wheels:out}})()`);
 for(const w of wheelLayout.wheels){if(w.scale.some(v=>!Number.isFinite(v)||v<.9||v>1.1))throw new Error("Drive native wheel scale drifted: "+JSON.stringify(wheelLayout));if(Math.abs(w.local[0])>1.02||Math.abs(w.local[2])>1.85||w.local[1]<-.1||w.local[1]>.8)throw new Error("Drive wheel detached from body: "+JSON.stringify(wheelLayout));}
@@ -188,6 +203,12 @@ if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.
 const wheelMaterials=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.flatMap(({node})=>{const out=[];node.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&out.push(m.color.getHexString()))}});return out})`);
 if(!wheelMaterials.some(c=>c==='111820'||c==='9aa5b1'))throw new Error(`native wheel materials were not made visible: ${JSON.stringify(wheelMaterials)}`);
 console.log('NATIVE WHEELS',JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelMaterials}));
+await key('KeyD');
+await sleep(900);
+await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.drive.renderPos;d.drive.car.visible=true;d.camera.position.set(p.x,p.y+42,p.z+.01);d.controls.target.set(p.x,p.y,p.z);d.controls.update();return true})()");
+await sleep(900);await screenshot('drive-native-wheels-top');
+await ev("window.__SC_CAMPUS_MAP_3D__.reset()");
+await sleep(600);
 await key('KeyD');
 const steer=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on`);
 if(!steer)throw new Error('second D toggled Drive off');
