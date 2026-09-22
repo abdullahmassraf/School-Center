@@ -1,0 +1,28 @@
+name: temporary export complete clone
+
+on:
+  push:
+    branches: [tmp/export-complete-clone]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Create repository archive
+        run: |
+          git archive --format=zip --output=/tmp/School-Center-main.zip HEAD
+          printf 'School-Center source snapshot exported from commit %s\n' "$(git rev-parse HEAD)" > /tmp/CLONE-INFO.txt
+      - name: Upload repository archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: School-Center-complete-clone
+          path: |
+            /tmp/School-Center-main.zip
+            /tmp/CLONE-INFO.txt
