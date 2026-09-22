@@ -280,9 +280,27 @@ async function loadPackedModel(url) {
       Yellow: '#f5c84b', Wheel: '#22272d'
     };
     for (const part of data.parts) {
-      const vertices = new Float32Array(part.v.flat());
-      const indices = new Uint16Array(part.i || []);
-      if (!vertices.length || indices.length < 3) continue;
+      const coords = Array.isArray(part.v) ? part.v : [];
+      const vertices = new Float32Array(coords.flat());
+      const vertexCount = coords.length;
+      const raw = Array.isArray(part.i) ? part.i : [];
+      // The packed vehicle mesh can exceed 65,535 vertices. Never truncate indices to
+      // Uint16 (that wraps large indices and produces the "exploded triangle" artifact).
+      const safe = [];
+      let maxIndex = 0;
+      for (let j = 0; j + 2 < raw.length; j += 3) {
+        const a = Number(raw[j]), b = Number(raw[j + 1]), d = Number(raw[j + 2]);
+        if (Number.isInteger(a) && Number.isInteger(b) && Number.isInteger(d) &&
+            a >= 0 && b >= 0 && d >= 0 && a < vertexCount && b < vertexCount && d < vertexCount) {
+          safe.push(a, b, d);
+          if (a > maxIndex) maxIndex = a;
+          if (b > maxIndex) maxIndex = b;
+          if (d > maxIndex) maxIndex = d;
+        }
+      }
+      if (vertices.length < 3 || safe.length < 3) continue;
+      const IndexArray = maxIndex > 65535 ? Uint32Array : Uint16Array;
+      const indices = new IndexArray(safe);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
       geo.setIndex(new THREE.BufferAttribute(indices, 1));
