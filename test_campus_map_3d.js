@@ -1,7 +1,7 @@
 /* Headless acceptance test for the iframe-backed Davis twin + fullscreen/drive/cinematic interaction upgrade. */
 import { execFileSync, spawn } from 'node:child_process';
 import http from 'node:http';
-import fs from 'node:fs';
+import fsio from 'node:fs';
 import path from 'node:path';
 
 const ROOT=process.cwd(),PORT=8984,DEBUG_PORT=9284;
@@ -11,8 +11,8 @@ if(!CHROME){console.error('no chromium');process.exit(2)}
 const MIME={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json'};
 const server=http.createServer((req,res)=>{
   const rel=decodeURIComponent(new URL(req.url,'http://x').pathname).replace(/^\/+/,''),file=path.join(ROOT,rel||'index.html');
-  if(!file.startsWith(ROOT)||!fs.existsSync(file)||fs.statSync(file).isDirectory()){res.statusCode=404;res.end('nf');return}
-  res.setHeader('Content-Type',MIME[path.extname(file)]||'application/octet-stream');res.end(fs.readFileSync(file));
+  if(!file.startsWith(ROOT)||!fsio.existsSync(file)||fsio.statSync(file).isDirectory()){res.statusCode=404;res.end('nf');return}
+  res.setHeader('Content-Type',MIME[path.extname(file)]||'application/octet-stream');res.end(fsio.readFileSync(file));
 });
 await new Promise(r=>server.listen(PORT,r));
 
