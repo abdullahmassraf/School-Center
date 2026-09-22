@@ -1926,9 +1926,9 @@ async function boot() {
   setWeather(WX[CFG.weather] || CFG.weather === 'live' ? CFG.weather : 'live', true);
   if (CFG.time && CFG.time !== 'live') { const d = new Date(isNaN(+CFG.time) ? CFG.time : +CFG.time); if (!isNaN(d)) { clock.t = d.getTime(); clock.mode = 'manual'; } }
   envDirty = true; syncClock(); updateEnv(0);
-  /* Warm the optional Drive physics while the map is already presenting so
-   * entering Drive does not race a cold WASM/module download. */
-  void initPhysics().catch(() => {});
+  /* Drive physics is deliberately lazy: Rapier/WASM and its world colliders
+   * are only created when the hidden Drive mode is actually activated. This
+   * avoids a main-thread/WASM spike during normal map startup. */
   ready = true; setLoad('Ready', 1); post({ type: 'ready' });
   $('loader').classList.add('done'); setTimeout(() => $('loader').hidden = true, 900);
   flyTo(OV.pos, OV.tgt, 3.4); if (CFG.building && BLD[String(CFG.building).toUpperCase()]) setTimeout(() => select(String(CFG.building).toUpperCase()), 1800);
