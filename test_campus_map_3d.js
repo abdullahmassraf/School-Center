@@ -149,7 +149,6 @@ await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_
 await sleep(1000);await screenshot('transit-bus-far');
 await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='schoolBus');const p=v.root.position;d.camera.position.set(p.x+16,7,p.z+12);d.controls.target.set(p.x,1.4,p.z);d.controls.update();return true})()");
 await sleep(1000);await screenshot('transit-schoolbus-close');
-const transitBefore=await ev
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
