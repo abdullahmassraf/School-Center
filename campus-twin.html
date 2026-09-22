@@ -1550,7 +1550,8 @@ function fitNativeTransitWheels(root, kind) {
      * Rotate only the rig around bus-local Y: wheel axle becomes local Z
      * (world X after the bus turn). Original vertices/materials stay intact.
      */
-    pivot.rotateY(Math.PI / 2);
+    /* Source transit wheels are already Z-axled. The vehicle's ±90° root
+     * rotation turns that axle to world X, the correct lateral axis. */
     pivot.userData.transitWheelAxis = 'z';
     pivot.scale.multiplyScalar(fit);
     pivot.userData.nativeWheelFit = fit;
