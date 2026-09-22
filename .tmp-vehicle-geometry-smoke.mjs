@@ -47,7 +47,7 @@ const geometry=await page.evaluate(()=>{
   };
   const posV=new THREE.Vector3();
   const sampleInstance=(inst,label)=>{
-    const m=new THREE.Matrix4(), p=new THREE.Vector3(), q=new THREE.Quaternion(), s=new THREE.Vector3();
+    const T=d.THREE; const m=new T.Matrix4(), p=new T.Vector3(), q=new T.Quaternion(), s=new T.Vector3();
     for(let i=0;i<Math.min(inst.count,80);i++){
       inst.getMatrixAt(i,m);m.decompose(p,q,s);
       if(![p.x,p.y,p.z,s.x,s.y,s.z].every(Number.isFinite)||s.x<0.45||s.x>2.2||s.y<0.45||s.y>2.2||s.z<0.45||s.z>2.2||Math.abs(p.x)>350||Math.abs(p.z)>350||p.y<-1||p.y>3)
