@@ -36,7 +36,6 @@ export class CampusMap3DManager {
     f.setAttribute('allow','fullscreen'); f.setAttribute('aria-label','Interactive 3D map of Davis Campus');
     Object.assign(f.style,{position:'absolute',inset:'0',width:'100%',height:'100%',border:'0',display:'block',background:'#070914',borderRadius:'inherit'});
     Object.assign(mount.style,{position:'relative'}); mount.replaceChildren(f);
-
     this._onMessage=e=>{
       if(this.disposed||e.source!==f.contentWindow||e.origin!==this._origin) return;
       const d=e.data; if(!d||d.source!=='davis-twin'||typeof d.type!=='string') return;
@@ -55,13 +54,19 @@ export class CampusMap3DManager {
       this._post({type:'campus:fullscreen-state',value:active});
       requestAnimationFrame(()=>this._post({type:'campus:resize'}));
       document.documentElement.classList.toggle('cm-map-fullscreen',active);
-      const previousOverflow=this._pageOverflowBeforeFullscreen;
       if(active){
-        if(previousOverflow===undefined)this._pageOverflowBeforeFullscreen=document.body.style.overflow;
+        if(this._pageOverflowBeforeFullscreen===undefined)this._pageOverflowBeforeFullscreen=document.body.style.overflow;
         document.body.style.overflow='hidden';
       }else{
-        document.body.style.overflow=previousOverflow??this._pageOverflowBeforeFullscreen??'';
+        /* Chromium can dispatch fullscreenchange before exitFullscreen()'s
+         * promise settles. Restore the page synchronously and once more on
+         * the next task so an intermediate event cannot leave the app locked. */
+        document.body.style.overflow=this._pageOverflowBeforeFullscreen ?? '';
         this._pageOverflowBeforeFullscreen=undefined;
+        setTimeout(()=>{
+          if(this.disposed||document.fullscreenElement)return;
+          document.body.style.overflow='';
+        },0);
       }
     };
     document.addEventListener('fullscreenchange',this._onFullscreenChange);
@@ -109,7 +114,12 @@ export class CampusMap3DManager {
         await this.fullscreenRoot.requestFullscreen();
       }
     }catch(_){}
-    this._syncFullscreenState(document.fullscreenElement===this.fullscreenRoot);
+    const active=document.fullscreenElement===this.fullscreenRoot;
+    this._syncFullscreenState(active);
+    if(!active){
+      this._pageOverflowBeforeFullscreen=undefined;
+      document.body.style.overflow='';
+    }
   }
 
   _installLegacyHud(){

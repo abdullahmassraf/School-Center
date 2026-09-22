@@ -5,7 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT=process.cwd(),PORT=8984,DEBUG_PORT=9284;
-const CHROME=['chromium','chromium-browser','google-chrome','google-chrome-stable'].find(c=>{try{execFileSync('which',[c],{stdio:'ignore'});return true}catch{return false}});
+const CHROME_CANDIDATES = process.platform === 'win32'
+  ? ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe','C:/Program Files/Microsoft/Edge/Application/msedge.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe']
+  : ['chromium','chromium-browser','google-chrome','google-chrome-stable'];
+const CHROME=CHROME_CANDIDATES.find(c=>process.platform === 'win32' ? fs.existsSync(c) : (()=>{try{execFileSync('which',[c],{stdio:'ignore'});return true}catch{return false}})());
 if(!CHROME){console.error('no chromium');process.exit(2)}
 
 const MIME={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.json':'application/json'};
@@ -25,8 +28,8 @@ if(!target)throw new Error('no CDP page');
 
 const ws=new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r=>ws.onopen=r);
-let seq=0;const pending=new Map(),errors=[];
-ws.onmessage=ev=>{const d=JSON.parse(ev.data);if(d.id&&pending.has(d.id)){pending.get(d.id)(d);pending.delete(d.id)}if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails?.exception?.description||d.params.exceptionDetails?.text||'exception');if(d.method==='Runtime.consoleAPICalled'&&d.params.type==='error')errors.push(d.params.args?.map(a=>a.value).join(' ')||'console error')};
+let seq=0;const pending=new Map(),errors=[],assetResponses=[];
+ws.onmessage=ev=>{const d=JSON.parse(ev.data);if(d.id&&pending.has(d.id)){pending.get(d.id)(d);pending.delete(d.id)}if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails?.exception?.description||d.params.exceptionDetails?.text||'exception');if(d.method==='Runtime.consoleAPICalled'&&d.params.type==='error')errors.push(d.params.args?.map(a=>a.value).join(' ')||'console error');if(d.method==='Network.responseReceived'&&/assets\/campus\/(cars|transit)\/.*\.(obj|mtl)$/i.test(d.params.response.url))assetResponses.push({url:d.params.response.url,status:d.params.response.status});};
 const send=(method,params={})=>new Promise((resolve,reject)=>{const i=++seq;pending.set(i,resolve);ws.send(JSON.stringify({id:i,method,params}));setTimeout(()=>{if(pending.has(i)){pending.delete(i);reject(new Error(`CDP timeout: ${method}`))}},20000)});
 const ev=async expression=>{const d=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(d.result?.exceptionDetails)throw new Error(d.result.exceptionDetails.exception?.description||'eval error');return d.result.result.value};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -48,7 +51,7 @@ const key=async(code,up=true)=>{
   if(up) await send('Input.dispatchKeyEvent',{type:'keyUp',code,key:code==='Escape'?'Escape':code.replace('Key',''),windowsVirtualKeyCode:code==='Escape'?27:code==='KeyD'?68:0});
 };
 
-await send('Page.enable');await send('Runtime.enable');await send('Log.enable');
+await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html`});
 
 let ready=false;
@@ -58,11 +61,19 @@ if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen');return{ready:m.ready,embed:new URL(m.frame.src).searchParams.get('embed'),ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
 if(boot.embed!=='1'||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
 for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Error(`missing building ${id}`);
+for(let i=0;i<100;i++){
+  const loaded=await ev(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ASSET_STATE;return s.car!=='pending'&&s.transit.bus!=='pending'&&s.transit.schoolBus!=='pending'})()`);
+  if(loaded)break;
+  await sleep(100);
+}
 const assets=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{state:d.ASSET_STATE,paths:d.CAMPUS_ASSETS,trafficMode:d.traffic?.mode,parked:d.traffic?.parkedCount,moving:d.traffic?.cars?.length,transit:d.transit?.vehicles?.map(v=>({key:v.key,x:v.x,z:v.z,dir:v.dir}))}})()`);
 if(assets.state.car!=='loaded'||assets.state.transit.bus!=='loaded'||assets.state.transit.schoolBus!=='loaded')throw new Error(`packed assets failed to load: ${JSON.stringify(assets)}`);
 if(assets.trafficMode!=='packed'||assets.moving!==12||assets.transit.length!==2)throw new Error(`traffic/transit integration failed: ${JSON.stringify(assets)}`);
-if(!String(assets.paths.normalCar).endsWith('/cars/NormalCar1.json.gz.b64')||!String(assets.paths.bus).endsWith('/transit/Bus.json.gz.b64')||!String(assets.paths.schoolBus).endsWith('/transit/SchoolBus.json.gz.b64'))throw new Error(`asset paths are not canonical: ${JSON.stringify(assets.paths)}`);
-console.log('ASSETS',JSON.stringify(assets));
+if(!String(assets.paths.normalCar).endsWith('/cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj')||!String(assets.paths.bus).endsWith('/transit/Public Transport Pack - Feb 2017/OBJ/Bus.obj')||!String(assets.paths.schoolBus).endsWith('/transit/Public Transport Pack - Feb 2017/OBJ/SchoolBus.obj'))throw new Error(`asset paths are not canonical: ${JSON.stringify(assets.paths)}`);
+await sleep(250);
+const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
+for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
+console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
@@ -78,22 +89,30 @@ console.log('DRIVE OUTSIDE FULLSCREEN: blocked');
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(600);
-let fs=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.camera.aspect,expected:innerWidth/innerHeight,calls:f.renderer.info.render.calls}})()`);
-if(!fs.host||!fs.twin||fs.label!=='Exit fullscreen'||Math.abs(fs.aspect-f.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fs)}`);
-console.log('FULLSCREEN ENTER',JSON.stringify(fs));
+let fullscreenState=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.__DAVIS_TWIN_DEBUG__.camera.aspect,expected:f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientWidth/f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientHeight,calls:f.__DAVIS_TWIN_DEBUG__.renderer.info.render.calls}})()`);
+if(!fullscreenState.host||!fullscreenState.twin||fullscreenState.label!=='Exit fullscreen'||Math.abs(fullscreenState.aspect-fullscreenState.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fullscreenState)}`);
+console.log('FULLSCREEN ENTER',JSON.stringify(fullscreenState));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(500);
-fs=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
-if(fs.host||fs.label!=='Enter fullscreen'||fs.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fs)}`);
-console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fs));
+fullscreenState=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
+if(fullscreenState.host||fullscreenState.label!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
+console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fullscreenState));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(400);
 await key('KeyD');
 await sleep(700);
 let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
-if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify(drive)}`);
+if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify({drive,errors})}`);
+const wheelMapping=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({node,pivot})=>({node:node.name,pivot:pivot.name}))`);
+if(wheelMapping.length!==3||!wheelMapping.some(w=>/FrontLeftWheel/i.test(w.node))||!wheelMapping.some(w=>/FrontRightWheel/i.test(w.node))||!wheelMapping.some(w=>/BackWheels/i.test(w.node)))throw new Error('native wheel groups were not mapped: '+JSON.stringify(wheelMapping));
+const wheelBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
+await key('KeyW',false); await key('KeyA',false); await sleep(500);
+const wheelAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
+await key('KeyA'); await key('KeyW');
+if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.abs(wheelAfter[0].y-wheelBefore[0].y)<.01||Math.abs(wheelAfter[1].y-wheelBefore[1].y)<.01)throw new Error(`native wheel visuals did not roll/steer: ${JSON.stringify({wheelMapping,wheelBefore,wheelAfter})}`);
+console.log('NATIVE WHEELS',JSON.stringify({wheelMapping,wheelBefore,wheelAfter}));
 await key('KeyD');
 const steer=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on`);
 if(!steer)throw new Error('second D toggled Drive off');
@@ -139,6 +158,10 @@ const drag=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame,fb=f.ge
 await send('Input.dispatchMouseEvent',{type:'mousePressed',x:drag.x,y:drag.y,button:'left',buttons:1,clickCount:1});
 await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:drag.x+100,y:drag.y+30,button:'left',buttons:1});
 await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:drag.x+100,y:drag.y+30,button:'left',buttons:0,clickCount:1});
+/* CDP mouse events target the top-level page; mirror the gesture into the
+ * same-origin iframe so this regression exercises the real child interaction
+ * handler rather than relying on browser-specific iframe event routing. */
+await ev(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.document.querySelector('#scene');const o={bubbles:true,clientX:100,clientY:100,buttons:1};s.dispatchEvent(new MouseEvent('mousedown',o));s.dispatchEvent(new MouseEvent('mousemove',{...o,clientX:200,clientY:130}));s.dispatchEvent(new MouseEvent('mouseup',{...o,buttons:0}));})()`);
 await sleep(800);
 const afterManual=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.idleStrength`);
 if(afterManual>=beforeManual*.65&&afterManual>.18)throw new Error(`manual input did not suppress cinematic idle: ${beforeManual}->${afterManual}`);
