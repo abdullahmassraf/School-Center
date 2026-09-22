@@ -237,6 +237,15 @@ const CAMPUS_ASSET_ROOT = 'assets/campus/';
 const CAMPUS_ASSETS = Object.freeze({
   normalCar: CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj',
   normalCarMtl: CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.mtl',
+  driveVariant: ['SUV', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.mtl'],
+  carVariants: [
+    ['NormalCar1', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.mtl'],
+    ['NormalCar2', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar2.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar2.mtl'],
+    ['SUV', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.mtl'],
+    ['SportsCar', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SportsCar.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SportsCar.mtl'],
+    ['SportsCar2', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SportsCar2.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SportsCar2.mtl'],
+    ['Taxi', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/Taxi.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/Taxi.mtl']
+  ],
   bus: CAMPUS_ASSET_ROOT + 'transit/Public Transport Pack - Feb 2017/OBJ/Bus.obj',
   busMtl: CAMPUS_ASSET_ROOT + 'transit/Public Transport Pack - Feb 2017/OBJ/Bus.mtl',
   schoolBus: CAMPUS_ASSET_ROOT + 'transit/Public Transport Pack - Feb 2017/OBJ/SchoolBus.obj',
@@ -244,6 +253,63 @@ const CAMPUS_ASSETS = Object.freeze({
 });
 const ASSET_STATE = { format: 'obj+mtl', car: 'pending', transit: { bus: 'pending', schoolBus: 'pending' }, errors: [] };
 const vehicleCache = new Map();
+
+const CAR_PAINT_MATERIAL = /^(blue|lightblue|white|orange|darkorange|yellow|red|green|maroon|material\.007)$/i;
+function styleNativeVehicleMaterial(material, kind, meshName = '') {
+  if (!material?.color) return;
+  const name = String(material.name || '').trim().toLowerCase();
+  const mesh = String(meshName || '').toLowerCase();
+  if (kind === 'bus' || kind === 'school-bus') {
+    const school = kind === 'school-bus';
+    const wheel = /wheel/.test(mesh);
+    const colors = school
+      ? { body: '#f0bd16', window: '#081923', trim: '#20272d', light: '#fff0a8', wheel: '#11161b' }
+      : { body: '#16869b', window: '#071b29', trim: '#1e2d35', light: '#fff0a8', wheel: '#11161b' };
+    if (wheel || /wheel/.test(name)) material.color.set(colors.wheel);
+    else if (/window/.test(name)) material.color.set(colors.window);
+    else if (/light/.test(name)) { material.color.set(colors.light); material.emissive = colors.light; material.emissiveIntensity = 0; }
+    else if (school && /yellow/.test(name)) material.color.set(colors.body);
+    else if (!school && /top|material/.test(name)) material.color.set(colors.body);
+    else material.color.set(colors.trim);
+    material.roughness = /window/.test(name) ? .2 : .62;
+    material.metalness = /wheel|bottom|bumper/.test(name) ? .35 : .06;
+    if (!/window|wheel|light|bumper|bottom/.test(name)) { material.emissive = material.color.clone(); material.emissiveIntensity = .12; }
+    material.needsUpdate = true;
+  }
+}
+
+function prepareVehicleInstance(root, { color = null } = {}) {
+  const result = { paint: [], head: [], tail: [], wheels: [] };
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.material) return;
+    let wheelNode = false;
+    for (let owner = mesh; owner; owner = owner.parent) {
+      if (/wheel/i.test(String(owner.name || ''))) { wheelNode = true; break; }
+    }
+    const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const next = source.map(material => {
+      const mat = material?.clone ? material.clone() : material;
+      if (!mat) return mat;
+      const name = String(mat.name || '').trim();
+      const lower = name.toLowerCase();
+      if (wheelNode || /wheel/.test(lower)) {
+        mat.color?.set(lower.includes('grey') ? '#b8c4cf' : '#111820');
+        mat.roughness = .72; mat.metalness = .18; result.wheels.push(mat);
+      } else if (color && CAR_PAINT_MATERIAL.test(name)) {
+        mat.color?.set(color);
+        mat.emissive = mat.color.clone();
+        mat.emissiveIntensity = .16;
+        result.paint.push(mat);
+      }
+      if (/headlight|lights/.test(lower)) { mat.color?.set('#fff0b0'); mat.emissive = new Col('#fff0b0'); mat.emissiveIntensity = 0; result.head.push(mat); }
+      if (/taillight|tail/.test(lower)) { mat.color?.set('#b81720'); mat.emissive = new Col('#ff1b24'); mat.emissiveIntensity = 0; result.tail.push(mat); }
+      mat.needsUpdate = true;
+      return mat;
+    });
+    mesh.material = Array.isArray(mesh.material) ? next : next[0];
+  });
+  return result;
+}
 
 async function loadObjModel(objUrl, mtlUrl, kind) {
   const key = `${objUrl}|${mtlUrl}`;
@@ -278,6 +344,7 @@ async function loadObjModel(objUrl, mtlUrl, kind) {
         material.metalness = /black|grey|wheel/i.test(material.name) ? .45 : .08;
         if (/headlight|lights/i.test(material.name)) { material.emissive = material.color.clone(); material.emissiveIntensity = 0; }
         if (/taillight|tail/i.test(material.name)) { material.emissive = material.color.clone(); material.emissiveIntensity = 0; }
+        styleNativeVehicleMaterial(material, kind, mesh.name);
         material.needsUpdate = true;
       });
     });
@@ -699,9 +766,13 @@ const ASSET_SCALE = new V3(1, 1, 1);
 const ASSET_OBJECT = new THREE.Object3D();
 const ASSET_COLOR = new Col();
 
-function makeVehicleInstanceSet(sourceRoot, vehicles) {
+function makeVehicleInstanceSet(sourceRoots, vehicles) {
   const roots = vehicles.map(vehicle => {
+    const sourceRoot = sourceRoots[vehicle.modelIndex || 0] || sourceRoots[0];
     const root = cloneVehicleRoot(sourceRoot);
+    prepareVehicleInstance(root, { color: vehicle.col });
+    root.userData.vehicleModel = vehicle.modelName || sourceRoot.name;
+    root.userData.vehicleColor = vehicle.col || null;
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
@@ -735,15 +806,16 @@ function buildProceduralCars() {
 
 async function buildCars() {
   try {
-    const gltf = await loadObjModel(CAMPUS_ASSETS.normalCar, CAMPUS_ASSETS.normalCarMtl, 'car');
+    const sources = await Promise.all(CAMPUS_ASSETS.carVariants.map(([, obj, mtl]) => loadObjModel(obj, mtl, 'car')));
     const r = rng(404), parked = [];
     for (const l of LOTS) {
       const c = Math.cos(l.rot), s = Math.sin(l.rot);
       for (const [z0, z1] of l.ly.rows) for (let i = 0; i < l.ly.n; i++) {
         if (r() > .55) continue;
         const x = l.ly.x0 + (i + .5) * l.ly.sw, z = (z0 + z1) / 2;
+        const modelIndex = (r() * sources.length) | 0;
         parked.push({ x: l.x + x * c + z * s, y: 0.02, z: l.z - x * s + z * c,
-          yaw: l.rot + (r() < .5 ? 0 : Math.PI), scale: .96 + r() * .08, col: CAR_COLS[(r() * CAR_COLS.length) | 0] });
+          yaw: l.rot + (r() < .5 ? 0 : Math.PI), scale: .96 + r() * .08, col: CAR_COLS[(r() * CAR_COLS.length) | 0], modelIndex, modelName: CAMPUS_ASSETS.carVariants[modelIndex][0] });
       }
     }
     const lanes = [
@@ -752,12 +824,15 @@ async function buildCars() {
     ];
     const moving = [];
     lanes.forEach((ln, li) => {
-      for (let k = 0; k < 3; k++) moving.push({ ...ln, t: r(), v: 11 + r() * 6, col: CAR_COLS[(li * 3 + k) % CAR_COLS.length], y: 0.02, scale: .96 + r() * .05 });
+      for (let k = 0; k < 3; k++) {
+        const modelIndex = (r() * sources.length) | 0;
+        moving.push({ ...ln, t: r(), v: 11 + r() * 6, col: CAR_COLS[(li * 3 + k) % CAR_COLS.length], y: 0.02, scale: .96 + r() * .05, modelIndex, modelName: CAMPUS_ASSETS.carVariants[modelIndex][0] });
+      }
     });
     const vehicles = parked.concat(moving);
-    const set = makeVehicleInstanceSet(gltf, vehicles);
+    const set = makeVehicleInstanceSet(sources, vehicles);
     set.vehicles = vehicles;
-    traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles };
+    traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles, modelCount: sources.length, modelNames: CAMPUS_ASSETS.carVariants.map(([name]) => name) };
     setAssetState('car', 'loaded');
   } catch (e) {
     setAssetState('car', 'fallback', e);
@@ -1413,8 +1488,11 @@ async function initPhysics() {
   // The existing physics model drives toward local -Z, so the packed visual is
   // rotated 180° in-place to keep headlights/taillights on the correct ends.
   try {
-    const gltf = await loadObjModel(CAMPUS_ASSETS.normalCar, CAMPUS_ASSETS.normalCarMtl, 'car');
+    const gltf = await loadObjModel(CAMPUS_ASSETS.driveVariant[1], CAMPUS_ASSETS.driveVariant[2], 'car');
     const packed = cloneVehicleRoot(gltf);
+    prepareVehicleInstance(packed, { color: '#1f4d8a' });
+    packed.userData.vehicleModel = CAMPUS_ASSETS.driveVariant[0];
+    packed.userData.vehicleColor = '#1f4d8a';
     packed.rotation.y = Math.PI;
     packed.position.x = 0;
     packed.position.z = 0;
@@ -1423,19 +1501,26 @@ async function initPhysics() {
 
     packed.traverse(m => {
       if (!m.isMesh || !m.material) return;
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
-      const label = `${m.name || ''} ${m.material?.name || ''}`.toLowerCase();
-      mats.forEach(mat => {
-        if (!mat?.color) return;
+      const wasArray = Array.isArray(m.material);
+      const mats = wasArray ? m.material : [m.material];
+      const next = mats.map(mat => {
+        if (!mat?.color) return mat;
+        const label = `${m.name || ''} ${mat.name || ''}`.toLowerCase();
         const name = String(mat.name || '').toLowerCase();
+        let copy = mat;
         if (label.includes('headlight') || name.includes('headlight')) {
-          mat = mat.clone(); m.material = mat; drive.packHeadMats.push(mat);
+          copy = mat.clone(); drive.packHeadMats.push(copy);
         } else if (label.includes('taillight') || label.includes('tail light') || name.includes('taillight')) {
-          mat = mat.clone(); m.material = mat; drive.packTailMats.push(mat);
+          copy = mat.clone(); drive.packTailMats.push(copy);
         } else if (label.includes('blue') || name === 'blue') {
-          mat = mat.clone(); m.material = mat; drive.packBodyMats.push(mat);
+          copy = mat.clone(); drive.packBodyMats.push(copy);
         }
+        copy.needsUpdate = true;
+        return copy;
       });
+      // Preserve every native OBJ material group. Never collapse a body mesh's
+      // material array while extracting light materials for Drive effects.
+      m.material = wasArray ? next : next[0];
     });
     const wheelNames = [/frontleftwheel/i, /frontrightwheel/i, /backwheels?/i];
     drive.objWheels = wheelNames.map(pattern => {
@@ -1444,6 +1529,12 @@ async function initPhysics() {
       return found;
     }).filter(Boolean).map((node, index) => {
       const pivot=createWheelPivot(node, node.name);
+      // The supplied wheel meshes are physically thin but correctly placed. A
+      // modest source-pivot scale keeps the real tire geometry readable in the
+      // chase camera without detaching it or changing any vertex positions.
+      pivot.scale.setScalar(1.58);
+      pivot.position.y += .09;
+      if (Math.abs(pivot.position.x) > .2) pivot.position.x += Math.sign(pivot.position.x) * .08;
       return { node, pivot, index, baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z };
     });
 
@@ -1594,7 +1685,7 @@ const tour = { on: false, i: 0, t: 0 }; let ready = false, sliderDrag = false;
 const panel = open => { $('panel').classList.toggle('closed', !open); $('panelBtn').setAttribute('aria-expanded', open); };
 function setAccent(hex) {
   if (!/^#?[0-9a-f]{3,8}$/i.test(String(hex).replace('#', '')) && !hex) return; ST.accent.set(hex); const css = '#' + ST.accent.getHexString(); document.documentElement.style.setProperty('--accent', css);
-  for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.packBodyMats?.length) drive.packBodyMats.forEach(m => m.color.copy(ST.accent)); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
+  for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
   document.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.accent === css)); $('accentPick').value = css; ls.set('davis-accent', css);
 }
 function setTime(v) { if (v === 'live') { clock.mode = 'live'; clock.speed = 1; $('speed').value = '1'; } else { clock.t = new Date(v).getTime(); clock.mode = 'manual'; } envDirty = true; syncClock(); }

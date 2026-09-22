@@ -1,3 +1,24 @@
+## v1.5.7 — Vehicle materials, Drive visuals, and traffic variety fix
+
+**Date:** 2026-09-22 · **Time:** 16:33 EDT · **Release:** `feat/fix-davis-vehicle-assets`
+
+### What changed
+- Fixed the Drive material-array mutation that collapsed the SUV’s native body, window, trim, headlight, and tail-light groups into the last tail-light material. The real native multi-material body is now preserved.
+- Drive now uses the supplied `SUV` variant with its native wheel groups, source-derived steering pivots, larger readable tire/hub presentation, and blue body paint.
+- Preserved native wheel materials while improving tire/hub contrast and keeping the wheels attached to their source pivots.
+- Applied explicit semantic colors to the supplied Bus and SchoolBus OBJ material groups because their source MTL files contain uniform gray diffuse values. Windows, trim, lights, and wheels now render as separate readable materials.
+- Non-drivable traffic now loads six supplied car variants (`NormalCar1`, `NormalCar2`, `SUV`, `SportsCar`, `SportsCar2`, and `Taxi`) and assigns varied paint colors independently to parked and moving vehicles.
+- Added browser assertions for native material bindings, multiple traffic models/colors, Drive material preservation, and wheel materials.
+
+### QA
+- Chromium acceptance passed with all six car variant OBJ/MTL pairs plus bus/school-bus assets returning HTTP 200.
+- Confirmed native bus/school-bus material groups and Drive body/window/light/wheel groups in the loaded Three.js hierarchy.
+- Confirmed Drive uses the SUV visual, retains the native multi-material body, and maps all three native wheel assemblies.
+- Confirmed wheel steering/rolling, transit movement, fullscreen/Drive lifecycle, cinematic idle, manual interaction suppression, and zero console errors.
+- JavaScript syntax and whitespace checks passed.
+
+---
+
 ## v1.5.6 — Davis campus native vehicle system and Drive lifecycle release
 
 **Date:** 2026-09-22 · **Time:** 15:44 EDT · **Release:** `feat/fix-davis-vehicle-assets`
