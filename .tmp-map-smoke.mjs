@@ -57,6 +57,18 @@ try {
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(2200);
   const night=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night);
   if(!(night>0.2)) throw new Error('time failed: '+night);
+  const fsButton=page.locator('.cm3d-fullscreen');
+  await fsButton.click(); await page.waitForTimeout(350);
+  const full=await page.evaluate(()=>({root:document.fullscreenElement?.id||null,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),width:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().width,height:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().height}));
+  if(full.root!=='cm-stage-3d'||full.label!=='Exit fullscreen'||full.width<window.innerWidth*.98||full.height<window.innerHeight*.98)throw new Error('map fullscreen failed: '+JSON.stringify(full));
+  await page.locator('.cm3d-mount').click({position:{x:180,y:180}}); await page.keyboard.press('D'); await page.waitForTimeout(450);
+  const driveOn=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on);
+  if(!driveOn)throw new Error('fullscreen Drive activation failed');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+  const afterDrive=await page.evaluate(()=>({full:document.fullscreenElement?.id||null,drive:window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on}));
+  if(afterDrive.full||afterDrive.drive)throw new Error('Drive/fullscreen Escape exit failed: '+JSON.stringify(afterDrive));
+  const outside=await page.evaluate(()=>document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'));
+  if(outside!=='Enter fullscreen')throw new Error('fullscreen button did not restore');
   await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
   console.log('MAP SMOKE PASS',JSON.stringify({state,assets,focused,route,reset,accent,rain,night,errors}));
   if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
