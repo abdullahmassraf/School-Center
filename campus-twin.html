@@ -238,7 +238,7 @@ const CAMPUS_ASSETS = Object.freeze({
   schoolBus: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.json.gz.b64'
 });
 const ASSET_STATE = {
-  format: 'gzip+base64-json',
+  format: 'gzip+base64-json-sanitized',
   car: 'pending',
   transit: { bus: 'pending', schoolBus: 'pending' },
   errors: []
@@ -258,6 +258,58 @@ async function unpackGzip(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
   return new Response(stream).arrayBuffer();
 }
+function sanitizeAssetPart(part, kind) {
+  const src = Array.isArray(part?.v) ? part.v : [];
+  const idx = Array.isArray(part?.i) ? part.i : [];
+  if (!src.length || idx.length < 3) return null;
+
+  const limits = kind === 'car'
+    ? { x: 1.8, yMin: -0.15, yMax: 2.7, z: 2.75, edge: 3.25 }
+    : { x: 7.5, yMin: -0.5, yMax: 5.0, z: 4.0, edge: 8.0 };
+  const pos = [];
+  const maxEdge2 = limits.edge * limits.edge;
+
+  for (let p = 0; p + 2 < idx.length; p += 3) {
+    const ia = Number(idx[p]), ib = Number(idx[p + 1]), ic = Number(idx[p + 2]);
+    if (!Number.isInteger(ia) || !Number.isInteger(ib) || !Number.isInteger(ic)) continue;
+    const a = src[ia], b = src[ib], d = src[ic];
+    if (!Array.isArray(a) || !Array.isArray(b) || !Array.isArray(d)) continue;
+
+    const ax=+a[0], ay=+a[1], az=+a[2], bx=+b[0], by=+b[1], bz=+b[2], cx=+d[0], cy=+d[1], cz=+d[2];
+    if (![ax,ay,az,bx,by,bz,cx,cy,cz].every(Number.isFinite)) continue;
+
+    // Reject vertices that are outside the known physical envelope of the
+    // supplied vehicle. This catches stray/outlier vertices without scaling
+    // the entire model down around them.
+    const inBounds =
+      Math.abs(ax)<=limits.x && ay>=limits.yMin && ay<=limits.yMax && Math.abs(az)<=limits.z &&
+      Math.abs(bx)<=limits.x && by>=limits.yMin && by<=limits.yMax && Math.abs(bz)<=limits.z &&
+      Math.abs(cx)<=limits.x && cy>=limits.yMin && cy<=limits.yMax && Math.abs(cz)<=limits.z;
+    if (!inBounds) continue;
+
+    const abx=bx-ax, aby=by-ay, abz=bz-az;
+    const bcx=cx-bx, bcy=cy-by, bcz=cz-bz;
+    const cax=ax-cx, cay=ay-cy, caz=az-cz;
+    const ab2=abx*abx+aby*aby+abz*abz;
+    const bc2=bcx*bcx+bcy*bcy+bcz*bcz;
+    const ca2=cax*cax+cay*cay+caz*caz;
+    const maxE2=Math.max(ab2,bc2,ca2);
+    const minE2=Math.min(ab2,bc2,ca2);
+    if (maxE2 > maxEdge2 || minE2 < 1e-9 || maxE2 > minE2 * 80) continue;
+
+    const nx=aby*caz-abz*cay, ny=abz*cax-abx*caz, nz=abx*cay-aby*cax;
+    if ((nx*nx+ny*ny+nz*nz) < 1e-10) continue;
+    pos.push(ax,ay,az,bx,by,bz,cx,cy,cz);
+  }
+  if (pos.length < 9) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 async function loadPackedModel(url) {
   if (packedCache.has(url)) return packedCache.get(url);
   const promise = (async () => {
@@ -271,35 +323,42 @@ async function loadPackedModel(url) {
       const data = JSON.parse(new TextDecoder().decode(bytes));
       if (!data || !Array.isArray(data.parts) || !data.parts.length) throw new Error(`Invalid campus asset payload: ${url}`);
 
+      const isCar = /NormalCar1|car/i.test(String(data.name || '') + String(url));
+      const kind = isCar ? 'car' : 'bus';
       const root = new THREE.Group();
-    root.name = `CampusAsset:${data.name || 'vehicle'}`;
-    const palette = {
-      Black: '#14181d', Grey: '#6e7379', Blue: '#5e95be', Windows: '#173446',
-      Headlights: '#fff1ac', TailLights: '#bf3d36',
-      Top: '#4f93d4', Bottom: '#65707b', Bumper: '#5b6672', Details: '#2f3740', Material: '#eef1f4', Lights: '#ffe79c',
-      Yellow: '#f5c84b', Wheel: '#22272d'
-    };
-    for (const part of data.parts) {
-      const vertices = new Float32Array(part.v.flat());
-      const indices = new Uint16Array(part.i || []);
-      if (!vertices.length || indices.length < 3) continue;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      geo.setIndex(new THREE.BufferAttribute(indices, 1));
-      geo.computeVertexNormals();
-      geo.computeBoundingSphere();
-      const material = new THREE.MeshStandardMaterial({
-        color: palette[part.name] || '#aab2bb',
-        roughness: /windows/i.test(part.name) ? .28 : /lights/i.test(part.name) ? .32 : .55,
-        metalness: /wheel|black|grey/i.test(part.name) ? .55 : .06
-      });
-      material.name = part.name;
-      const mesh = new THREE.Mesh(geo, material);
-      mesh.name = part.name;
-      mesh.castShadow = mesh.receiveShadow = true;
-      mesh.frustumCulled = true;
-      root.add(mesh);
-    }
+      root.name = `CampusAsset:${data.name || 'vehicle'}`;
+      const palette = {
+        Black:'#11161b', Grey:'#727a83', Blue:'#5c91b8', Windows:'#163246',
+        Headlights:'#fff3b0', TailLights:'#c83b36',
+        Top:'#4f93d4', Bottom:'#65707b', Bumper:'#5b6672', Details:'#2f3740',
+        Material:'#edf1f4', Lights:'#ffe79c', Yellow:'#f5c84b', Wheel:'#22272d'
+      };
+      for (const part of data.parts) {
+        const geo = sanitizeAssetPart(part, kind);
+        if (!geo) continue;
+        const name = String(part.name || 'part');
+        const material = new THREE.MeshStandardMaterial({
+          color: palette[name] || '#aab2bb',
+          roughness: /windows/i.test(name) ? .24 : /lights/i.test(name) ? .30 : .58,
+          metalness: /wheel|black|grey/i.test(name) ? .52 : .08
+        });
+        material.name = name;
+        const mesh = new THREE.Mesh(geo, material);
+        mesh.name = name;
+        mesh.castShadow = mesh.receiveShadow = true;
+        mesh.frustumCulled = true;
+        root.add(mesh);
+      }
+      if (!root.children.length) throw new Error(`Vehicle asset contains no valid triangles: ${url}`);
+      root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new V3());
+      const target = kind === 'car' ? 4.35 : 9.5;
+      const length = Math.max(size.x, size.z);
+      if (!(length > 0) || !Number.isFinite(length)) throw new Error(`Vehicle asset has invalid bounds: ${url}`);
+      const factor = THREE.MathUtils.clamp(target / length, 0.45, 1.75);
+      root.scale.setScalar(factor);
+      root.position.y -= box.min.y * factor;
       preparePackedRoot(root);
       return root;
     } finally {
@@ -851,9 +910,11 @@ async function buildPublicTransport() {
     transit = { vehicles: [] };
     loaded.forEach(({ spec, gltf }) => {
       const root = clonePackedRoot(gltf);
-      root.position.set(spec.x, 0.04, spec.z);
+      root.position.x = spec.x;
+      root.position.z = spec.z;
+      root.position.y += 0.04;
       root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-      root.scale.setScalar(spec.scale);
+      root.scale.multiplyScalar(spec.scale);
       scene.add(root);
       transit.vehicles.push({ root, ...spec, stopTimer: 0, servedStop: false });
       setAssetState(spec.key, 'loaded');
@@ -1440,7 +1501,8 @@ async function initPhysics() {
     const gltf = await loadPackedModel(CAMPUS_ASSETS.normalCar);
     const packed = clonePackedRoot(gltf);
     packed.rotation.y = Math.PI;
-    packed.position.set(0, 0, 0);
+    packed.position.x = 0;
+    packed.position.z = 0;
     g.add(packed);
     drive.packedCar = packed;
 
@@ -1727,7 +1789,7 @@ addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
   interaction, drive, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
-  get traffic(){ return traffic; }, get transit(){ return transit; }
+  get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.entries) out.trafficMeshes=traffic.set.entries.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
