@@ -60,8 +60,13 @@ try {
   await page.locator('.cm3d-fullscreen').click(); await page.waitForTimeout(450);
   const full=await page.evaluate(()=>({root:document.fullscreenElement?.id||null,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),width:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().width,height:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().height}));
   if(full.root!=='cm-stage-3d'||full.label!=='Exit fullscreen'||full.width<100||full.height<100)throw new Error('map fullscreen failed: '+JSON.stringify(full));
-  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',bubbles:true}))); await page.waitForTimeout(650);
-  const driveOn=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on);
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',bubbles:true})));
+  let driveOn=false; const driveDeadline=Date.now()+12000;
+  while(Date.now()<driveDeadline){
+    driveOn=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on);
+    if(driveOn) break;
+    await page.waitForTimeout(200);
+  }
   if(!driveOn)throw new Error('fullscreen Drive activation failed');
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape',bubbles:true}))); await page.waitForTimeout(700);
   const afterDrive=await page.evaluate(()=>({full:document.fullscreenElement?.id||null,drive:window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on}));
