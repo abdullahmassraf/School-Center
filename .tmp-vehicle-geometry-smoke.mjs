@@ -45,7 +45,6 @@ const geometry=await page.evaluate(()=>{
       if(mx>64||mx>Math.max(mn,1e-9)*250)out.thin.push({label,mx,mn});
     }
   };
-  const posV=new THREE.Vector3();
   const sampleInstance=(inst,label)=>{
     const T=d.THREE; const m=new T.Matrix4(), p=new T.Vector3(), q=new T.Quaternion(), s=new T.Vector3();
     for(let i=0;i<Math.min(inst.count,80);i++){
