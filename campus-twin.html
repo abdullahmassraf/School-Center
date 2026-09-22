@@ -219,7 +219,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ═══════════ 0 · CONFIG & DATA (your proof-of-concept data model, kept as-is) ═══════════ */
 const CAMPUS = { lat: 43.65539, lon: -79.73846, tz: 'America/Toronto' };
@@ -234,12 +233,12 @@ const $ = id => document.getElementById(id);
 
 const CAMPUS_ASSET_ROOT = 'assets/campus/';
 const CAMPUS_ASSETS = Object.freeze({
-  normalCar: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.glb.gz.b64',
-  bus: CAMPUS_ASSET_ROOT + 'transit/Bus.glb.gz.b64',
-  schoolBus: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.glb.gz.b64'
+  normalCar: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.json.gz.b64',
+  bus: CAMPUS_ASSET_ROOT + 'transit/Bus.json.gz.b64',
+  schoolBus: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.json.gz.b64'
 });
 const ASSET_STATE = {
-  format: 'gzip+base64',
+  format: 'gzip+base64-json',
   car: 'pending',
   transit: { bus: 'pending', schoolBus: 'pending' },
   errors: []
@@ -259,15 +258,47 @@ async function unpackGzip(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
   return new Response(stream).arrayBuffer();
 }
-async function loadPackedGLB(url) {
+async function loadPackedModel(url) {
   if (packedCache.has(url)) return packedCache.get(url);
   const promise = (async () => {
     const res = await fetch(url, { cache: 'force-cache' });
     if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
     const packed = decodeBase64Bytes(await res.text());
-    const arrayBuffer = await unpackGzip(packed);
-    const loader = new GLTFLoader();
-    return await new Promise((resolve, reject) => loader.parse(arrayBuffer, '', resolve, reject));
+    const bytes = await unpackGzip(packed);
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    if (!data || !Array.isArray(data.parts) || !data.parts.length) throw new Error(`Invalid campus asset payload: ${url}`);
+
+    const root = new THREE.Group();
+    root.name = `CampusAsset:${data.name || 'vehicle'}`;
+    const palette = {
+      Black: '#14181d', Grey: '#6e7379', Blue: '#5e95be', Windows: '#173446',
+      Headlights: '#fff1ac', TailLights: '#bf3d36',
+      Top: '#4f93d4', Bottom: '#65707b', Bumper: '#5b6672', Details: '#2f3740', Material: '#eef1f4', Lights: '#ffe79c',
+      Yellow: '#f5c84b', Wheel: '#22272d'
+    };
+    for (const part of data.parts) {
+      const vertices = new Float32Array(part.v.flat());
+      const indices = new Uint32Array(part.i || []);
+      if (!vertices.length || indices.length < 3) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+      geo.setIndex(new THREE.BufferAttribute(indices, 1));
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      const material = new THREE.MeshStandardMaterial({
+        color: palette[part.name] || '#aab2bb',
+        roughness: /windows/i.test(part.name) ? .28 : /lights/i.test(part.name) ? .32 : .55,
+        metalness: /wheel|black|grey/i.test(part.name) ? .55 : .06
+      });
+      material.name = part.name;
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.name = part.name;
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+      root.add(mesh);
+    }
+    preparePackedRoot(root);
+    return root;
   })();
   packedCache.set(url, promise);
   try { return await promise; } catch (e) { packedCache.delete(url); throw e; }
@@ -749,7 +780,7 @@ function buildProceduralCars() {
 
 async function buildCars() {
   try {
-    const gltf = await loadPackedGLB(CAMPUS_ASSETS.normalCar);
+    const gltf = await loadPackedModel(CAMPUS_ASSETS.normalCar);
     const r = rng(404), parked = [];
     for (const l of LOTS) {
       const c = Math.cos(l.rot), s = Math.sin(l.rot);
@@ -809,12 +840,12 @@ async function buildPublicTransport() {
     { key: 'schoolBus', url: CAMPUS_ASSETS.schoolBus, x: -56.3, z: -58, dir: -1, speed: 8.5, scale: .90 }
   ];
   try {
-    const loaded = await Promise.all(specs.map(async spec => ({ spec, gltf: await loadPackedGLB(spec.url) })));
+    const loaded = await Promise.all(specs.map(async spec => ({ spec, gltf: await loadPackedModel(spec.url) })));
     transit = { vehicles: [] };
     loaded.forEach(({ spec, gltf }) => {
       const root = clonePackedRoot(gltf.scene);
       root.position.set(spec.x, 0.04, spec.z);
-      root.rotation.y = spec.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+      root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
       root.scale.setScalar(spec.scale);
       scene.add(root);
       transit.vehicles.push({ root, ...spec, stopTimer: 0, servedStop: false });
@@ -855,7 +886,7 @@ function updatePublicTransport(dt) {
     v.root.position.set(v.x, 0.04, v.z);
     /* Source buses are modeled front-first along +X. The campus corridor is
      * along Z, so +/-90° keeps headlights/front end facing travel direction. */
-    v.root.rotation.y = v.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+    v.root.rotation.y = v.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   });
 }
 
@@ -1399,7 +1430,7 @@ async function initPhysics() {
   // The existing physics model drives toward local -Z, so the packed visual is
   // rotated 180° in-place to keep headlights/taillights on the correct ends.
   try {
-    const gltf = await loadPackedGLB(CAMPUS_ASSETS.normalCar);
+    const gltf = await loadPackedModel(CAMPUS_ASSETS.normalCar);
     const packed = clonePackedRoot(gltf.scene);
     packed.rotation.y = Math.PI;
     packed.position.set(0, 0, 0);
