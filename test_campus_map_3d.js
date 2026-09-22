@@ -136,7 +136,7 @@ const targetDelta=Math.hypot(chased.target[0]-moving.target[0],chased.target[1]-
 if(camDelta<0.05||targetDelta<0.05||chased.strength<=0)throw new Error(`smart Drive chase did not move the camera rig: ${JSON.stringify({moving,chased,camDelta,targetDelta})}`);
 console.log('SMART DRIVE CHASE',JSON.stringify({moving,chased,camDelta,targetDelta}));
 await key('Escape'); await sleep(800);
-await ev(`window.__SC_CAMPUS_MAP_3D__.autoOrbit(true); window.__SC_CAMPUS_MAP_3D__.reset()`);
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.postMessage({type:'campus:autoorbit',value:true}, location.origin); window.__SC_CAMPUS_MAP_3D__.reset()`);
 await sleep(5000);
 
 const idleOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition}})()`);
