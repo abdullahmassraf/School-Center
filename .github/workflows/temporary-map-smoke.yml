@@ -25,7 +25,7 @@ jobs:
           python3 -m http.server 8787 --bind 127.0.0.1 >/tmp/school-center-http.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID || true' EXIT
-          cat > /tmp/map-smoke.mjs <<'EOF'
+          cat > .tmp-map-smoke.mjs <<'EOF
           import { chromium } from 'playwright';
 
           const browser = await chromium.launch({headless:true,args:[
@@ -99,7 +99,8 @@ jobs:
           if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
           await browser.close();
           EOF
-          node /tmp/map-smoke.mjs
+          node .tmp-map-smoke.mjs
+          rm -f .tmp-map-smoke.mjs
       - name: Upload smoke screenshot
         uses: actions/upload-artifact@v4
         with:
