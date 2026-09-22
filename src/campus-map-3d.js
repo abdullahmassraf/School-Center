@@ -65,7 +65,10 @@ export class CampusMap3DManager {
       this._syncFullscreenState(active);
       this._syncPageFullscreen(active);
       this._post({type:'campus:fullscreen-state',value:active});
-      requestAnimationFrame(()=>this._post({type:'campus:resize'}));
+      requestAnimationFrame(()=>{
+        this._post({type:'campus:resize'});
+        requestAnimationFrame(()=>this._post({type:'campus:resize'}));
+      });
     };
     document.addEventListener('fullscreenchange',this._onFullscreenChange);
     this._mo=new MutationObserver(()=>this.refreshAccent());
@@ -115,7 +118,7 @@ export class CampusMap3DManager {
     const active=document.fullscreenElement===this.fullscreenRoot;
     this._syncFullscreenState(active);
     this._syncPageFullscreen?.(active);
-    if(!active) requestAnimationFrame(()=>this._post({type:'campus:resize'}));
+    if(!active) requestAnimationFrame(()=>{ this._post({type:'campus:resize'}); requestAnimationFrame(()=>this._post({type:'campus:resize'})); });
   }
 
   _installLegacyHud(){
