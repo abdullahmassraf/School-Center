@@ -84,7 +84,7 @@ console.log('DRIVE OUTSIDE FULLSCREEN: blocked');
 await clickSelector('.cm3d-fullscreen');
 await sleep(600);
 let fs=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.__DAVIS_TWIN_DEBUG__.camera.aspect,expected:innerWidth/innerHeight,calls:f.__DAVIS_TWIN_DEBUG__.renderer.info.render.calls}})()`);
-if(!fs.host||!fs.twin||fs.label!=='Exit fullscreen'||Math.abs(fs.aspect-f.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fs)}`);
+if(!fs.host||!fs.twin||fs.label!=='Exit fullscreen'||Math.abs(fs.aspect-fs.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fs)}`);
 console.log('FULLSCREEN ENTER',JSON.stringify(fs));
 
 await clickSelector('.cm3d-fullscreen');
