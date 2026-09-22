@@ -75,7 +75,11 @@ const waitFor=async(expression,timeout=10000,interval=120)=>{
 };
 const QA_DIR=path.join(ROOT,'qa-artifacts');fs.mkdirSync(QA_DIR,{recursive:true});
 const screenshot=async name=>{
-  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+  await ev(`document.querySelector('#cm3d-mount iframe')?.scrollIntoView({block:'center',inline:'center'})`);
+  await sleep(160);
+  const clip=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__?.frame,r=f?.getBoundingClientRect?.();return r&&r.width>4&&r.height>4?{x:Math.max(0,r.left),y:Math.max(0,r.top),width:Math.min(innerWidth-r.left,r.width),height:Math.min(innerHeight-r.top,r.height),scale:1}:null})()`);
+  if(!clip)throw new Error('campus map iframe clip unavailable for screenshot');
+  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true,clip});
   const out=path.join(QA_DIR,name+'.png');
   fs.writeFileSync(out,Buffer.from(shot.result.data,'base64'));
   console.log('SCREENSHOT',out);
