@@ -61,7 +61,7 @@ for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Er
 const assets=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{state:d.ASSET_STATE,paths:d.CAMPUS_ASSETS,trafficMode:d.traffic?.mode,parked:d.traffic?.parkedCount,moving:d.traffic?.cars?.length,transit:d.transit?.vehicles?.map(v=>({key:v.key,x:v.x,z:v.z,dir:v.dir}))}})()`);
 if(assets.state.car!=='loaded'||assets.state.transit.bus!=='loaded'||assets.state.transit.schoolBus!=='loaded')throw new Error(`packed assets failed to load: ${JSON.stringify(assets)}`);
 if(assets.trafficMode!=='packed'||assets.moving!==12||assets.transit.length!==2)throw new Error(`traffic/transit integration failed: ${JSON.stringify(assets)}`);
-if(!String(assets.paths.normalCar).endsWith('/cars/NormalCar1.glb.gz.b64')||!String(assets.paths.bus).endsWith('/transit/Bus.glb.gz.b64')||!String(assets.paths.schoolBus).endsWith('/transit/SchoolBus.glb.gz.b64'))throw new Error(`asset paths are not canonical: ${JSON.stringify(assets.paths)}`);
+if(!String(assets.paths.normalCar).endsWith('/cars/NormalCar1.json.gz.b64')||!String(assets.paths.bus).endsWith('/transit/Bus.json.gz.b64')||!String(assets.paths.schoolBus).endsWith('/transit/SchoolBus.json.gz.b64'))throw new Error(`asset paths are not canonical: ${JSON.stringify(assets.paths)}`);
 console.log('ASSETS',JSON.stringify(assets));
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
