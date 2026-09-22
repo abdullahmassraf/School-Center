@@ -51,7 +51,7 @@ try {
   await page.evaluate(()=>{document.documentElement.style.setProperty('--accent','#ff4fd8'); window.__SC_CAMPUS_MAP_3D__.refreshAccent();}); await page.waitForTimeout(150);
   const accent=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.accent?.getHexString?.() || null);
   if(accent!=='ff4fd8') throw new Error('accent failed: '+accent);
-  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setWeather('rain')); await page.waitForTimeout(150);
+  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setWeather('rain')); await page.waitForTimeout(900);
   const rain=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.W.rain);
   if(!(rain>0)) throw new Error('weather failed');
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(300);
