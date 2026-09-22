@@ -261,14 +261,17 @@ async function unpackGzip(bytes) {
 async function loadPackedModel(url) {
   if (packedCache.has(url)) return packedCache.get(url);
   const promise = (async () => {
-    const res = await fetch(url, { cache: 'force-cache' });
-    if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
-    const packed = decodeBase64Bytes(await res.text());
-    const bytes = await unpackGzip(packed);
-    const data = JSON.parse(new TextDecoder().decode(bytes));
-    if (!data || !Array.isArray(data.parts) || !data.parts.length) throw new Error(`Invalid campus asset payload: ${url}`);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
+    try {
+      const res = await fetch(url, { cache: 'force-cache', signal: ac.signal });
+      if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
+      const packed = decodeBase64Bytes(await res.text());
+      const bytes = await unpackGzip(packed);
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!data || !Array.isArray(data.parts) || !data.parts.length) throw new Error(`Invalid campus asset payload: ${url}`);
 
-    const root = new THREE.Group();
+      const root = new THREE.Group();
     root.name = `CampusAsset:${data.name || 'vehicle'}`;
     const palette = {
       Black: '#14181d', Grey: '#6e7379', Blue: '#5e95be', Windows: '#173446',
@@ -297,8 +300,11 @@ async function loadPackedModel(url) {
       mesh.frustumCulled = true;
       root.add(mesh);
     }
-    preparePackedRoot(root);
-    return root;
+      preparePackedRoot(root);
+      return root;
+    } finally {
+      clearTimeout(timer);
+    }
   })();
   packedCache.set(url, promise);
   try { return await promise; } catch (e) { packedCache.delete(url); throw e; }
@@ -720,6 +726,7 @@ let transit = null;
 
 const ASSET_MATRIX = new THREE.Matrix4();
 const ASSET_QUAT = new THREE.Quaternion();
+const MT = new THREE.Matrix4();
 const ASSET_EULER = new THREE.Euler(0, 0, 0);
 const ASSET_SCALE = new V3(1, 1, 1);
 const ASSET_OBJECT = new THREE.Object3D();
@@ -1124,7 +1131,7 @@ function updateEnv(dt) {
   if (Math.abs(ST.wet - (ST._w || 0)) > .004 || Math.abs(ST.day - (ST._d || 0)) > .004) { ST._w = ST.wet; ST._d = ST.day; ST.wetMix(); }
   ST.lampPool && (ST.lampPool.opacity = ST.night * .55, ST.lampHead.color.setRGB(2.6, 2.1, 1.3).multiplyScalar(.25 + .75 * ST.night));
   for (const id in BG) { const bd = BG[id]; bd.halo.material.opacity = ST.night * .55; }
-  if (traffic) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
+  if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
 function updateShadow() {
@@ -1655,7 +1662,11 @@ function frame(now) {
 }
 const setLoad = (msg, p) => { $('loadMsg').textContent = msg; $('loadBar').style.width = (p * 100) + '%'; };
 async function boot() {
-  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, async () => { buildLamps(); buildMisc(); buildWeather(); await buildCars(); await buildPublicTransport(); }], ['Wayfinding…', false, buildRoute]];
+  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, () => {
+  buildLamps(); buildMisc(); buildWeather();
+  void buildCars();
+  void buildPublicTransport();
+}], ['Wayfinding…', false, buildRoute]];
   for (let i = 0; i < steps.length; i++) {
     setLoad(steps[i][0], i / steps.length); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
     try { await steps[i][2](); } catch (e) { console.error(steps[i][0], e); if (steps[i][1]) { fatal('Something went wrong while building the scene', String(e && e.message || e)); return; } }
