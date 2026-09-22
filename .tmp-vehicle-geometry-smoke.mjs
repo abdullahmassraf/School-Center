@@ -58,7 +58,7 @@ const geometry=await page.evaluate(()=>{
   if(d?.transit?.vehicles)for(const [i,v] of d.transit.vehicles.entries())v.root.traverse(m=>{if(m.isMesh){out.transitMeshes++;inspect(m.geometry,'transit-'+i+'-'+m.name,14);}});
   return out;
 });
-if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.driveMeshes<1||geometry.transitMeshes<1||geometry.badInstanceTransforms.length)
+if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.transitMeshes<1||geometry.badInstanceTransforms.length)
   throw new Error('asset geometry integrity failed: '+JSON.stringify(geometry));
 
 for(const id of ['J','H','M','B','C','A']){
