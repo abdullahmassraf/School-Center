@@ -25,15 +25,16 @@ const chromeArgs = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
   '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--enable-webgl',
+  '--use-angle=swiftshader',
+  '--enable-unsafe-swiftshader',
+  '--disable-background-networking',
+  '--disable-component-update',
+  '--disable-default-apps',
+  '--disable-crash-reporter',
   '--no-first-run',
   '--no-default-browser-check',
-  '--enable-gpu',
-  '--use-gl=angle',
-  '--use-angle=swiftshader-webgl',
-  '--enable-unsafe-swiftshader',
-  '--disable-gpu-sandbox',
-  '--enable-webgl',
-  '--ignore-gpu-blocklist',
   '--remote-debugging-address=127.0.0.1',
   `--remote-debugging-port=${DEBUG_PORT}`,
   '--remote-allow-origins=*',
@@ -41,10 +42,14 @@ const chromeArgs = [
   '--window-size=1280,900',
   'about:blank'
 ];
-const chrome=spawn(CHROME,chromeArgs,{stdio:'ignore'});
+const chrome=spawn(CHROME,chromeArgs,{stdio:['ignore','pipe','pipe']});
+let chromeStdout='', chromeStderr='';
+chrome.stdout?.on('data',b=>{chromeStdout+=b.toString();});
+chrome.stderr?.on('data',b=>{chromeStderr+=b.toString();});
 
 let target, cdpVersion = null, cdpLastError = null;
-for(let i=0;i<80&&!target;i++){
+for(let i=0;i<120&&!target;i++){
+  if (chrome.exitCode !== null) break;
   try{
     const vr=await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
     if(vr.ok) cdpVersion=await vr.json();
@@ -55,7 +60,7 @@ for(let i=0;i<80&&!target;i++){
   }catch(e){ cdpLastError=String(e?.message||e); }
   if(!target) await new Promise(r=>setTimeout(r,250));
 }
-if(!target)throw new Error(`no CDP page (version=${JSON.stringify(cdpVersion)}, lastError=${cdpLastError||'none'}, chrome=${CHROME})`);
+if(!target)throw new Error(`no CDP page (exitCode=${chrome.exitCode}, signal=${chrome.signalCode}, version=${JSON.stringify(cdpVersion)}, lastError=${cdpLastError||'none'}, stdout=${JSON.stringify(chromeStdout.slice(-2000))}, stderr=${JSON.stringify(chromeStderr.slice(-4000))}, chrome=${CHROME})`);
 
 const ws=new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r=>ws.onopen=r);
