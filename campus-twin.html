@@ -926,7 +926,7 @@ function updatePublicTransport(dt) {
       for (const rig of v.wheelRigs) {
         rig.roll += rollDistance / Math.max(rig.radius, .08);
         rig.pivot.rotation.set(rig.baseX, rig.baseY, rig.baseZ);
-        rig.pivot.rotateX(rig.roll);
+        rig.pivot.rotateZ(rig.roll);
       }
     }
   });
@@ -1541,6 +1541,17 @@ function fitNativeTransitWheels(root, kind) {
     const wheelBox = new THREE.Box3().setFromObject(node), wheelSize = wheelBox.getSize(new V3());
     const nativeDiameter = Math.max(wheelSize.x, wheelSize.y, wheelSize.z);
     const fit = nativeDiameter > .001 ? desiredDiameter / nativeDiameter : .25;
+
+    /*
+     * Transit source wheel cylinders are authored on local X while the bus
+     * body is lengthwise on local +X. The bus turns ±90° onto the campus Z
+     * corridor, so leaving the wheel axis untouched puts the disk on the bus
+     * front/rear and creates the reported large black rectangular artifact.
+     * Rotate only the rig around bus-local Y: wheel axle becomes local Z
+     * (world X after the bus turn). Original vertices/materials stay intact.
+     */
+    pivot.rotateY(Math.PI / 2);
+    pivot.userData.transitWheelAxis = 'z';
     pivot.scale.multiplyScalar(fit);
     pivot.userData.nativeWheelFit = fit;
     pivot.userData.nativeWheelDiameter = nativeDiameter * fit;
@@ -1591,20 +1602,19 @@ async function initPhysics() {
   P(new THREE.BoxGeometry(.9, .12, 1.2), bm, 0, 1.66, .3, 'body');
 
   const hl = new THREE.MeshStandardMaterial({color:'#403c34',roughness:.18,metalness:.08,emissive:'#ffe2b0',emissiveIntensity:0});
-  drive.headLampMat=hl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.19,.045),hl,x,.78,-2.115,'headlight'));
+  drive.headLampMat=hl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.19,.045),hl,x,.78,2.115,'headlight'));
   const tl = new THREE.MeshStandardMaterial({color:'#4a080b',roughness:.28,metalness:.04,emissive:'#ff1b24',emissiveIntensity:0});
-  drive.tailLampMat=tl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.18,.045),tl,x,.78,2.115,'taillight'));
+  drive.tailLampMat=tl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.18,.045),tl,x,.78,-2.115,'taillight'));
 
-  // The supplied NormalCar1 is an actual road car (front at local +Z).
-  // The existing physics model drives toward local -Z, so the packed visual is
-  // rotated 180° in-place to keep headlights/taillights on the correct ends.
+  // NormalCar1 is authored with its front at local +Z. Drive uses that same
+  // forward convention, so the source wheel groups keep their natural roles.
   try {
     const gltf = await loadObjModel(CAMPUS_ASSETS.driveVariant[1], CAMPUS_ASSETS.driveVariant[2], 'car');
     const packed = cloneVehicleRoot(gltf);
     prepareVehicleInstance(packed, { color: '#1f4d8a' });
     packed.userData.vehicleModel = CAMPUS_ASSETS.driveVariant[0];
     packed.userData.vehicleColor = '#1f4d8a';
-    packed.rotation.y = Math.PI;
+    packed.rotation.y = 0;
     packed.position.x = 0;
     packed.position.z = 0;
     g.add(packed);
@@ -1663,11 +1673,11 @@ async function initPhysics() {
   drive.beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uI: { value: 0 }, uCol: { value: new Col('#ffe4b5') } },
     vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv=uv; vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.); vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }',
     fragmentShader: 'uniform float uI; uniform vec3 uCol; varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ float f=pow(abs(dot(normalize(vN),normalize(vV))),1.5); gl_FragColor=vec4(uCol*pow(vUv.y,1.4)*f*.5*uI,1.); }' });
-  for (const x of [-.64, .64]) { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.12, 3.4, 26, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, -13), drive.beamMat); cone.position.set(x, .8, -2.1); cone.frustumCulled = false; g.add(cone); }
+  for (const x of [-.64, .64]) { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.12, 3.4, 26, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, 13), drive.beamMat); cone.position.set(x, .8, 2.1); cone.frustumCulled = false; g.add(cone); }
   drive.poolM = new THREE.MeshBasicMaterial({ map: ST.glow || (ST.glow = glowTex()), color: '#ffe0aa', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
-  g.add(new THREE.Mesh(new THREE.PlaneGeometry(9, 24).rotateX(-Math.PI / 2).translate(0, .08, -13), drive.poolM));
+  g.add(new THREE.Mesh(new THREE.PlaneGeometry(9, 24).rotateX(-Math.PI / 2).translate(0, .08, 13), drive.poolM));
   // Fine illuminated dust/moisture motes inside the headlight cones.
-  { const n=110, rr=rng(7474), pos=new Float32Array(n*3), base=new Float32Array(n*3); for(let i=0;i<n;i++){const side=i%2?1:-1, z=-3-rr()*25, spread=(Math.abs(z)+2)*.10, x=side*.64+(rr()-.5)*spread, y=.35+rr()*1.15+(rr()-.5)*.15;pos.set([x,y,z],i*3);base.set([x,y,z],i*3);}
+  { const n=110, rr=rng(7474), pos=new Float32Array(n*3), base=new Float32Array(n*3); for(let i=0;i<n;i++){const side=i%2?1:-1, z=3+rr()*25, spread=(Math.abs(z)+2)*.10, x=side*.64+(rr()-.5)*spread, y=.35+rr()*1.15+(rr()-.5)*.15;pos.set([x,y,z],i*3);base.set([x,y,z],i*3);}
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
     const matp=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.28,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
     const dust=new THREE.Points(geo,matp);dust.frustumCulled=false;dust.renderOrder=8;g.add(dust);drive.dust=dust;drive.dustBase=base;
@@ -1676,7 +1686,7 @@ async function initPhysics() {
   if (drive.packedCar) drive.wheels.forEach(wheel => wheel.visible = false);
 
   g.visible = false; scene.add(g); drive.car = g; drive.prevAnchor.set(-150,2.2,138);
-  drive.body = w.createRigidBody(RAP.RigidBodyDesc.dynamic().setTranslation(-150, 1.2, 138).setRotation({ x: 0, y: -Math.SQRT1_2, z: 0, w: Math.SQRT1_2 }).enabledRotations(false, true, false).setLinearDamping(.2).setAngularDamping(3).setCcdEnabled(true));
+  drive.body = w.createRigidBody(RAP.RigidBodyDesc.dynamic().setTranslation(-150, 1.2, 138).setRotation({ x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 }).enabledRotations(false, true, false).setLinearDamping(.2).setAngularDamping(3).setCcdEnabled(true));
   const initPos = drive.body.translation(), initRot = drive.body.rotation();
   drive.physicsPrevPos.set(initPos.x, initPos.y, initPos.z); drive.physicsCurrPos.set(initPos.x, initPos.y, initPos.z); drive.renderPos.set(initPos.x, initPos.y, initPos.z);
   drive.physicsPrevQuat.set(initRot.x, initRot.y, initRot.z, initRot.w); drive.physicsCurrQuat.copy(drive.physicsPrevQuat); drive.renderQuat.copy(drive.physicsPrevQuat);
@@ -1694,7 +1704,7 @@ async function initPhysics() {
   return drive.initPromise;
 }
 function driveStep(dt) {
-  const d = drive, k = d.keys, b = d.body, v = b.linvel(), r = b.rotation(); d.q.set(r.x, r.y, r.z, r.w); d.fwd.set(0, 0, -1).applyQuaternion(d.q);
+  const d = drive, k = d.keys, b = d.body, v = b.linvel(), r = b.rotation(); d.q.set(r.x, r.y, r.z, r.w); d.fwd.set(0, 0, 1).applyQuaternion(d.q);
   const sf0 = v.x * d.fwd.x + v.z * d.fwd.z, th = (k.w ? 1 : 0) - (k.s ? 1 : 0); let sf = sf0 + th * (th * sf0 < 0 ? 38 : 22) * dt; sf *= Math.exp(-(th ? .12 : .8) * dt); sf = clamp(sf, -9, 26);
   const lx = (v.x - d.fwd.x * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt), lz = (v.z - d.fwd.z * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt);
   b.setLinvel({ x: d.fwd.x * sf + lx, y: v.y, z: d.fwd.z * sf + lz }, true);
@@ -1752,7 +1762,7 @@ function driveStep(dt) {
   if (driveCamera.chaseStrength>0.0005) {
     const speedFactor=clamp(Math.abs(sf0)/26,0,1);
     const effectiveDistance=clamp(driveCamera.distance+speedFactor*driveCamera.speedDistance,driveCamera.minDistance,driveCamera.maxDistance+driveCamera.speedDistance);
-    d.fwd.set(0, 0, -1).applyQuaternion(d.renderQuat).normalize();
+    d.fwd.set(0, 0, 1).applyQuaternion(d.renderQuat).normalize();
     driveCamera.desiredPos.copy(d.anchor).addScaledVector(d.fwd,-effectiveDistance);
     driveCamera.desiredPos.y=d.renderPos.y+3.5+effectiveDistance*.15;
     driveCamera.desiredTarget.copy(d.anchor).addScaledVector(d.fwd,4.5);
@@ -1787,7 +1797,7 @@ async function toggleDrive() {
   setDrivePerformanceMode(true);
   driveSavedDamping = controls.enableDamping;
   controls.enableDamping = false;
-  controls.target.copy(drive.anchor); camera.position.copy(new V3(0,6.7,13.5).applyQuaternion(drive.q).add(drive.anchor)); controls.update();
+  controls.target.copy(drive.anchor); camera.position.copy(new V3(0,6.7,-13.5).applyQuaternion(drive.q).add(drive.anchor)); controls.update();
   driveCamera.distance=clamp(camera.position.distanceTo(drive.anchor),driveCamera.minDistance,driveCamera.maxDistance);
   bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
 }
@@ -1800,7 +1810,7 @@ function updateVehicleLighting(dt,now) {
   if(drive.beamMat)drive.beamMat.uniforms.uI.value=night*(.7+.8*haze); if(drive.poolM)drive.poolM.opacity=night*.6;
   if (drive.dust) {
     drive.dust.material.opacity=night*(.13+.42*haze); if(night<.02) return; const a=drive.dust.geometry.attributes.position, base=drive.dustBase;
-    for(let i=0;i<a.count;i++){const z0=base[i*3+2], phase=(now*.00036+i*.037)%1, z=-3-(((-z0-3)+phase*6)%25);a.setXYZ(i,base[i*3]+Math.sin(now*.0017+i)*.025,base[i*3+1]+Math.sin(now*.0021+i*.7)*.035,z);}
+    for(let i=0;i<a.count;i++){const z0=base[i*3+2], phase=(now*.00036+i*.037)%1, z=3+(((z0-3)+phase*6)%25);a.setXYZ(i,base[i*3]+Math.sin(now*.0017+i)*.025,base[i*3+1]+Math.sin(now*.0021+i*.7)*.035,z);}
     a.needsUpdate=true;
   }
 }
