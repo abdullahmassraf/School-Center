@@ -714,11 +714,14 @@ function makePackedInstanceSet(root, vehicles) {
   const update = (index, vehicle) => {
     ASSET_QUAT.setFromEuler(ASSET_EULER.set(0, vehicle.yaw || 0, 0));
     ASSET_SCALE.setScalar(vehicle.scale || 1);
-    ASSET_MATRIX.compose(ASSET_OBJECT.position.set(vehicle.x, vehicle.y || 0, vehicle.z), ASSET_QUAT, ASSET_SCALE);
+    ASSET_OBJECT.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
+    ASSET_OBJECT.quaternion.copy(ASSET_QUAT);
+    ASSET_OBJECT.scale.copy(ASSET_SCALE);
+    ASSET_OBJECT.updateMatrix();
     entries.forEach(entry => {
       ASSET_MATRIX.multiplyMatrices(ASSET_OBJECT.matrix, entry.base);
       entry.inst.setMatrixAt(index, ASSET_MATRIX);
-      if (entry.isBody && vehicle.col) entry.inst.setColorAt(index, new Col(vehicle.col));
+      if (entry.isBody && vehicle.col) { if (!window.__SC_ASSET_COLOR__) window.__SC_ASSET_COLOR__ = new Col(); window.__SC_ASSET_COLOR__.set(vehicle.col); entry.inst.setColorAt(index, window.__SC_ASSET_COLOR__); }
     });
   };
 
@@ -1647,7 +1650,11 @@ addEventListener('visibilitychange', () => {
   if (!frameId) frameId = requestAnimationFrame(frame);
 });
 addEventListener('pagehide', disposeTwin, { once: true });
-if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, driveCamera, traffic, transit, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
+if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
+  interaction, drive, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  get traffic(){ return traffic; }, get transit(){ return transit; }
+};
 frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
 
