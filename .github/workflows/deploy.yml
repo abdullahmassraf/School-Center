@@ -1,7 +1,11 @@
 name: Deploy to GitHub Pages
 
+name: Deploy to GitHub Pages
+
 on:
   push:
+    branches: [main, master]
+  pull_request:
     branches: [main, master]
   workflow_dispatch:
 
@@ -16,7 +20,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: Campus 3D regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Ensure Chromium
+        shell: bash
+        run: |
+          if command -v chromium >/dev/null 2>&1; then
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y chromium
+      - name: Run campus 3D acceptance
+        run: node test_campus_map_3d.js
+
   deploy:
+    if: github.event_name == 'push'
+    needs: test
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -31,7 +54,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload the entire repository root (static site)
           path: '.'
 
       - name: Deploy to GitHub Pages
