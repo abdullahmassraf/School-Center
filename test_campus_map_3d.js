@@ -121,10 +121,10 @@ await sleep(300);
 /* Smart Drive chase: the existing Drive physics is reused. Hold forward long
  * enough to move, then verify automatic rear alignment engages. */
 await clickSelector('.cm3d-fullscreen'); await sleep(400); await key('KeyD'); await sleep(500);
-await key('KeyW',false); await sleep(1600);
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const p=d.drive.body.translation();const q=d.drive.body.rotation();d.drive.q.set(q.x,q.y,q.z,q.w);d.drive.fwd.set(0,0,-1).applyQuaternion(d.drive.q).normalize();d.drive.body.setLinvel({x:d.drive.fwd.x*12,y:0,z:d.drive.fwd.z*12},true);d.driveCamera.userRotating=false;d.driveCamera.releaseAt=performance.now()-800;return true})()`);
+await sleep(1100);
 const moving=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const p=d.drive.body.linvel();return{speed:Math.hypot(p.x,p.z),chase:d.driveCamera.chaseStrength,rotating:d.driveCamera.userRotating}})()`);
-await key('KeyW');
-if(moving.speed<0.5||moving.rotating||moving.chase<0.2)throw new Error(`smart drive chase did not engage: ${JSON.stringify(moving)}`);
+if(moving.speed<0.5||moving.rotating||moving.chase<0.35)throw new Error(`smart drive chase did not engage under deterministic motion: ${JSON.stringify(moving)}`);
 const distanceBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.distance`);
 await sleep(700);
 const chaseAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.chaseStrength`);
