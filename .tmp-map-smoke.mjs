@@ -57,7 +57,7 @@ try {
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.setTime('2026-12-21T21:30:00-05:00')); await page.waitForTimeout(2200);
   const night=await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night);
   if(!(night>0.2)) throw new Error('time failed: '+night);
-  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.toggleFullscreen()); await page.waitForTimeout(450);
+  await page.locator('.cm3d-fullscreen').click(); await page.waitForTimeout(450);
   const full=await page.evaluate(()=>({root:document.fullscreenElement?.id||null,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),width:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().width,height:document.querySelector('#cm-stage-3d')?.getBoundingClientRect().height}));
   if(full.root!=='cm-stage-3d'||full.label!=='Exit fullscreen'||full.width<100||full.height<100)throw new Error('map fullscreen failed: '+JSON.stringify(full));
   await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',bubbles:true}))); await page.waitForTimeout(650);
