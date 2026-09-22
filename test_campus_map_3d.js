@@ -95,10 +95,14 @@ console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fs));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(900);
-await ev(`(()=>{const w=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;w.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',bubbles:true}));return true})()`);
-await sleep(700);
-let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
-if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify(drive)}`);
+await ev(`(()=>{const w=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;w.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',key:'d',bubbles:true}));return true})()`);
+let drive;
+for(let i=0;i<40;i++){
+  await sleep(250);
+  drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar,physics:!!d.drive.world}})()`);
+  if(drive.on&&drive.packed)break;
+}
+if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed after 10s: ${JSON.stringify(drive)}`);
 await key('KeyD');
 const steer=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on`);
 if(!steer)throw new Error('second D toggled Drive off');
