@@ -207,3 +207,26 @@ Corrected runtime asset paths:
 The source model geometry is normalized before packaging (centered on X/Z and grounded at Y=0). The bus source front is local -X; public transport placement therefore uses +90° for the +Z lane and -90° for the -Z lane so each vehicle faces its travel direction.
 
 The previously committed truncated `.glb.gz.b64` payloads were removed. They were incomplete text payloads and were not safe to keep as runtime assets.
+
+
+## Verified browser recovery
+
+A GitHub Actions Playwright smoke test was run against the repository at `a6eac534c49cb2a93326744df4c4d6462c372489` and completed successfully (run 35748020735).
+
+Desktop/headless checks passed:
+- adapter and twin both reached ready
+- Three.js scene had 105 children and non-zero render calls
+- all six buildings J/H/B/C/A/M were present and selectable
+- H route became visible
+- reset returned selection to null
+- accent propagated to `ff4fd8`
+- rain propagated
+- night/time override reached `ST.night === 1`
+- supplied car + Bus + SchoolBus payloads loaded
+- packed traffic mode was active with 12 moving cars and 2 transit vehicles
+- fullscreen map-stage and fullscreen-gated Drive checks completed
+- zero page/console errors
+
+Responsive mobile-emulation checks also passed at 390×844 with the map renderer active and a 318×260 map surface.
+
+The temporary browser-test workflow and temporary smoke script are test-only and are removed from the final branch after verification; no new runtime dependency or production build step is retained.
