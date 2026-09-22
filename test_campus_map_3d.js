@@ -127,12 +127,9 @@ if(vehicleAppearance.modelCount<4||vehicleAppearance.trafficModels.length<3||veh
 if(vehicleAppearance.bus.length<2||vehicleAppearance.schoolBus.length<2)throw new Error(`transit material styling was not applied: ${JSON.stringify(vehicleAppearance)}`);
 const materialBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const dump=root=>{const a=[];root?.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];a.push({mesh:o.name,materials:ms.map(m=>({name:m?.name,color:m?.color?.getHexString()}))})}});return a};return{bus:dump(d.transit?.vehicles?.find(v=>v.key==='bus')?.root),schoolBus:dump(d.transit?.vehicles?.find(v=>v.key==='schoolBus')?.root),drive:dump(d.drive?.packedCar)}})()`);
 console.log('VEHICLE APPEARANCE',JSON.stringify({vehicleAppearance,materialBindings}));
-/* Regression guard for the Drive light-binding bug: extracting headlight/tail
- * light materials for Drive effects must never collapse a native multi-material
- * mesh into a single material. */
-const driveBody=(materialBindings.drive||[]).find(m=>/NormalCar1_Cube/i.test(m.mesh||''));
-if(!driveBody||driveBody.materials.length<5)throw new Error(`Drive body lost its native material groups: ${JSON.stringify(driveBody)}`);
-for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.materials.some(m=>m.name===slot))throw new Error(`Drive body is missing the native ${slot} material slot: ${JSON.stringify(driveBody.materials)}`);
+/* Drive physics/assets are lazy-loaded. Before the Drive easter egg is activated
+ * there may be no packed player mesh yet, so defer its native-material assertion
+ * until the Drive lifecycle section below. */
 const distinctColors=list=>[...new Set((list||[]).map(m=>m.color))];
 for(const key of ['bus','schoolBus']){const groups=materialBindings[key]||[],colors=distinctColors(groups.flatMap(g=>g.materials));if(colors.length<5)throw new Error(`${key} did not receive distinct body/window/trim/light/wheel materials: ${JSON.stringify(materialBindings[key])}`)}
 /* A "gray shell" is a transit asset whose materials all desaturate to grey; the
@@ -192,6 +189,11 @@ let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindo
 if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify({drive,errors})}`);
 const playerAppearance=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const mats=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&mats.push(m.color.getHexString()))}});return{model:d.drive.packedCar.userData.vehicleModel,color:d.drive.packedCar.userData.vehicleColor,materials:[...new Set(mats)]}})()`);
 if(playerAppearance.model!=='NormalCar1'||playerAppearance.color!=='#1f4d8a')throw new Error(`Drive did not use the intended native NormalCar1 visual: ${JSON.stringify(playerAppearance)}`);
+const driveBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const out=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];out.push({mesh:o.name,materials:ms.map(m=>({name:m?.name,color:m?.color?.getHexString()}))})}});return out})()`);
+const driveBody=driveBindings.find(m=>/NormalCar1_Cube/i.test(m.mesh||''));
+if(!driveBody||driveBody.materials.length<5)throw new Error(`Drive body lost its native material groups: ${JSON.stringify(driveBody)}`);
+for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.materials.some(m=>m.name===slot))throw new Error(`Drive body is missing the native ${slot} material slot: ${JSON.stringify(driveBody.materials)}`);
+console.log('DRIVE MATERIALS',JSON.stringify(driveBody));
 const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{active:d.drivePerf.active,dpr:d.renderer.getPixelRatio(),dof:d.CU.uDof.value,bloom:d.CU.uBloom.value,maxPr:d.drivePerf.maxPr}})()`);
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
 console.log("DRIVE PERFORMANCE MODE",JSON.stringify(drivePerf));
