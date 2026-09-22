@@ -137,6 +137,7 @@ export class CampusMap3DManager {
   select(id){id==null?this.reset():this.focus(id)}
   reset(){this.focusId=null;this.camMode='overview';this._routeVisible=false;this.pathBtn?.classList.add('is-hidden');this._post({type:'campus:reset'})}
   autoOrbit(on){this.autoOrbit=Boolean(on)&&!matchMedia?.('(prefers-reduced-motion: reduce)').matches;this._post({type:'campus:autoorbit',value:this.autoOrbit})}
+  setAutoOrbit(on){this.autoOrbit=Boolean(on)&&!matchMedia?.('(prefers-reduced-motion: reduce)').matches;this._post({type:'campus:autoorbit',value:this.autoOrbit})}
   toggleFullscreen(){return this._toggleFullscreen()}
   resize(){this._post({type:'campus:resize'})}
   refreshAccent(){const value=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();if(value)this._post({type:'campus:accent',value});this._post({type:'campus:theme',value:document.documentElement.dataset.theme||(matchMedia?.('(prefers-color-scheme: light)').matches?'light':'dark')})}
