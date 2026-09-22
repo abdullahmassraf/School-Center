@@ -1723,7 +1723,7 @@ addEventListener('visibilitychange', () => {
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, drive, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  interaction, drive, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updatePublicTransport, updateCinematicCamera, resize, actualFullscreen,
   get traffic(){ return traffic; }, get transit(){ return transit; }
 };
 frameId = requestAnimationFrame(frame);
