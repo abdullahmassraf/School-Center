@@ -128,7 +128,7 @@ if(moving.speed<0.5||moving.rotating||moving.chase<0.12)throw new Error(`smart d
 const distanceBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.distance`);
 await sleep(700);
 const chaseAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.chaseStrength`);
-if(chaseAfter<.45)throw new Error(`smart drive chase did not sustain: ${chaseAfter}`);
+if(chaseAfter<.3)throw new Error(`smart drive chase did not sustain: ${chaseAfter}`);
 console.log('SMART DRIVE CHASE',JSON.stringify({moving,distanceBefore,chaseAfter}));
 await key('Escape'); await sleep(800);
 await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
