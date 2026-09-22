@@ -828,6 +828,37 @@ async function buildPublicTransport() {
   }
 }
 
+function updatePublicTransport(dt) {
+  if (!transit?.vehicles?.length) return;
+  const stopZ = BUS_STOP[2], minZ = -246, maxZ = 92;
+  transit.vehicles.forEach(v => {
+    if (v.stopTimer > 0) {
+      v.stopTimer = Math.max(0, v.stopTimer - dt);
+    } else {
+      const prevZ = v.z, nextZ = v.z + v.dir * v.speed * dt;
+      const crossedStop = !v.servedStop && (
+        (v.dir > 0 && prevZ < stopZ && nextZ >= stopZ) ||
+        (v.dir < 0 && prevZ > stopZ && nextZ <= stopZ)
+      );
+      if (crossedStop) {
+        v.z = stopZ;
+        v.stopTimer = 2.25;
+        v.servedStop = true;
+      } else {
+        v.z = nextZ;
+      }
+    }
+
+    if (v.z >= maxZ) { v.z = maxZ; v.dir = -1; v.servedStop = false; }
+    if (v.z <= minZ) { v.z = minZ; v.dir = 1; v.servedStop = false; }
+
+    v.root.position.set(v.x, 0.04, v.z);
+    /* Source buses are modeled front-first along +X. The campus corridor is
+     * along Z, so +/-90° keeps headlights/front end facing travel direction. */
+    v.root.rotation.y = v.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+  });
+}
+
 function buildMisc() {
   // bus shelter
   const g = new THREE.Group(), post = std({ color: '#39404c', metalness: .7, roughness: .4 }), glass = new THREE.MeshPhysicalMaterial({ color: '#9ec8e8', transparent: true, opacity: .35, roughness: .05, metalness: 0 }); reg(glass, 1.5);
