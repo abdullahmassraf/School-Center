@@ -1,3 +1,27 @@
+## v1.5.9 — Transit wheel artifact fix, native Drive wheel alignment, and driving-mode performance polish
+
+**Date:** 2026-09-22 · **Time:** 18:27 EDT · **Release:** `fix/drive-transit-smoothness`
+
+### What changed
+- Fixed the oversized black front/rear transit artifacts by fitting the supplied native Bus/SchoolBus wheel assemblies to the actual body height through source-derived pivots. No vertices were edited and no replacement geometry was introduced.
+- Added native transit wheel rigs with continuous rolling animation while preserving the supplied Bus/SchoolBus geometry, windows, trim, lights, and wheels.
+- Restored the supplied NormalCar1 Drive wheel assemblies to their native source scale and source-derived centers. Removed the prior `1.80` scale, vertical lift, and lateral spread that detached the wheels from the body.
+- Added render-space interpolation between fixed-step Rapier states to reduce visible 60 Hz physics jitter when rendering at a different frame rate.
+- Smoothed steering input and made native Drive wheel roll continuous instead of resetting the wheel angle every frame.
+- Removed camera/orbit fighting during Drive by translating the OrbitControls target with the car rather than overwriting the target every frame. Chase-camera response is smoother and manual orbit remains authoritative while the user is interacting.
+- Made camera transitions mutually exclusive with cinematic idle motion and removed the redundant transition timeout so animation callbacks cannot race each other.
+- Reduced Drive rendering cost without removing model detail: expensive blur/bloom post passes are disabled only while driving, distant traffic is view-budgeted, non-player traffic/transit stop casting shadows while driving, and shadow-map refreshes are throttled based on actual camera/light movement.
+- Added regression coverage for transit wheel sizing, Drive wheel placement, continuous wheel rolling, Drive performance-mode activation, camera finite-state stability, and the existing full campus interaction contract.
+- Added GitHub Actions coverage so the existing Campus 3D acceptance suite runs on pull requests and must pass before a main-branch Pages deployment.
+
+### QA
+- Static JavaScript parse checks passed for the updated campus twin and acceptance script.
+- The full browser acceptance suite is configured to run in GitHub Actions on the pull request, including native asset loading, traffic/transit motion, Drive lifecycle, native wheel mapping/rolling/steering, cinematic camera, fullscreen/Escape, mobile behavior, and console-error checks.
+- Visual acceptance for the two reported defects must be confirmed from the rendered WebGL output at close, medium, far, and very-far camera distances before merge.
+
+### Known behavior
+- The Drive vehicle remains the supplied blue `NormalCar1` and is still not recolored by `setAccent()`.
+
 ## v1.5.8 — Drive NormalCar1 visual, material contrast, and native wheel readability
 
 **Date:** 2026-09-22 · **Time:** 17:28 EDT · **Release:** `feat/fix-davis-vehicle-assets`
