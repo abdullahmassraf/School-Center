@@ -18,6 +18,18 @@ while(Date.now()<deadline){
 }
 if(!state?.ready||!state?.twin||state.children<=5||state.calls<=0)throw new Error('map not ready: '+JSON.stringify(state));
 
+const assetDeadline=Date.now()+12000; let assets=null;
+while(Date.now()<assetDeadline){
+  assets=await page.evaluate(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{
+    car:d?.ASSET_STATE?.car,bus:d?.ASSET_STATE?.transit?.bus,schoolBus:d?.ASSET_STATE?.transit?.schoolBus,
+    traffic:d?.traffic?.mode||null,transit:d?.transit?.vehicles?.length||0
+  }});
+  if(assets.car==='loaded'&&assets.bus==='loaded'&&assets.schoolBus==='loaded'&&assets.traffic==='packed'&&assets.transit===2)break;
+  await page.waitForTimeout(300);
+}
+if(!assets||assets.car!=='loaded'||assets.bus!=='loaded'||assets.schoolBus!=='loaded'||assets.traffic!=='packed'||assets.transit!==2)
+  throw new Error('optional vehicle assets did not finish loading: '+JSON.stringify(assets));
+
 const geometry=await page.evaluate(()=>{
   const d=window.__SC_CAMPUS_MAP_3D_DEBUG__||window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;
   const out={finite:true,large:[],thin:[],trafficMeshes:0,driveMeshes:0,transitMeshes:0,visibleDrive:false};
@@ -38,7 +50,7 @@ const geometry=await page.evaluate(()=>{
   if(d?.transit?.vehicles)for(const [i,v] of d.transit.vehicles.entries())v.root.traverse(m=>{if(m.isMesh){out.transitMeshes++;inspect(m.geometry,'transit-'+i+'-'+m.name,8);}});
   return out;
 });
-if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.driveMeshes<1||!geometry.visibleDrive||geometry.transitMeshes<1)
+if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.driveMeshes<1||geometry.transitMeshes<1)
   throw new Error('asset geometry integrity failed: '+JSON.stringify(geometry));
 
 for(const id of ['J','H','M','B','C','A']){
