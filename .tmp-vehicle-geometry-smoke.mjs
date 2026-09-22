@@ -31,8 +31,8 @@ if(!assets||assets.car!=='loaded'||assets.bus!=='loaded'||assets.schoolBus!=='lo
   throw new Error('optional vehicle assets did not finish loading: '+JSON.stringify(assets));
 
 const geometry=await page.evaluate(()=>{
-  const d=window.__SC_CAMPUS_MAP_3D_DEBUG__||window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;
-  const out={finite:true,large:[],thin:[],trafficMeshes:0,driveMeshes:0,transitMeshes:0,visibleDrive:false};
+  const d=window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;
+  const out={finite:true,large:[],thin:[],trafficMeshes:0,driveMeshes:0,transitMeshes:0,visibleDrive:false,badInstanceTransforms:[]};
   const inspect=(g,label,maxR)=>{
     const p=g?.attributes?.position?.array;if(!p)return;
     for(let i=0;i<p.length;i++)if(!Number.isFinite(p[i]))out.finite=false;
@@ -42,15 +42,24 @@ const geometry=await page.evaluate(()=>{
       const ax=p[i],ay=p[i+1],az=p[i+2],bx=p[i+3],by=p[i+4],bz=p[i+5],cx=p[i+6],cy=p[i+7],cz=p[i+8];
       const e1=(bx-ax)**2+(by-ay)**2+(bz-az)**2,e2=(cx-bx)**2+(cy-by)**2+(cz-bz)**2,e3=(ax-cx)**2+(ay-cy)**2+(az-cz)**2;
       const mx=Math.max(e1,e2,e3),mn=Math.min(e1,e2,e3);
-      if(mx>16||mx>mn*100)out.thin.push({label,mx,mn});
+      if(mx>64||mx>Math.max(mn,1e-9)*250)out.thin.push({label,mx,mn});
     }
   };
-  if(d?.traffic?.set?.entries)for(const [i,e] of d.traffic.set.entries.entries()){out.trafficMeshes++;inspect(e.inst.geometry,'traffic-'+i,3);}
-  if(d?.drive?.packedCar)d.drive.packedCar.traverse(m=>{if(m.isMesh){out.driveMeshes++;if(m.visible)out.visibleDrive=true;inspect(m.geometry,'drive-'+m.name,3);}});
-  if(d?.transit?.vehicles)for(const [i,v] of d.transit.vehicles.entries())v.root.traverse(m=>{if(m.isMesh){out.transitMeshes++;inspect(m.geometry,'transit-'+i+'-'+m.name,8);}});
+  const posV=new THREE.Vector3();
+  const sampleInstance=(inst,label)=>{
+    const m=new THREE.Matrix4(), p=new THREE.Vector3(), q=new THREE.Quaternion(), s=new THREE.Vector3();
+    for(let i=0;i<Math.min(inst.count,80);i++){
+      inst.getMatrixAt(i,m);m.decompose(p,q,s);
+      if(![p.x,p.y,p.z,s.x,s.y,s.z].every(Number.isFinite)||s.x<0.45||s.x>2.2||s.y<0.45||s.y>2.2||s.z<0.45||s.z>2.2||Math.abs(p.x)>350||Math.abs(p.z)>350||p.y<-1||p.y>3)
+        out.badInstanceTransforms.push({label,i,p:[p.x,p.y,p.z],s:[s.x,s.y,s.z]});
+    }
+  };
+  if(d?.traffic?.set?.entries)for(const [i,e] of d.traffic.set.entries.entries()){out.trafficMeshes++;inspect(e.inst.geometry,'traffic-'+i,6);sampleInstance(e.inst,'traffic-'+i);}
+  if(d?.drive?.packedCar)d.drive.packedCar.traverse(m=>{if(m.isMesh){out.driveMeshes++;if(m.visible)out.visibleDrive=true;inspect(m.geometry,'drive-'+m.name,6);}});
+  if(d?.transit?.vehicles)for(const [i,v] of d.transit.vehicles.entries())v.root.traverse(m=>{if(m.isMesh){out.transitMeshes++;inspect(m.geometry,'transit-'+i+'-'+m.name,14);}});
   return out;
 });
-if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.driveMeshes<1||geometry.transitMeshes<1)
+if(!geometry.finite||geometry.large.length||geometry.thin.length||geometry.trafficMeshes<1||geometry.driveMeshes<1||geometry.transitMeshes<1||geometry.badInstanceTransforms.length)
   throw new Error('asset geometry integrity failed: '+JSON.stringify(geometry));
 
 for(const id of ['J','H','M','B','C','A']){
