@@ -107,8 +107,13 @@ console.log('DRIVE EASTER EGG',JSON.stringify(drive));
 await key('Escape');
 await sleep(900);
 const afterEsc=await ev(`(()=>({fs:!!document.fullscreenElement,drive:window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on}))()`);
-if(afterEsc.fs||afterEsc.drive)throw new Error(`Escape did not leave a non-driving non-fullscreen state: ${JSON.stringify(afterEsc)}`);
-console.log('ESCAPE EXIT',JSON.stringify(afterEsc));
+if(afterEsc.drive)throw new Error(`Escape did not exit Drive: ${JSON.stringify(afterEsc)}`);
+console.log('ESCAPE DRIVE EXIT',JSON.stringify(afterEsc));
+/* Browser-level Escape exits native fullscreen; the CDP key is intentionally scoped to the iframe,
+ * so keep fullscreen on here and verify that the map's explicit fullscreen control still exits it. */
+await clickSelector('.cm3d-fullscreen'); await sleep(500);
+const afterFs=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')}))()`);
+if(afterFs.host||afterFs.label!=='Enter fullscreen')throw new Error(`fullscreen cleanup failed: ${JSON.stringify(afterFs)}`);
 
 await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
 await sleep(300);
