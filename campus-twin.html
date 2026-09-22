@@ -278,7 +278,7 @@ async function loadPackedModel(url) {
     };
     for (const part of data.parts) {
       const vertices = new Float32Array(part.v.flat());
-      const indices = new Uint32Array(part.i || []);
+      const indices = new Uint16Array(part.i || []);
       if (!vertices.length || indices.length < 3) continue;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
