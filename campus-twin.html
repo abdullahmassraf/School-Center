@@ -692,6 +692,7 @@ const ASSET_QUAT = new THREE.Quaternion();
 const ASSET_EULER = new THREE.Euler(0, 0, 0);
 const ASSET_SCALE = new V3(1, 1, 1);
 const ASSET_OBJECT = new THREE.Object3D();
+const ASSET_COLOR = new Col();
 
 function makePackedInstanceSet(root, vehicles) {
   root.updateMatrixWorld(true);
@@ -721,7 +722,7 @@ function makePackedInstanceSet(root, vehicles) {
     entries.forEach(entry => {
       ASSET_MATRIX.multiplyMatrices(ASSET_OBJECT.matrix, entry.base);
       entry.inst.setMatrixAt(index, ASSET_MATRIX);
-      if (entry.isBody && vehicle.col) { if (!window.__SC_ASSET_COLOR__) window.__SC_ASSET_COLOR__ = new Col(); window.__SC_ASSET_COLOR__.set(vehicle.col); entry.inst.setColorAt(index, window.__SC_ASSET_COLOR__); }
+      if (entry.isBody && vehicle.col) { ASSET_COLOR.set(vehicle.col); entry.inst.setColorAt(index, ASSET_COLOR); }
     });
   };
 
