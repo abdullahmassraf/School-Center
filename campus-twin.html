@@ -767,12 +767,59 @@ const ASSET_SCALE = new V3(1, 1, 1);
 const ASSET_OBJECT = new THREE.Object3D();
 const ASSET_COLOR = new Col();
 
+function getRootLocalBounds(root) {
+  root.updateMatrixWorld(true);
+  const world = new THREE.Box3().setFromObject(root), local = new THREE.Box3();
+  [
+    new V3(world.min.x,world.min.y,world.min.z), new V3(world.min.x,world.min.y,world.max.z),
+    new V3(world.min.x,world.max.y,world.min.z), new V3(world.min.x,world.max.y,world.max.z),
+    new V3(world.max.x,world.min.y,world.min.z), new V3(world.max.x,world.min.y,world.max.z),
+    new V3(world.max.x,world.max.y,world.min.z), new V3(world.max.x,world.max.y,world.max.z)
+  ].forEach(p=>{root.worldToLocal(p);local.expandByPoint(p);});
+  return local;
+}
+function createVehicleLightRig(root,{actualLights=false,forwardAxis='z'}={}){
+  const b=getRootLocalBounds(root), size=b.getSize(new V3());
+  const front=forwardAxis==='x'?b.max.x:b.max.z, rear=forwardAxis==='x'?b.min.x:b.min.z;
+  const lateral=forwardAxis==='x'?size.z:size.x, y=b.min.y+size.y*.42, half=lateral*.34;
+  const head=forwardAxis==='x'?[{x:front,y,z:-half},{x:front,y,z:half}]:[{x:-half,y,z:front},{x:half,y,z:front}];
+  const tail=forwardAxis==='x'?[{x:rear,y,z:-half},{x:rear,y,z:half}]:[{x:-half,y,z:rear},{x:half,y,z:rear}];
+  const glow=ST.glow||(ST.glow=glowTex()), headGlow=[], tailGlow=[], headEmit=[], tailEmit=[];
+  const addSprite=(color,scale,p)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:glow,color,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false}));s.position.set(p.x,p.y,p.z);s.scale.set(scale,scale,1);root.add(s);return s;};
+  head.forEach(p=>headGlow.push(addSprite('#ffe8bd',.34,p)));
+  tail.forEach(p=>tailGlow.push(addSprite('#ff2430',.28,p)));
+  if(actualLights){
+    const forward=forwardAxis==='x'?{x:9,z:0}:{x:0,z:9};
+    head.forEach(p=>{const l=new THREE.SpotLight('#fff0c5',1.6,18,Math.PI/7,.55,1.8);l.position.set(p.x,p.y,p.z);l.castShadow=false;const t=new THREE.Object3D();t.position.set(p.x+forward.x,p.y,p.z+forward.z);root.add(t);l.target=t;root.add(l);headEmit.push(l);});
+    tail.forEach(p=>{const l=new THREE.PointLight('#ff1b24',.55,7,2);l.position.set(p.x,p.y,p.z);root.add(l);tailEmit.push(l);});
+  }
+  return {bounds:b,head,tail,headGlow,tailGlow,headEmit,tailEmit};
+}
+function updateVehicleLightRig(rig,on,scale=1){
+  if(!rig)return;
+  rig.headGlow.forEach(s=>s.material.opacity=.82*on*scale);
+  rig.tailGlow.forEach(s=>s.material.opacity=.62*on*scale);
+  rig.headEmit.forEach(l=>l.intensity=1.6*on*scale);
+  rig.tailEmit.forEach(l=>l.intensity=.55*on*scale);
+}
+function updateAllTrafficLights(){
+  const on=sstep(.10,.62,ST.night);
+  (traffic?.set?.roots||[]).forEach(root=>{
+    const lights=root.userData.vehicleLights;
+    lights?.head?.forEach(m=>m.emissiveIntensity=on*3.8);
+    lights?.tail?.forEach(m=>m.emissiveIntensity=on*3.2);
+    updateVehicleLightRig(root.userData.vehicleLightRig,on,.9);
+  });
+}
+
 function makeVehicleInstanceSet(sourceRoots, vehicles) {
   const roots = vehicles.map(vehicle => {
     const sourceRoot = sourceRoots[vehicle.modelIndex || 0] || sourceRoots[0];
     const root = cloneVehicleRoot(sourceRoot);
-    prepareVehicleInstance(root, { color: vehicle.col });
+    const vehicleLights = prepareVehicleInstance(root, { color: vehicle.col });
     root.userData.vehicleModel = vehicle.modelName || sourceRoot.name;
+    root.userData.vehicleLights = vehicleLights;
+    root.userData.vehicleLightRig = createVehicleLightRig(root);
     root.userData.vehicleColor = vehicle.col || null;
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
@@ -879,9 +926,17 @@ async function buildPublicTransport() {
       root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
       root.scale.multiplyScalar(spec.scale);
       const wheelRigs = fitNativeTransitWheels(root, spec.key === 'schoolBus' ? 'school-bus' : 'bus');
+      const lightRig = createVehicleLightRig(root,{actualLights:true,forwardAxis:'x'});
+      const lightMaterials = [];
+      root.traverse(mesh=>{
+        const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+        mats.forEach(m=>{if(m&&/light/i.test(String(m.name||'')))lightMaterials.push(m);});
+      });
       root.userData.nativeWheelRigs = wheelRigs;
+      root.userData.vehicleLightRig = lightRig;
+      root.userData.vehicleLightMaterials = lightMaterials;
       scene.add(root);
-      transit.vehicles.push({ root, wheelRigs, ...spec, stopTimer: 0, servedStop: false });
+      transit.vehicles.push({ root, wheelRigs, lightRig, lightMaterials, ...spec, stopTimer: 0, servedStop: false });
       if (drivePerf.active) setDriveVehicleShadowMode(false);
       setAssetState(spec.key, 'loaded');
     });
@@ -926,7 +981,8 @@ function updatePublicTransport(dt) {
       for (const rig of v.wheelRigs) {
         rig.roll += rollDistance / Math.max(rig.radius, .08);
         rig.pivot.rotation.set(rig.baseX, rig.baseY, rig.baseZ);
-        rig.pivot.rotateZ(rig.roll);
+        /* Native transit wheels are Z-axled in source space; root yaw puts the axle laterally. */
+        rig.pivot.rotateX(rig.roll);
       }
     }
   });
@@ -1550,7 +1606,8 @@ function fitNativeTransitWheels(root, kind) {
      * Rotate only the rig around bus-local Y: wheel axle becomes local Z
      * (world X after the bus turn). Original vertices/materials stay intact.
      */
-    pivot.rotateY(Math.PI / 2);
+    /* Source transit wheels are already Z-axled. The vehicle's ±90° root
+     * rotation turns that axle to world X, the correct lateral axis. */
     pivot.userData.transitWheelAxis = 'z';
     pivot.scale.multiplyScalar(fit);
     pivot.userData.nativeWheelFit = fit;
@@ -1670,14 +1727,20 @@ async function initPhysics() {
   }
 
   // v4: headlights are additive light-cone + ground-pool meshes.
+  // Anchor all procedural illumination to the loaded NormalCar1 bounds so it
+  // cannot drift away from the native headlight/tail-light locations.
+  drive.playerLightRig = drive.packedCar ? createVehicleLightRig(drive.packedCar,{actualLights:true,forwardAxis:'z'}) : null;
+  const playerHead = drive.playerLightRig?.head || [{x:-.56,y:.47,z:2.0},{x:.56,y:.47,z:2.0}];
   drive.beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uI: { value: 0 }, uCol: { value: new Col('#ffe4b5') } },
     vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv=uv; vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.); vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }',
     fragmentShader: 'uniform float uI; uniform vec3 uCol; varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ float f=pow(abs(dot(normalize(vN),normalize(vV))),1.5); gl_FragColor=vec4(uCol*pow(vUv.y,1.4)*f*.5*uI,1.); }' });
-  for (const x of [-.64, .64]) { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.12, 3.4, 26, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, 13), drive.beamMat); cone.position.set(x, .8, 2.1); cone.frustumCulled = false; g.add(cone); }
+  drive.playerBeams = playerHead.map(p=>{const cone=new THREE.Mesh(new THREE.CylinderGeometry(.09,2.2,20,20,1,true).rotateX(Math.PI/2).translate(0,0,10),drive.beamMat);cone.position.set(p.x,p.y,p.z);cone.frustumCulled=false;g.add(cone);return cone;});
   drive.poolM = new THREE.MeshBasicMaterial({ map: ST.glow || (ST.glow = glowTex()), color: '#ffe0aa', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
-  g.add(new THREE.Mesh(new THREE.PlaneGeometry(9, 24).rotateX(-Math.PI / 2).translate(0, .08, 13), drive.poolM));
-  // Fine illuminated dust/moisture motes inside the headlight cones.
-  { const n=110, rr=rng(7474), pos=new Float32Array(n*3), base=new Float32Array(n*3); for(let i=0;i<n;i++){const side=i%2?1:-1, z=3+rr()*25, spread=(Math.abs(z)+2)*.10, x=side*.64+(rr()-.5)*spread, y=.35+rr()*1.15+(rr()-.5)*.15;pos.set([x,y,z],i*3);base.set([x,y,z],i*3);}
+  const pool=new THREE.Mesh(new THREE.PlaneGeometry(4.4,20).rotateX(-Math.PI/2).translate(0,.08,10),drive.poolM);
+  pool.position.z=playerHead[0]?.z||2;
+  g.add(pool);
+  // Fine illuminated dust/moisture motes start at the native headlamps.
+  { const n=90, rr=rng(7474), pos=new Float32Array(n*3), base=new Float32Array(n*3); for(let i=0;i<n;i++){const hp=playerHead[(i>>3)&1]||playerHead[0],z=hp.z+.8+rr()*18,spread=(Math.abs(z-hp.z)+1)*.065,x=hp.x+(rr()-.5)*spread,y=hp.y+(rr()-.5)*.12;pos.set([x,y,z],i*3);base.set([x,y,z],i*3);}
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
     const matp=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.28,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
     const dust=new THREE.Points(geo,matp);dust.frustumCulled=false;dust.renderOrder=8;g.add(dust);drive.dust=dust;drive.dustBase=base;
@@ -1802,15 +1865,18 @@ async function toggleDrive() {
   bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
 }
 function updateVehicleLighting(dt,now) {
+  const night=sstep(.10,.62,ST.night), haze=clamp(W.fog*.8+W.rain*.42+W.snow*.18,0,1);
+  updateAllTrafficLights();
+  transit?.vehicles?.forEach(v=>{v.lightMaterials?.forEach(m=>m.emissiveIntensity=night*4.8);updateVehicleLightRig(v.lightRig,night);});
   if (!drive.car || !drive.car.visible) return;
-  const night=sstep(.08,.72,ST.night), haze=clamp(W.fog*.8+W.rain*.42+W.snow*.18,0,1);
   if(drive.headLampMat)drive.headLampMat.emissiveIntensity=night*5.2; if(drive.tailLampMat)drive.tailLampMat.emissiveIntensity=night*4.4;
   drive.packHeadMats?.forEach(m => m.emissiveIntensity = night * 5.2);
   drive.packTailMats?.forEach(m => m.emissiveIntensity = night * 4.4);
+  updateVehicleLightRig(drive.playerLightRig,night);
   if(drive.beamMat)drive.beamMat.uniforms.uI.value=night*(.7+.8*haze); if(drive.poolM)drive.poolM.opacity=night*.6;
   if (drive.dust) {
     drive.dust.material.opacity=night*(.13+.42*haze); if(night<.02) return; const a=drive.dust.geometry.attributes.position, base=drive.dustBase;
-    for(let i=0;i<a.count;i++){const z0=base[i*3+2], phase=(now*.00036+i*.037)%1, z=3+(((z0-3)+phase*6)%25);a.setXYZ(i,base[i*3]+Math.sin(now*.0017+i)*.025,base[i*3+1]+Math.sin(now*.0021+i*.7)*.035,z);}
+    for(let i=0;i<a.count;i++){const hp=playerHead[(i>>3)&1]||playerHead[0],z0=base[i*3+2],phase=(now*.00036+i*.037)%1,z=hp.z+.8+(((z0-hp.z-.8)+phase*6)%18);a.setXYZ(i,base[i*3]+Math.sin(now*.0017+i)*.018,base[i*3+1]+Math.sin(now*.0021+i*.7)*.025,z);}
     a.needsUpdate=true;
   }
 }
