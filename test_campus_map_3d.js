@@ -69,9 +69,9 @@ if(assets.trafficMode!=='packed'||assets.moving!==12||assets.transit.length!==2)
 if(!String(assets.paths.normalCar).endsWith('/cars/NormalCar1.json.gz.b64')||!String(assets.paths.bus).endsWith('/transit/Bus.json.gz.b64')||!String(assets.paths.schoolBus).endsWith('/transit/SchoolBus.json.gz.b64'))throw new Error(`asset paths are not canonical: ${JSON.stringify(assets.paths)}`);
 console.log('ASSETS',JSON.stringify(assets));
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
-await new Promise(r=>setTimeout(r,1200));
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.updatePublicTransport(1)`);
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
-if(transitBefore.every((v,i)=>Math.abs(v-transitAfter[i])<.1))throw new Error(`public transport is not moving: ${JSON.stringify({before:transitBefore,after:transitAfter})}`);
+if(transitBefore.every((v,i)=>Math.abs(v-transitAfter[i])<.1))throw new Error(`public transport update produced no movement: ${JSON.stringify({before:transitBefore,after:transitAfter})}`);
 console.log('TRANSIT MOTION',JSON.stringify({before:transitBefore,after:transitAfter}));
 console.log('BOOT',JSON.stringify(boot));
 
