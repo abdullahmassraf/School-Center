@@ -60,5 +60,24 @@ try {
   await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-map-smoke.png'});
   console.log('MAP SMOKE PASS',JSON.stringify({state,assets,focused,route,reset,accent,rain,night,errors}));
   if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
+  const mobileErrors=[];
+  const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});
+  mobile.on('pageerror',e=>mobileErrors.push('pageerror: '+e.message));
+  mobile.on('console',m=>{if(m.type()==='error')mobileErrors.push('console: '+m.text())});
+  await mobile.goto('http://127.0.0.1:8787/index.html?map-smoke=mobile&debug=1',{waitUntil:'domcontentloaded'});
+  const mobileDeadline=Date.now()+30000;
+  let mobileState=null;
+  while(Date.now()<mobileDeadline){
+    mobileState=await mobile.evaluate(()=>{const m=window.__SC_CAMPUS_MAP_3D__,d=m?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;return{ready:!!m?.ready,scene:!!d?.renderer,children:d?.scene?.children?.length||0,calls:d?.renderer?.info?.render?.calls||0}});
+    if(mobileState.ready&&mobileState.scene&&mobileState.children>5&&mobileState.calls>0)break;
+    await mobile.waitForTimeout(500);
+  }
+  if(!mobileState?.ready||mobileState.children<=5||mobileState.calls<=0)throw new Error('mobile map did not render: '+JSON.stringify(mobileState));
+  const mobileBox=await mobile.locator('.cm3d-mount').boundingBox();
+  if(!mobileBox||mobileBox.width<280||mobileBox.height<250)throw new Error('mobile map sizing failed: '+JSON.stringify(mobileBox));
+  if(mobileErrors.length)throw new Error('mobile browser errors: '+mobileErrors.join(' | '));
+  console.log('MOBILE MAP PASS',JSON.stringify({mobileState,mobileBox}));
+  await mobile.close();
+
   await browser.close();
 } finally { server.kill('SIGTERM'); }
