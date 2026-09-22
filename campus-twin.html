@@ -233,12 +233,12 @@ const $ = id => document.getElementById(id);
 
 const CAMPUS_ASSET_ROOT = 'assets/campus/';
 const CAMPUS_ASSETS = Object.freeze({
-  normalCar: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.json.gz.b64',
-  bus: CAMPUS_ASSET_ROOT + 'transit/Bus.json.gz.b64',
-  schoolBus: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.json.gz.b64'
+  normalCar: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.glb.gz.b64.', chunks: 3 }),
+  bus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/Bus.glb.gz.b64.', chunks: 2 }),
+  schoolBus: Object.freeze({ base: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.glb.gz.b64.', chunks: 2 })
 });
 const ASSET_STATE = {
-  format: 'gzip+base64-json',
+  format: 'gzip+base64-glb',
   car: 'pending',
   transit: { bus: 'pending', schoolBus: 'pending' },
   errors: []
@@ -258,56 +258,35 @@ async function unpackGzip(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
   return new Response(stream).arrayBuffer();
 }
-async function loadPackedModel(url) {
-  if (packedCache.has(url)) return packedCache.get(url);
+async function fetchAssetText(asset) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 9000);
+  try {
+    const parts = await Promise.all(Array.from({ length: asset.chunks }, async (_, i) => {
+      const res = await fetch(asset.base + i, { cache: 'force-cache', signal: ac.signal });
+      if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${asset.base + i}`);
+      return res.text();
+    }));
+    return parts.join('');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function loadPackedModel(asset) {
+  const key = asset.base;
+  if (packedCache.has(key)) return packedCache.get(key);
   const promise = (async () => {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 8000);
-    try {
-      const res = await fetch(url, { cache: 'force-cache', signal: ac.signal });
-      if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
-      const packed = decodeBase64Bytes(await res.text());
-      const bytes = await unpackGzip(packed);
-      const data = JSON.parse(new TextDecoder().decode(bytes));
-      if (!data || !Array.isArray(data.parts) || !data.parts.length) throw new Error(`Invalid campus asset payload: ${url}`);
-
-      const root = new THREE.Group();
-    root.name = `CampusAsset:${data.name || 'vehicle'}`;
-    const palette = {
-      Black: '#14181d', Grey: '#6e7379', Blue: '#5e95be', Windows: '#173446',
-      Headlights: '#fff1ac', TailLights: '#bf3d36',
-      Top: '#4f93d4', Bottom: '#65707b', Bumper: '#5b6672', Details: '#2f3740', Material: '#eef1f4', Lights: '#ffe79c',
-      Yellow: '#f5c84b', Wheel: '#22272d'
-    };
-    for (const part of data.parts) {
-      const vertices = new Float32Array(part.v.flat());
-      const indices = new Uint16Array(part.i || []);
-      if (!vertices.length || indices.length < 3) continue;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      geo.setIndex(new THREE.BufferAttribute(indices, 1));
-      geo.computeVertexNormals();
-      geo.computeBoundingSphere();
-      const material = new THREE.MeshStandardMaterial({
-        color: palette[part.name] || '#aab2bb',
-        roughness: /windows/i.test(part.name) ? .28 : /lights/i.test(part.name) ? .32 : .55,
-        metalness: /wheel|black|grey/i.test(part.name) ? .55 : .06
-      });
-      material.name = part.name;
-      const mesh = new THREE.Mesh(geo, material);
-      mesh.name = part.name;
-      mesh.castShadow = mesh.receiveShadow = true;
-      mesh.frustumCulled = true;
-      root.add(mesh);
-    }
-      preparePackedRoot(root);
-      return root;
-    } finally {
-      clearTimeout(timer);
-    }
+    const packed = decodeBase64Bytes(await fetchAssetText(asset));
+    const bytes = await unpackGzip(packed);
+    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+    const loader = new GLTFLoader();
+    const gltf = await new Promise((resolve, reject) => loader.parse(bytes, '', resolve, reject));
+    if (!gltf?.scene) throw new Error(`Invalid GLB scene payload: ${key}`);
+    preparePackedRoot(gltf.scene);
+    return gltf.scene;
   })();
-  packedCache.set(url, promise);
-  try { return await promise; } catch (e) { packedCache.delete(url); throw e; }
+  packedCache.set(key, promise);
+  try { return await promise; } catch (e) { packedCache.delete(key); throw e; }
 }
 function preparePackedRoot(root) {
   root.updateMatrixWorld(true);
@@ -1433,7 +1412,7 @@ async function initPhysics() {
   const tl = new THREE.MeshStandardMaterial({color:'#4a080b',roughness:.28,metalness:.04,emissive:'#ff1b24',emissiveIntensity:0});
   drive.tailLampMat=tl;[-.68,.68].forEach(x=>P(new THREE.BoxGeometry(.44,.18,.045),tl,x,.78,2.115,'taillight'));
 
-  // The supplied NormalCar1 is an actual road car (front at local +Z).
+  // The supplied NormalCar1 GLB is loaded from the original asset pack. Its headlights/front are local +Z.
   // The existing physics model drives toward local -Z, so the packed visual is
   // rotated 180° in-place to keep headlights/taillights on the correct ends.
   try {
