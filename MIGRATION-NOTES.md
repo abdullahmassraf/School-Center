@@ -167,3 +167,27 @@ The existing Drive activation remains fullscreen-gated to the map stage specific
 
 ### Verification
 Added regression assertions for map-stage fullscreen geometry/overflow, compact fullscreen control presence, fullscreen-gated Drive, smart chase activation while moving, cinematic idle overview/selected-building behavior, and console errors. Actual Chrome Android/Safari iOS hardware measurements still require those real device environments.
+
+
+## Supplied vehicle / public transport asset integration
+
+### Asset paths
+- `assets/campus/cars/NormalCar1.glb.gz.b64` — replacement for the procedural parked/road traffic cars and the player's Drive vehicle.
+- `assets/campus/transit/Bus.glb.gz.b64` — moving campus bus.
+- `assets/campus/transit/SchoolBus.glb.gz.b64` — moving school/public-service bus.
+- `assets/campus/ASSET-SOURCES.md` — source/licensing and conversion notes.
+
+### Placement/orientation rules
+The supplied car model's front is local +Z, while the existing Drive physics uses local -Z. The player car visual is therefore rotated 180° relative to the physics body so its headlights remain at the front and taillights remain at the rear.
+
+Parked cars reuse the existing traced parking-lot rows and yaw logic. Moving cars reuse the existing arterial lanes, but their yaw is converted to the asset's +Z forward axis so each car faces the actual direction of travel.
+
+The Bus and SchoolBus source models are length-oriented along +X. They are rotated ±90° around Y so their fronts align with the two directions of the campus bus corridor. Two vehicles are placed in opposite lanes and circulate between the north/south road limits, slowing/dwelling at the existing `BUS_STOP` location. No arbitrary traffic lights were inserted into the scene because the current environment has no appropriate signalized intersection for them; the pack's bus assets are used where they have a clear contextual role.
+
+### Runtime format
+To preserve the repo's static GitHub Pages deployment and avoid a new build/dependency step, converted GLBs are stored as gzip-compressed base64 text. The twin fetches, decompresses and parses them through the existing Three.js `GLTFLoader`. A graceful procedural-car fallback remains for browsers that cannot decode the packed asset format.
+
+### Performance choice
+Parked and road cars are rendered through `THREE.InstancedMesh` primitives extracted from one shared NormalCar1 source scene, so many vehicles share GPU geometry/material state rather than creating one independent GLTF draw hierarchy per car. The player's Drive vehicle uses one cloned GLTF scene so its light materials can be animated independently.
+
+The supplied raycast-vehicle repository was used as an implementation reference for GLTF loading, model/wheel binding patterns and vehicle-camera/light concepts. Its Cannon vehicle implementation was not copied into School Center because the Davis twin already uses Rapier physics and an established control/camera system.
