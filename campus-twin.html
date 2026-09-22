@@ -237,7 +237,7 @@ const CAMPUS_ASSET_ROOT = 'assets/campus/';
 const CAMPUS_ASSETS = Object.freeze({
   normalCar: CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj',
   normalCarMtl: CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.mtl',
-  driveVariant: ['SUV', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/SUV.mtl'],
+  driveVariant: ['NormalCar1', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.mtl'],
   carVariants: [
     ['NormalCar1', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar1.mtl'],
     ['NormalCar2', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar2.obj', CAMPUS_ASSET_ROOT + 'cars/Realistic Car Pack - Nov 2018/OBJ/NormalCar2.mtl'],
@@ -269,11 +269,11 @@ function styleNativeVehicleMaterial(material, kind, meshName = '') {
     else if (/window/.test(name)) material.color.set(colors.window);
     else if (/light/.test(name)) { material.color.set(colors.light); material.emissive = colors.light; material.emissiveIntensity = 0; }
     else if (school && /yellow/.test(name)) material.color.set(colors.body);
-    else if (!school && /top|material/.test(name)) material.color.set(colors.body);
+    else if (!school && /top|material|details/.test(name)) material.color.set(colors.body);
     else material.color.set(colors.trim);
     material.roughness = /window/.test(name) ? .2 : .62;
     material.metalness = /wheel|bottom|bumper/.test(name) ? .35 : .06;
-    if (!/window|wheel|light|bumper|bottom/.test(name)) { material.emissive = material.color.clone(); material.emissiveIntensity = .12; }
+    if (!/window|wheel|light|bumper|bottom/.test(name)) { material.emissive = material.color.clone(); material.emissiveIntensity = .42; }
     material.needsUpdate = true;
   }
 }
@@ -298,7 +298,7 @@ function prepareVehicleInstance(root, { color = null } = {}) {
       } else if (color && CAR_PAINT_MATERIAL.test(name)) {
         mat.color?.set(color);
         mat.emissive = mat.color.clone();
-        mat.emissiveIntensity = .16;
+        mat.emissiveIntensity = .42;
         result.paint.push(mat);
       }
       if (/headlight|lights/.test(lower)) { mat.color?.set('#fff0b0'); mat.emissive = new Col('#fff0b0'); mat.emissiveIntensity = 0; result.head.push(mat); }
@@ -1532,9 +1532,9 @@ async function initPhysics() {
       // The supplied wheel meshes are physically thin but correctly placed. A
       // modest source-pivot scale keeps the real tire geometry readable in the
       // chase camera without detaching it or changing any vertex positions.
-      pivot.scale.setScalar(1.58);
-      pivot.position.y += .09;
-      if (Math.abs(pivot.position.x) > .2) pivot.position.x += Math.sign(pivot.position.x) * .08;
+      pivot.scale.setScalar(1.80);
+      pivot.position.y += .12;
+      if (Math.abs(pivot.position.x) > .2) pivot.position.x += Math.sign(pivot.position.x) * .14;
       return { node, pivot, index, baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z };
     });
 

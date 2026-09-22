@@ -1,3 +1,33 @@
+## v1.5.8 — Drive NormalCar1 visual, material contrast, and native wheel readability
+
+**Date:** 2026-09-22 · **Time:** 17:28 EDT · **Release:** `feat/fix-davis-vehicle-assets`
+
+Supersedes the v1.5.7 note that the player Drive car used the `SUV` variant.
+
+### What changed
+- Player Drive now uses the supplied **`NormalCar1`** OBJ/MTL (matching the traffic/player reference car) instead of `SUV`. `NormalCar1` was always loaded for traffic; this points the Drive variant at the same supplied asset and keeps its native wheel groups (`NormalCar1_FrontLeftWheel_Cube.007`, `NormalCar1_FrontRightWheel_Cube.008`, `NormalCar1_BackWheels_Cube.011`) as the animated wheels.
+- Vehicle paint and native bus/school-bus material contrast raised so assigned colours read as distinct paint rather than near-black surfaces: paint emissive intensity `0.16 → 0.42`, opaque transit material emissive intensity `0.12 → 0.42`.
+- The Bus body group match now includes `Details` alongside `Top`/`Material`, so the teal body is separated from the dark trim instead of partially collapsing into it. The SchoolBus keeps its yellow `Yellow` body group and dark `Details`/`Bumper` trim (the added match is bus-only).
+- Native wheel readability tuned on the source-derived pivots only: pivot scale `1.58 → 1.80`, vertical lift `0.09 → 0.12`, lateral spread `0.08 → 0.14`. No vehicle vertices are edited, flattened, or regenerated; the wheels remain the original OBJ geometry mounted through centre pivots.
+- Browser acceptance extended: the Drive assertion now requires the **`NormalCar1`** visual, and new regression guards assert that (a) the Drive body keeps at least five native material slots including `Blue`, `Windows`, `Headlights`, and `TailLights`, and (b) the Bus and SchoolBus each expose at least five distinct material colours with a chromatic (non-grey) body.
+
+### Root cause
+- The v1.5.7 release set the Drive variant to `SUV`, so the player car did not match the supplied `NormalCar1` reference the rest of the vehicle system is built around.
+- The pre-v1.5.7 light-binding loop for the Drive car replaced the whole material array with the last light material, destroying the body/window/trim/light groups. That fix (already in v1.5.7) is now covered by an explicit acceptance assertion so it cannot silently regress.
+- Assigned paints were being applied but rendered too dark to separate from each other; the emissive contrast lift makes the per-instance colours actually visible while the native material groups stay intact.
+
+### QA
+- `node test_campus_map_3d.js` (headless Chromium acceptance) passes end to end: six native car variants load, all 16 vehicle OBJ/MTL requests return HTTP 200, traffic uses all six supplied models with distinct paint colours, Bus/SchoolBus load with distinct body/window/trim/light/wheel materials, the Drive car uses `NormalCar1` with its native multi-material body preserved, all three native wheel assemblies roll and the front pair steers, and fullscreen/Drive/Escape/chase-camera/cinematic-idle/manual-suppression behaviour is unchanged with zero console errors.
+- Rendered-pixel verification (headless Chromium, isolated renders reading the actual WebGL buffer): traffic-only render shows four distinct chromatic paint hues (blue/crimson/green/ochre) plus silver/white/dark cars; the Bus renders teal (hue ~185-205) and the SchoolBus renders yellow (hue ~45) with dark windows/trim, so neither is a grey shell; the Drive car renders a blue body with dark windows/trim; the isolated wheel assemblies render real geometry in the lower half of the frame.
+- Night check: the isolated player car produces ~17× more bright pixels after switching to night, confirming the headlight/brake-light materials illuminate rather than staying dark.
+- Mobile acceptance repeated at 390×844: twin ready, assets loaded, fullscreen control inside the viewport, no horizontal overflow, zero console errors.
+- JavaScript syntax and whitespace checks passed.
+
+### Known limitation
+No Playwright package is installed in this workspace. Visual QA was performed with the system Chromium via the DevTools Protocol: screenshots were captured during the run and the rendered WebGL pixel buffer was classified directly. Screenshots are not committed (they are throwaway QA artifacts, not release assets).
+
+---
+
 ## v1.5.7 — Vehicle materials, Drive visuals, and traffic variety fix
 
 **Date:** 2026-09-22 · **Time:** 16:33 EDT · **Release:** `feat/fix-davis-vehicle-assets`
