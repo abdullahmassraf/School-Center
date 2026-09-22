@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{
 await new Promise(r=>server.listen(PORT,r));
 
 const profile=fsio.mkdtempSync('/tmp/sc-map-fullscreen-');
-const chrome=spawn(CHROME,['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--enable-gpu','--use-gl=angle','--use-angle=swiftshader-webgl','--enable-unsafe-swiftshader','--disable-gpu-sandbox','--enable-webgl','--ignore-gpu-blocklist',`--remote-debugging-port=${DEBUG_PORT}`,`--user-data-dir=${profile}`,'--window-size=1280,900'],{stdio:'ignore'});
+const chrome=spawn(CHROME,['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--enable-gpu','--use-gl=angle','--use-angle=swiftshader-webgl','--enable-unsafe-swiftshader','--disable-gpu-sandbox','--enable-webgl','--ignore-gpu-blocklist',`--remote-debugging-port=${DEBUG_PORT}`,`--user-data-dir=${profile}`,'--window-size=1280,900',`http://127.0.0.1:${PORT}/index.html`],{stdio:'ignore'});
 
 let target;
 for(let i=0;i<120&&!target;i++){try{target=(await(await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json()).find(t=>t.type==='page')}catch{}await new Promise(r=>setTimeout(r,250))}
