@@ -36,10 +36,22 @@ try{
  });
  const horizontal=Math.max(carBounds.size.x,carBounds.size.z), vertical=carBounds.size.y;
  if(horizontal<2.0||horizontal>7.5||vertical<0.45||vertical>2.5)throw new Error('packed car dimensions invalid: '+JSON.stringify(carBounds));
+ const transitBounds=await page.evaluate(()=>{
+   const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;
+   return d.transit.vehicles.map(v=>{
+     const box=new d.THREE.Box3().setFromObject(v.root), size=box.getSize(new d.THREE.Vector3());
+     const mats=[]; v.root.traverse(o=>{if(o.isMesh){for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m?.name)mats.push(m.name)}});
+     return {key:v.key,size:{x:size.x,y:size.y,z:size.z},materials:[...new Set(mats)].slice(0,12)};
+   });
+ });
+ for(const v of transitBounds){
+   const h=Math.max(v.size.x,v.size.z);
+   if(h<2.5||h>7.5||v.size.y<0.7||v.size.y>3.2)throw new Error('transit dimensions invalid: '+JSON.stringify(v));
+ }
  await page.evaluate(()=>window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.DavisTwin.drive());
  await page.waitForTimeout(350);
  await page.locator('.cm3d-mount').screenshot({path:'/tmp/davis-assetfix.png'});
- console.log('ASSET MAP PASS',JSON.stringify({s,dims,driveState,carBounds,errs}));
+ console.log('ASSET MAP PASS',JSON.stringify({s,dims,driveState,carBounds,transitBounds,errs}));
  if(errs.length)throw new Error(errs.join(' | '));
  await browser.close();
 }finally{server.kill('SIGTERM')}
