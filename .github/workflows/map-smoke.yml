@@ -1,0 +1,27 @@
+name: Davis Campus Map Smoke Test
+
+on:
+  push:
+    branches: ["fix/map-never-finishes-loading"]
+  pull_request:
+    paths:
+      - "campus-twin.html"
+      - "src/campus-map-3d.js"
+      - "src/style.css"
+      - "test_campus_map_3d.js"
+      - "assets/campus/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  map-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Davis map acceptance suite
+        run: node test_campus_map_3d.js
