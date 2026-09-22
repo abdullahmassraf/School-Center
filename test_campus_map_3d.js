@@ -95,9 +95,7 @@ console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fs));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(900);
-await clickSelectorInFrame('#scene');
-await sleep(120);
-await key('KeyD');
+await ev(`(()=>{const w=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;w.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyD',bubbles:true}));return true})()`);
 await sleep(700);
 let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
 if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify(drive)}`);
