@@ -1844,6 +1844,7 @@ function frame(now) {
   frameId = 0;
   if (renderPaused) return;
   frameId = requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
+  frameNo++;
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
   if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
   camDist = camera.position.distanceTo(controls.target);
