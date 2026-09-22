@@ -805,7 +805,7 @@ function makePackedInstanceSet(root, vehicles) {
     inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     inst.castShadow = true; inst.receiveShadow = true; inst.frustumCulled = false;
     scene.add(inst);
-    entries.push({ base: mesh.matrix.clone(), inst, isBody });
+    entries.push({ base: mesh.matrixWorld.clone(), inst, isBody });
   });
   if (!entries.length) throw new Error('Packed vehicle contained no usable mesh primitives.');
 
@@ -910,9 +910,11 @@ async function buildPublicTransport() {
     transit = { vehicles: [] };
     loaded.forEach(({ spec, gltf }) => {
       const root = clonePackedRoot(gltf);
-      root.position.set(spec.x, 0.04, spec.z);
+      root.position.x = spec.x;
+      root.position.z = spec.z;
+      root.position.y += 0.04;
       root.rotation.y = spec.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-      root.scale.setScalar(spec.scale);
+      root.scale.multiplyScalar(spec.scale);
       scene.add(root);
       transit.vehicles.push({ root, ...spec, stopTimer: 0, servedStop: false });
       setAssetState(spec.key, 'loaded');
@@ -1499,7 +1501,8 @@ async function initPhysics() {
     const gltf = await loadPackedModel(CAMPUS_ASSETS.normalCar);
     const packed = clonePackedRoot(gltf);
     packed.rotation.y = Math.PI;
-    packed.position.set(0, 0, 0);
+    packed.position.x = 0;
+    packed.position.z = 0;
     g.add(packed);
     drive.packedCar = packed;
 
