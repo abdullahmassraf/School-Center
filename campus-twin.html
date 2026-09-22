@@ -219,6 +219,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ═══════════ 0 · CONFIG & DATA (your proof-of-concept data model, kept as-is) ═══════════ */
 const CAMPUS = { lat: 43.65539, lon: -79.73846, tz: 'America/Toronto' };
@@ -230,6 +231,64 @@ if (CFG.quality === 'auto' && ls.get('davis-quality')) CFG.quality = ls.get('dav
 const DEBUG = Q.has('debug'); if (Q.has('embed')) document.body.classList.add('embed');
 const HOST_ORIGIN = location.origin;
 const $ = id => document.getElementById(id);
+
+const CAMPUS_ASSET_ROOT = 'assets/campus/';
+const CAMPUS_ASSETS = Object.freeze({
+  normalCar: CAMPUS_ASSET_ROOT + 'cars/NormalCar1.glb.gz.b64',
+  bus: CAMPUS_ASSET_ROOT + 'transit/Bus.glb.gz.b64',
+  schoolBus: CAMPUS_ASSET_ROOT + 'transit/SchoolBus.glb.gz.b64'
+});
+const ASSET_STATE = {
+  format: 'gzip+base64',
+  car: 'pending',
+  transit: { bus: 'pending', schoolBus: 'pending' },
+  errors: []
+};
+const packedCache = new Map();
+
+function decodeBase64Bytes(text) {
+  const raw = atob(String(text).replace(/\s+/g, ''));
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+async function unpackGzip(bytes) {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('This browser does not expose gzip decompression for packed campus assets.');
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).arrayBuffer();
+}
+async function loadPackedGLB(url) {
+  if (packedCache.has(url)) return packedCache.get(url);
+  const promise = (async () => {
+    const res = await fetch(url, { cache: 'force-cache' });
+    if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
+    const packed = decodeBase64Bytes(await res.text());
+    const arrayBuffer = await unpackGzip(packed);
+    const loader = new GLTFLoader();
+    return await new Promise((resolve, reject) => loader.parse(arrayBuffer, '', resolve, reject));
+  })();
+  packedCache.set(url, promise);
+  try { return await promise; } catch (e) { packedCache.delete(url); throw e; }
+}
+function preparePackedRoot(root) {
+  root.updateMatrixWorld(true);
+  root.traverse(m => {
+    if (!m.isMesh) return;
+    m.castShadow = true; m.receiveShadow = true;
+    m.frustumCulled = true;
+  });
+  return root;
+}
+function clonePackedRoot(sourceRoot) {
+  return preparePackedRoot(sourceRoot.clone(true));
+}
+function setAssetState(key, value, error) {
+  if (key === 'bus' || key === 'schoolBus') ASSET_STATE.transit[key === 'schoolBus' ? 'schoolBus' : key] = value;
+  else ASSET_STATE[key] = value;
+  if (error) ASSET_STATE.errors.push(String(error.message || error));
+}
 
 const BUS_STOP = [-58, 0.22, -122];
 const BUILDINGS = [
@@ -626,26 +685,145 @@ function buildLamps() {
 }
 const CAR_COLS = ['#c9ccd4', '#1d2027', '#8b1d2c', '#1f4d8a', '#e4e6ea', '#5b6470', '#2d5f3f', '#b8892a'];
 let traffic = null;
-function buildCars() {
+let transit = null;
+
+const ASSET_MATRIX = new THREE.Matrix4();
+const ASSET_QUAT = new THREE.Quaternion();
+const ASSET_EULER = new THREE.Euler(0, 0, 0);
+const ASSET_SCALE = new V3(1, 1, 1);
+const ASSET_OBJECT = new THREE.Object3D();
+
+function makePackedInstanceSet(root, vehicles) {
+  root.updateMatrixWorld(true);
+  const entries = [];
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.geometry || !mesh.material || Array.isArray(mesh.material)) return;
+    mesh.updateWorldMatrix(true, false);
+    const isBody = /^(blue|yellow|body|bodycolor)$/i.test(String(mesh.name || '').trim())
+      || /^(blue|yellow|body|bodycolor)$/i.test(String(mesh.material.name || '').trim());
+    const material = mesh.material.clone();
+    if (isBody) material.vertexColors = true;
+    const inst = new THREE.InstancedMesh(mesh.geometry, material, vehicles.length);
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    inst.castShadow = true; inst.receiveShadow = true; inst.frustumCulled = false;
+    scene.add(inst);
+    entries.push({ base: mesh.matrixWorld.clone(), inst, isBody });
+  });
+  if (!entries.length) throw new Error('Packed vehicle contained no usable mesh primitives.');
+
+  const update = (index, vehicle) => {
+    ASSET_QUAT.setFromEuler(ASSET_EULER.set(0, vehicle.yaw || 0, 0));
+    ASSET_SCALE.setScalar(vehicle.scale || 1);
+    ASSET_MATRIX.compose(ASSET_OBJECT.position.set(vehicle.x, vehicle.y || 0, vehicle.z), ASSET_QUAT, ASSET_SCALE);
+    entries.forEach(entry => {
+      ASSET_MATRIX.multiplyMatrices(ASSET_OBJECT.matrix, entry.base);
+      entry.inst.setMatrixAt(index, ASSET_MATRIX);
+      if (entry.isBody && vehicle.col) entry.inst.setColorAt(index, new Col(vehicle.col));
+    });
+  };
+
+  vehicles.forEach((vehicle, index) => update(index, vehicle));
+  entries.forEach(entry => {
+    entry.inst.instanceMatrix.needsUpdate = true;
+    if (entry.inst.instanceColor) entry.inst.instanceColor.needsUpdate = true;
+  });
+  return { entries, update, vehicles };
+}
+
+function buildProceduralCars() {
   const r = rng(404), bodyG = new THREE.BoxGeometry(1.85, .75, 4.3).translate(0, .62, 0), cabG = new THREE.BoxGeometry(1.6, .6, 2.3).translate(0, 1.28, .1);
   const bodyM = std({ color: '#fff', metalness: .6, roughness: .32 }, 1.2), cabM = std({ color: '#0e161f', metalness: .85, roughness: .08 }, 1.5);
   const list = []; for (const l of LOTS) { const c = Math.cos(l.rot), s = Math.sin(l.rot); for (const [z0, z1] of l.ly.rows) for (let i = 0; i < l.ly.n; i++) { if (r() > .5) continue; const x = l.ly.x0 + (i + .5) * l.ly.sw, z = (z0 + z1) / 2; list.push({ x: l.x + x * c + z * s, z: l.z - x * s + z * c, yaw: l.rot + (r() < .5 ? 0 : Math.PI) + (r() - .5) * .08, col: CAR_COLS[(r() * 8) | 0] }); } }
   const N = list.length, body = mkI(bodyG, bodyM, N), cab = mkI(cabG, cabM, N), o = new THREE.Object3D();
   list.forEach((c, i) => { o.position.set(c.x, 0, c.z); o.rotation.set(0, c.yaw, 0); o.updateMatrix(); body.setMatrixAt(i, o.matrix); cab.setMatrixAt(i, o.matrix); body.setColorAt(i, new Col(c.col)); });
-  // moving traffic on the arterials
   const lanes = [{ ax: 'z', f: -214, d: 1 }, { ax: 'z', f: -200, d: -1 }, { ax: 'x', f: -258, d: 1 }, { ax: 'x', f: -274, d: -1 }];
   const cars = []; lanes.forEach((ln, li) => { for (let k = 0; k < 3; k++) cars.push({ ...ln, t: r(), v: 11 + r() * 6, col: CAR_COLS[(li * 3 + k) % 8] }); });
   const tb = mkI(bodyG, bodyM, cars.length), tc = mkI(cabG, cabM, cars.length), tl = mkI(new THREE.BoxGeometry(.35, .2, .1), new THREE.MeshBasicMaterial({ color: new Col(2.4, 2.2, 1.6), toneMapped: false }), cars.length * 2, false);
   cars.forEach((c, i) => tb.setColorAt(i, new Col(c.col)));
-  traffic = { cars, tb, tc, tl, o, tlMat: tl.material };
+  traffic = { mode: 'procedural', cars, tb, tc, tl, o, tlMat: tl.material };
 }
-const MT = new THREE.Matrix4();
+
+async function buildCars() {
+  try {
+    const gltf = await loadPackedGLB(CAMPUS_ASSETS.normalCar);
+    const r = rng(404), parked = [];
+    for (const l of LOTS) {
+      const c = Math.cos(l.rot), s = Math.sin(l.rot);
+      for (const [z0, z1] of l.ly.rows) for (let i = 0; i < l.ly.n; i++) {
+        if (r() > .55) continue;
+        const x = l.ly.x0 + (i + .5) * l.ly.sw, z = (z0 + z1) / 2;
+        parked.push({ x: l.x + x * c + z * s, y: 0.02, z: l.z - x * s + z * c,
+          yaw: l.rot + (r() < .5 ? 0 : Math.PI), scale: .96 + r() * .08, col: CAR_COLS[(r() * CAR_COLS.length) | 0] });
+      }
+    }
+    const lanes = [
+      { ax: 'z', f: -214, d: 1 }, { ax: 'z', f: -200, d: -1 },
+      { ax: 'x', f: -258, d: 1 }, { ax: 'x', f: -274, d: -1 }
+    ];
+    const moving = [];
+    lanes.forEach((ln, li) => {
+      for (let k = 0; k < 3; k++) moving.push({ ...ln, t: r(), v: 11 + r() * 6, col: CAR_COLS[(li * 3 + k) % CAR_COLS.length], y: 0.02, scale: .96 + r() * .05 });
+    });
+    const vehicles = parked.concat(moving);
+    const set = makePackedInstanceSet(gltf.scene, vehicles);
+    set.vehicles = vehicles;
+    traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles };
+    setAssetState('car', 'loaded');
+  } catch (e) {
+    setAssetState('car', 'fallback', e);
+    console.warn('[campus-assets] NormalCar1 unavailable; using procedural traffic:', e);
+    buildProceduralCars();
+  }
+}
+
 function updateTraffic(dt) {
-  if (!traffic) return; const { cars, tb, tc, tl, o } = traffic;
+  if (!traffic) return;
+  if (traffic.mode === 'packed') {
+    const { cars, parkedCount, set, vehicles } = traffic;
+    cars.forEach((car, i) => {
+      car.t = (car.t + car.v * dt / 640) % 1;
+      const s = (car.d > 0 ? car.t : 1 - car.t) * 640 - 320;
+      if (car.ax === 'z') { car.x = car.f; car.z = s; car.yaw = car.d > 0 ? 0 : Math.PI; }
+      else { car.z = car.f; car.x = s; car.yaw = car.d > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      set.update(parkedCount + i, car);
+    });
+    set.entries.forEach(entry => {
+      entry.inst.instanceMatrix.needsUpdate = true;
+      if (entry.inst.instanceColor) entry.inst.instanceColor.needsUpdate = true;
+    });
+    return;
+  }
+  const { cars, tb, tc, tl, o } = traffic;
   cars.forEach((c, i) => { c.t = (c.t + c.v * dt / 640) % 1; const s = (c.d > 0 ? c.t : 1 - c.t) * 640 - 320; if (c.ax === 'z') { o.position.set(c.f, 0, s); o.rotation.y = c.d > 0 ? Math.PI : 0; } else { o.position.set(s, 0, c.f); o.rotation.y = c.d > 0 ? -Math.PI / 2 : Math.PI / 2; } o.updateMatrix(); tb.setMatrixAt(i, o.matrix); tc.setMatrixAt(i, o.matrix);
     for (const sx of [-.7, .7]) { const m = MT.makeTranslation(sx, .7, -2.17).premultiply(o.matrix); tl.setMatrixAt(i * 2 + (sx > 0), m); } });
   tb.instanceMatrix.needsUpdate = tc.instanceMatrix.needsUpdate = tl.instanceMatrix.needsUpdate = true;
 }
+
+async function buildPublicTransport() {
+  const specs = [
+    { key: 'bus', url: CAMPUS_ASSETS.bus, x: -59.7, z: -190, dir: 1, speed: 10.5, scale: .98 },
+    { key: 'schoolBus', url: CAMPUS_ASSETS.schoolBus, x: -56.3, z: -58, dir: -1, speed: 8.5, scale: .90 }
+  ];
+  try {
+    const loaded = await Promise.all(specs.map(async spec => ({ spec, gltf: await loadPackedGLB(spec.url) })));
+    transit = { vehicles: [] };
+    loaded.forEach(({ spec, gltf }) => {
+      const root = clonePackedRoot(gltf.scene);
+      root.position.set(spec.x, 0.04, spec.z);
+      root.rotation.y = spec.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+      root.scale.setScalar(spec.scale);
+      scene.add(root);
+      transit.vehicles.push({ root, ...spec, stopTimer: 0, servedStop: false });
+      setAssetState(spec.key, 'loaded');
+    });
+  } catch (e) {
+    setAssetState('bus', 'fallback', e);
+    setAssetState('schoolBus', 'fallback', e);
+    transit = { vehicles: [] };
+    console.warn('[campus-assets] Public transport models unavailable; keeping the existing shelter only:', e);
+  }
+}
+
 function buildMisc() {
   // bus shelter
   const g = new THREE.Group(), post = std({ color: '#39404c', metalness: .7, roughness: .4 }), glass = new THREE.MeshPhysicalMaterial({ color: '#9ec8e8', transparent: true, opacity: .35, roughness: .05, metalness: 0 }); reg(glass, 1.5);
@@ -1287,7 +1465,7 @@ const tour = { on: false, i: 0, t: 0 }; let ready = false, sliderDrag = false;
 const panel = open => { $('panel').classList.toggle('closed', !open); $('panelBtn').setAttribute('aria-expanded', open); };
 function setAccent(hex) {
   if (!/^#?[0-9a-f]{3,8}$/i.test(String(hex).replace('#', '')) && !hex) return; ST.accent.set(hex); const css = '#' + ST.accent.getHexString(); document.documentElement.style.setProperty('--accent', css);
-  for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
+  for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.packBodyMats?.length) drive.packBodyMats.forEach(m => m.color.copy(ST.accent)); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
   document.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.accent === css)); $('accentPick').value = css; ls.set('davis-accent', css);
 }
 function setTime(v) { if (v === 'live') { clock.mode = 'live'; clock.speed = 1; $('speed').value = '1'; } else { clock.t = new Date(v).getTime(); clock.mode = 'manual'; } envDirty = true; syncClock(); }
@@ -1338,7 +1516,7 @@ function frame(now) {
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
   if (frameNo++ % FX.se === 0) { updateShadow(); renderer.shadowMap.needsUpdate = true; }   // shadow map refreshed every 2nd–4th frame
-  updateTraffic(dt); updateRoute(dt); if ((hoverT += dt) > .08) { hoverT = 0; updateHover(); }
+  updateTraffic(dt); updatePublicTransport(dt); updateRoute(dt); if ((hoverT += dt) > .08) { hoverT = 0; updateHover(); }
   if (ST.monument) ST.monument.material.emissiveIntensity = .9 + .5 * Math.sin(now * .002) + ST.night;
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
@@ -1352,7 +1530,7 @@ function frame(now) {
 }
 const setLoad = (msg, p) => { $('loadMsg').textContent = msg; $('loadBar').style.width = (p * 100) + '%'; };
 async function boot() {
-  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, () => { buildLamps(); buildCars(); buildMisc(); buildWeather(); }], ['Wayfinding…', false, buildRoute]];
+  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, async () => { buildLamps(); buildMisc(); buildWeather(); await buildCars(); await buildPublicTransport(); }], ['Wayfinding…', false, buildRoute]];
   for (let i = 0; i < steps.length; i++) {
     setLoad(steps[i][0], i / steps.length); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
     try { await steps[i][2](); } catch (e) { console.error(steps[i][0], e); if (steps[i][1]) { fatal('Something went wrong while building the scene', String(e && e.message || e)); return; } }
@@ -1410,7 +1588,7 @@ addEventListener('visibilitychange', () => {
   if (!frameId) frameId = requestAnimationFrame(frame);
 });
 addEventListener('pagehide', disposeTwin, { once: true });
-if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, driveCamera, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
+if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = { THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight, interaction, drive, driveCamera, traffic, transit, ASSET_STATE, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen };
 frameId = requestAnimationFrame(frame);
 boot().catch(e => { console.error(e); fatal('Failed to start', String(e && e.message || e)); });
 
