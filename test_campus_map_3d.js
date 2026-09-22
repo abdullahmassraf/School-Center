@@ -136,16 +136,16 @@ const targetDelta=Math.hypot(chased.target[0]-moving.target[0],chased.target[1]-
 if(camDelta<0.05||targetDelta<0.05||chased.strength<=0)throw new Error(`smart Drive chase did not move the camera rig: ${JSON.stringify({moving,chased,camDelta,targetDelta})}`);
 console.log('SMART DRIVE CHASE',JSON.stringify({moving,chased,camDelta,targetDelta}));
 await key('Escape'); await sleep(800);
-await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.AUTO.on=true;d.drive.on=false;d.tour.on=false;d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now()-4500;d.updateCinematicCamera(.5,performance.now());return window.__SC_CAMPUS_MAP_3D__.reset()})()`);
+await ev(`(()=>{window.__SC_CAMPUS_MAP_3D__.setAutoOrbit(true);return window.__SC_CAMPUS_MAP_3D__.reset()})()`);
 await sleep(300);
 
-const idleOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.AUTO.on=true;d.drive.on=false;d.tour.on=false;d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now()-4500;d.updateCinematicCamera(.5,performance.now());return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition}})()`);
+const idleOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.drive.on=false;d.tour.on=false;d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now()-4500;d.updateCinematicCamera(.5,performance.now());return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition}})()`);
 if(idleOverview.sel!==null||idleOverview.pivot!==null||idleOverview.strength<.08||idleOverview.transition)throw new Error(`overview cinematic idle failed: ${JSON.stringify(idleOverview)}`);
 console.log('CINEMATIC OVERVIEW',JSON.stringify(idleOverview));
 
 await ev(`window.__SC_CAMPUS_MAP_3D__.focus('H')`);
 await sleep(500);
-const idleSelected=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.AUTO.on=true;d.drive.on=false;d.tour.on=false;d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now()-4500;d.updateCinematicCamera(.5,performance.now());return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition,route:d.R.grp.visible}})()`);
+const idleSelected=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.drive.on=false;d.tour.on=false;d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now()-4500;d.updateCinematicCamera(.5,performance.now());return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition,route:d.R.grp.visible}})()`);
 if(idleSelected.sel!=='H'||idleSelected.pivot!=='H'||idleSelected.strength<.08||idleSelected.transition||!idleSelected.route)throw new Error(`selected cinematic idle failed: ${JSON.stringify(idleSelected)}`);
 console.log('CINEMATIC SELECTED H',JSON.stringify(idleSelected));
 
