@@ -140,7 +140,7 @@ for(const v of transitWheelFit){
   if(v.wheels.length<2)throw new Error("transit wheel rigs missing: "+JSON.stringify(v));
   for(const w of v.wheels){
     if(!Number.isFinite(w.fit)||w.fit<=.05||w.fit>=.8||!Number.isFinite(w.diameter)||w.diameter<=.5||w.diameter>=1.6)throw new Error("transit wheel fit out of bounds: "+JSON.stringify(v));
-    if(w.axis!=="z"||Math.abs(Math.abs(w.baseY)-Math.PI/2)>.05)throw new Error("transit wheel axis still points at bus ends: "+JSON.stringify(v));
+    if(w.axis!=="z"||Math.abs(w.baseY)>.05)throw new Error("transit wheel axis is not the native local-Z axle: "+JSON.stringify(v));
   }
 }
 console.log("TRANSIT WHEEL FIT/AXIS",JSON.stringify(transitWheelFit));
@@ -161,6 +161,12 @@ await new Promise(r=>setTimeout(r,1200));
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 if(transitBefore.every((v,i)=>Math.abs(v-transitAfter[i])<.1))throw new Error(`public transport is not moving: ${JSON.stringify({before:transitBefore,after:transitAfter})}`);
 console.log('TRANSIT MOTION',JSON.stringify({before:transitBefore,after:transitAfter}));
+
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.DavisTwin.setTime('2026-01-15T03:00:00Z')`);
+await sleep(500);
+const nightLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const car=d.traffic?.set?.roots?.slice(d.traffic.parkedCount||0,d.traffic.parkedCount+12)||[];const pick=car.find(r=>r?.userData?.vehicleLights);const mat=n=>n?.head?.some(m=>m.emissiveIntensity>.2)&&n?.tail?.some(m=>m.emissiveIntensity>.2);const tv=d.transit?.vehicles||[];return{night:d.ST.night,npcOn:!!pick&&mat(pick.userData.vehicleLights)&&pick.userData.vehicleLightRig?.headGlow?.some(s=>s.material.opacity>.1)&&pick.userData.vehicleLightRig?.tailGlow?.some(s=>s.material.opacity>.1),transitOn:tv.length===2&&tv.every(v=>v.lightMaterials?.some(m=>m.emissiveIntensity>.2)&&v.lightRig?.headEmit?.some(l=>l.intensity>.2)&&v.lightRig?.tailEmit?.some(l=>l.intensity>.1)}})()`);
+if(nightLights.night<.6||!nightLights.npcOn||!nightLights.transitOn)throw new Error(`night vehicle lighting failed: ${JSON.stringify(nightLights)}`);
+console.log('NIGHT VEHICLE LIGHTS',JSON.stringify(nightLights));
 console.log('BOOT',JSON.stringify(boot));
 
 const dOutside=await ev(`(()=>{window.__SC_CAMPUS_MAP_3D__.frame.focus();return window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on})()`);
@@ -196,6 +202,9 @@ for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.mat
 console.log('DRIVE MATERIALS',JSON.stringify(driveBody));
 const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{active:d.drivePerf.active,dpr:d.renderer.getPixelRatio(),dof:d.CU.uDof.value,bloom:d.CU.uBloom.value,maxPr:d.drivePerf.maxPr}})()`);
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
+const playerLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=d.drive.playerLightRig,heads=d.drive.playerBeams||[];return{headOn:!!r&&r.headEmit.some(l=>l.intensity>.2),tailOn:!!r&&r.tailEmit.some(l=>l.intensity>.1),beamAligned:heads.length===r.head.length&&heads.every((m,i)=>Math.hypot(m.position.x-r.head[i].x,m.position.y-r.head[i].y,m.position.z-r.head[i].z)<.03),particleStart:d.drive.dustBase?.slice(0,3)}})()`);
+if(!playerLights.headOn||!playerLights.tailOn||!playerLights.beamAligned)throw new Error(`player native light rig is misaligned: ${JSON.stringify(playerLights)}`);
+console.log('PLAYER NATIVE LIGHT RIG',JSON.stringify(playerLights));
 console.log("DRIVE PERFORMANCE MODE",JSON.stringify(drivePerf));
 console.log('PLAYER APPEARANCE',JSON.stringify(playerAppearance));
 await sleep(1000);await screenshot('drive-native-wheels-chase');
