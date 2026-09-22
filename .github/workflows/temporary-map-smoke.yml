@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - name: Install Playwright browser
-        run: npm install --global --prefix /tmp/playwright playwright@1.52.0 && /tmp/playwright/bin/playwright install --with-deps chromium
+        run: npm install --no-save playwright@1.52.0 && npx playwright install --with-deps chromium
       - name: Run map smoke test
         shell: bash
         run: |
@@ -37,7 +37,7 @@ jobs:
           page.on('pageerror', e=>errors.push('pageerror: '+e.message));
           page.on('console', msg=>{if(msg.type()==='error')errors.push('console: '+msg.text())});
 
-          await page.goto('http://127.0.0.1:8787/index.html?map-smoke=1',{waitUntil:'domcontentloaded'});
+          await page.goto('http://127.0.0.1:8787/index.html?map-smoke=1&debug=1',{waitUntil:'domcontentloaded'});
           const deadline=Date.now()+45000;
           let state=null;
           while(Date.now()<deadline){
@@ -99,7 +99,7 @@ jobs:
           if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
           await browser.close();
           EOF
-          NODE_PATH=/tmp/playwright/lib/node_modules node /tmp/map-smoke.mjs
+          node /tmp/map-smoke.mjs
       - name: Upload smoke screenshot
         uses: actions/upload-artifact@v4
         with:
