@@ -75,7 +75,11 @@ const waitFor=async(expression,timeout=10000,interval=120)=>{
 };
 const QA_DIR=path.join(ROOT,'qa-artifacts');fs.mkdirSync(QA_DIR,{recursive:true});
 const screenshot=async name=>{
-  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+  await ev(`document.querySelector('#cm3d-mount iframe')?.scrollIntoView({block:'center',inline:'center'})`);
+  await sleep(160);
+  const clip=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__?.frame,r=f?.getBoundingClientRect?.();return r&&r.width>4&&r.height>4?{x:Math.max(0,r.left),y:Math.max(0,r.top),width:Math.min(innerWidth-r.left,r.width),height:Math.min(innerHeight-r.top,r.height),scale:1}:null})()`);
+  if(!clip)throw new Error('campus map iframe clip unavailable for screenshot');
+  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true,clip});
   const out=path.join(QA_DIR,name+'.png');
   fs.writeFileSync(out,Buffer.from(shot.result.data,'base64'));
   console.log('SCREENSHOT',out);
@@ -123,22 +127,25 @@ if(vehicleAppearance.modelCount<4||vehicleAppearance.trafficModels.length<3||veh
 if(vehicleAppearance.bus.length<2||vehicleAppearance.schoolBus.length<2)throw new Error(`transit material styling was not applied: ${JSON.stringify(vehicleAppearance)}`);
 const materialBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const dump=root=>{const a=[];root?.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];a.push({mesh:o.name,materials:ms.map(m=>({name:m?.name,color:m?.color?.getHexString()}))})}});return a};return{bus:dump(d.transit?.vehicles?.find(v=>v.key==='bus')?.root),schoolBus:dump(d.transit?.vehicles?.find(v=>v.key==='schoolBus')?.root),drive:dump(d.drive?.packedCar)}})()`);
 console.log('VEHICLE APPEARANCE',JSON.stringify({vehicleAppearance,materialBindings}));
-/* Regression guard for the Drive light-binding bug: extracting headlight/tail
- * light materials for Drive effects must never collapse a native multi-material
- * mesh into a single material. */
-const driveBody=(materialBindings.drive||[]).find(m=>/NormalCar1_Cube/i.test(m.mesh||''));
-if(!driveBody||driveBody.materials.length<5)throw new Error(`Drive body lost its native material groups: ${JSON.stringify(driveBody)}`);
-for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.materials.some(m=>m.name===slot))throw new Error(`Drive body is missing the native ${slot} material slot: ${JSON.stringify(driveBody.materials)}`);
+/* Drive physics/assets are lazy-loaded. Before the Drive easter egg is activated
+ * there may be no packed player mesh yet, so defer its native-material assertion
+ * until the Drive lifecycle section below. */
 const distinctColors=list=>[...new Set((list||[]).map(m=>m.color))];
 for(const key of ['bus','schoolBus']){const groups=materialBindings[key]||[],colors=distinctColors(groups.flatMap(g=>g.materials));if(colors.length<5)throw new Error(`${key} did not receive distinct body/window/trim/light/wheel materials: ${JSON.stringify(materialBindings[key])}`)}
 /* A "gray shell" is a transit asset whose materials all desaturate to grey; the
  * body paint must stay chromatic so the bus and the school bus stay distinct. */
 const saturation=hex=>{const r=parseInt(hex.slice(0,2),16)/255,g=parseInt(hex.slice(2,4),16)/255,b=parseInt(hex.slice(4,6),16)/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b);return mx===0?0:(mx-mn)/mx};
-const transitWheelFit=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.transit.vehicles.map(v=>({key:v.key,wheels:(v.wheelRigs||[]).map(w=>({name:w.node.name,fit:w.pivot.scale.x,diameter:w.pivot.userData.nativeWheelDiameter,radius:w.radius}))}))})()`);
-for(const v of transitWheelFit){if(v.wheels.length<2)throw new Error("transit wheel rigs missing: "+JSON.stringify(v));for(const w of v.wheels){if(!Number.isFinite(w.fit)||w.fit<=.05||w.fit>=.8||!Number.isFinite(w.diameter)||w.diameter<=.5||w.diameter>=1.6)throw new Error("transit wheel fit out of bounds: "+JSON.stringify(v));}}
-console.log("TRANSIT WHEEL FIT",JSON.stringify(transitWheelFit));
+const transitWheelFit=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.transit.vehicles.map(v=>({key:v.key,wheels:(v.wheelRigs||[]).map(w=>({name:w.node.name,fit:w.pivot.scale.x,diameter:w.pivot.userData.nativeWheelDiameter,radius:w.radius,axis:w.pivot.userData.transitWheelAxis,baseY:w.baseY}))}))})()`);
+for(const v of transitWheelFit){
+  if(v.wheels.length<2)throw new Error("transit wheel rigs missing: "+JSON.stringify(v));
+  for(const w of v.wheels){
+    if(!Number.isFinite(w.fit)||w.fit<=.05||w.fit>=.8||!Number.isFinite(w.diameter)||w.diameter<=.5||w.diameter>=1.6)throw new Error("transit wheel fit out of bounds: "+JSON.stringify(v));
+    if(w.axis!=="z"||Math.abs(Math.abs(w.baseY)-Math.PI/2)>.05)throw new Error("transit wheel axis still points at bus ends: "+JSON.stringify(v));
+  }
+}
+console.log("TRANSIT WHEEL FIT/AXIS",JSON.stringify(transitWheelFit));
 for(const [key,list] of [['bus',vehicleAppearance.bus],['schoolBus',vehicleAppearance.schoolBus]])if(!list.some(c=>saturation(c)>.25))throw new Error(`${key} renders as a gray shell with no distinct body paint: ${JSON.stringify(list)}`);
-console.log('MATERIAL SLOT PRESERVATION',JSON.stringify({driveBody:driveBody.materials,busDistinct:distinctColors((materialBindings.bus||[]).flatMap(g=>g.materials)),schoolBusDistinct:distinctColors((materialBindings.schoolBus||[]).flatMap(g=>g.materials))}));
+console.log('MATERIAL SLOT PRESERVATION',JSON.stringify({busDistinct:distinctColors((materialBindings.bus||[]).flatMap(g=>g.materials)),schoolBusDistinct:distinctColors((materialBindings.schoolBus||[]).flatMap(g=>g.materials))}));
 await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
@@ -177,11 +184,16 @@ console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fullscreenState));
 await clickSelector('.cm3d-fullscreen');
 await sleep(400);
 await key('KeyD');
-await sleep(700);
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.on&&!!d.drive.packedCar})()`,12000,150);
 let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
 if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify({drive,errors})}`);
 const playerAppearance=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const mats=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&mats.push(m.color.getHexString()))}});return{model:d.drive.packedCar.userData.vehicleModel,color:d.drive.packedCar.userData.vehicleColor,materials:[...new Set(mats)]}})()`);
 if(playerAppearance.model!=='NormalCar1'||playerAppearance.color!=='#1f4d8a')throw new Error(`Drive did not use the intended native NormalCar1 visual: ${JSON.stringify(playerAppearance)}`);
+const driveBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const out=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];out.push({mesh:o.name,materials:ms.map(m=>({name:m?.name,color:m?.color?.getHexString()}))})}});return out})()`);
+const driveBody=driveBindings.find(m=>/NormalCar1_Cube/i.test(m.mesh||''));
+if(!driveBody||driveBody.materials.length<5)throw new Error(`Drive body lost its native material groups: ${JSON.stringify(driveBody)}`);
+for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.materials.some(m=>m.name===slot))throw new Error(`Drive body is missing the native ${slot} material slot: ${JSON.stringify(driveBody.materials)}`);
+console.log('DRIVE MATERIALS',JSON.stringify(driveBody));
 const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{active:d.drivePerf.active,dpr:d.renderer.getPixelRatio(),dof:d.CU.uDof.value,bloom:d.CU.uBloom.value,maxPr:d.drivePerf.maxPr}})()`);
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
 console.log("DRIVE PERFORMANCE MODE",JSON.stringify(drivePerf));
@@ -190,6 +202,10 @@ await sleep(1000);await screenshot('drive-native-wheels-chase');
 const wheelMapping=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({node,pivot})=>({node:node.name,pivot:pivot.name}))`);
 const wheelLayout=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,car=d.drive.packedCar;car.updateMatrixWorld(true);let body=null;car.traverse(o=>{if(!body&&o.isMesh&&/NormalCar1_Cube/i.test(o.name||""))body=o});const bb=new d.THREE.Box3().setFromObject(body),out=d.drive.objWheels.map(w=>{const wb=new d.THREE.Box3().setFromObject(w.node),c=wb.getCenter(new d.THREE.Vector3()),l=car.worldToLocal(c.clone());return{name:w.node.name,scale:[w.pivot.scale.x,w.pivot.scale.y,w.pivot.scale.z],local:[l.x,l.y,l.z],box:wb.getSize(new d.THREE.Vector3()).toArray()}});return{body:bb.getSize(new d.THREE.Vector3()).toArray(),wheels:out}})()`);
 for(const w of wheelLayout.wheels){if(w.scale.some(v=>!Number.isFinite(v)||v<.9||v>1.1))throw new Error("Drive native wheel scale drifted: "+JSON.stringify(wheelLayout));if(Math.abs(w.local[0])>1.02||Math.abs(w.local[2])>1.85||w.local[1]<-.1||w.local[1]>.8)throw new Error("Drive wheel detached from body: "+JSON.stringify(wheelLayout));}
+const byName=Object.fromEntries(wheelLayout.wheels.map(w=>[w.name,w.local]));
+const frontLeft=byName["NormalCar1_FrontLeftWheel_Cube.007"], frontRight=byName["NormalCar1_FrontRightWheel_Cube.008"], rearAxle=byName["NormalCar1_BackWheels_Cube.011"];
+if(!(frontLeft?.[2]>.5&&frontRight?.[2]>.5&&frontLeft?.[0]>.2&&frontRight?.[0]<-.2&&rearAxle?.[2]<-.5))throw new Error("Drive native front/rear wheel semantics are inverted: "+JSON.stringify(wheelLayout));
+if(Math.hypot(frontLeft[0]-rearAxle[0],frontLeft[2]-rearAxle[2])<1.6)throw new Error("Drive front-left wheel is too close to the rear axle: "+JSON.stringify(wheelLayout));
 console.log("DRIVE WHEEL LAYOUT",JSON.stringify(wheelLayout));
 if(wheelMapping.length!==3||!wheelMapping.some(w=>/FrontLeftWheel/i.test(w.node))||!wheelMapping.some(w=>/FrontRightWheel/i.test(w.node))||!wheelMapping.some(w=>/BackWheels/i.test(w.node)))throw new Error('native wheel groups were not mapped: '+JSON.stringify(wheelMapping));
 const wheelBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);

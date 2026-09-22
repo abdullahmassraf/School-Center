@@ -1,5 +1,19 @@
 # Davis Campus 3D Twin Migration
 
+## v1.5.10 — Vehicle wheel-axis correction and Drive performance cleanup
+
+**Date:** 2026-09-22
+
+### Changes
+- Corrected the supplied Bus/SchoolBus wheel rig axis before the vehicles rotate onto the campus Z corridor. Native wheel geometry and materials remain untouched; only the rig transform is corrected, eliminating the oversized dark front/rear wheel artifact.
+- Kept the supplied NormalCar1 on its native +Z-forward convention. FrontLeftWheel / FrontRightWheel remain the actual front steering wheels instead of being visually inverted by a hidden 180° root rotation.
+- Re-aligned Drive headlight/tail-light helpers, light pools, dust and the initial camera with the native vehicle front.
+- Added regression checks for transit wheel axis, player front/rear wheel semantics, axle spacing, continuous wheel motion and existing material preservation.
+- Lazy-loaded Rapier/Drive physics so ordinary map startup does not pay the optional WASM/world-collider initialization cost before Drive is used.
+
+### Validation
+- GitHub Actions Campus 3D regression passed on the fix branch, covering native asset loading, transit motion, Drive lifecycle, wheel mapping/rolling/steering, camera stability, cinematic behavior and browser console-error checks.
+- Rendered vehicle QA screenshots are retained in the campus-vehicle-visual-qa workflow artifact. Final real-device FPS/visual validation remains a separate desktop/mobile check outside the CI runner.
 ## Goal
 Keep the existing School Center campus-map card, buttons, chips, status line, loading state, fallback, sizing and CSS. Replace only the 3D environment with the supplied Davis Campus digital twin.
 
