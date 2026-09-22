@@ -261,7 +261,11 @@ async function unpackGzip(bytes) {
 async function loadPackedModel(url) {
   if (packedCache.has(url)) return packedCache.get(url);
   const promise = (async () => {
-    const res = await fetch(url, { cache: 'force-cache' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    let res;
+    try { res = await fetch(url, { cache: 'force-cache', signal: controller.signal }); }
+    finally { clearTimeout(timer); }
     if (!res.ok) throw new Error(`Campus asset request failed (${res.status}): ${url}`);
     const packed = decodeBase64Bytes(await res.text());
     const bytes = await unpackGzip(packed);
@@ -1655,7 +1659,11 @@ function frame(now) {
 }
 const setLoad = (msg, p) => { $('loadMsg').textContent = msg; $('loadBar').style.width = (p * 100) + '%'; };
 async function boot() {
-  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, async () => { buildLamps(); buildMisc(); buildWeather(); await buildCars(); await buildPublicTransport(); }], ['Wayfinding…', false, buildRoute]];
+  const steps = [['Starting renderer…', true, () => { resize(); }], ['Laying out roads & lots…', true, buildGround], ['Raising buildings…', true, () => { buildBuildings(); patchGlass(); }], ['Adding AAA architectural detail…', true, buildAAAFacelift], ['Planting trees…', false, buildVegetation], ['Lighting the campus…', false, () => {
+    buildLamps(); buildMisc(); buildWeather();
+    void buildCars().catch(e => console.warn('[campus-assets] car task failed after scene boot', e));
+    void buildPublicTransport().catch(e => console.warn('[campus-assets] transit task failed after scene boot', e));
+  }], ['Wayfinding…', false, buildRoute]];
   for (let i = 0; i < steps.length; i++) {
     setLoad(steps[i][0], i / steps.length); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
     try { await steps[i][2](); } catch (e) { console.error(steps[i][0], e); if (steps[i][1]) { fatal('Something went wrong while building the scene', String(e && e.message || e)); return; } }
