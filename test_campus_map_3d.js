@@ -16,7 +16,7 @@ const server=http.createServer((req,res)=>{
 });
 await new Promise(r=>server.listen(PORT,r));
 
-const profile=fs.mkdtempSync('/tmp/sc-map-fullscreen-');
+const profile=fsio.mkdtempSync('/tmp/sc-map-fullscreen-');
 const chrome=spawn(CHROME,['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--enable-gpu','--use-gl=angle','--use-angle=swiftshader-webgl','--enable-unsafe-swiftshader','--disable-gpu-sandbox','--enable-webgl','--ignore-gpu-blocklist',`--remote-debugging-port=${DEBUG_PORT}`,`--user-data-dir=${profile}`,'--window-size=1280,900'],{stdio:'ignore'});
 
 let target;
