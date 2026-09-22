@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - name: Install Playwright browser
-        run: npx --yes playwright@1.52.0 install --with-deps chromium
+        run: npm install --global --prefix /tmp/playwright playwright@1.52.0 && /tmp/playwright/bin/playwright install --with-deps chromium
       - name: Run map smoke test
         shell: bash
         run: |
@@ -99,7 +99,7 @@ jobs:
           if(errors.length) throw new Error('browser errors: '+errors.join(' | '));
           await browser.close();
           EOF
-          npx --yes --package=playwright@1.52.0 node /tmp/map-smoke.mjs
+          NODE_PATH=/tmp/playwright/lib/node_modules node /tmp/map-smoke.mjs
       - name: Upload smoke screenshot
         uses: actions/upload-artifact@v4
         with:
