@@ -20,11 +20,42 @@ const server=http.createServer((req,res)=>{
 await new Promise(r=>server.listen(PORT,r));
 
 const profile=fs.mkdtempSync('/tmp/sc-map-fullscreen-');
-const chrome=spawn(CHROME,['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--enable-gpu','--use-gl=angle','--use-angle=swiftshader-webgl','--enable-unsafe-swiftshader','--disable-gpu-sandbox','--enable-webgl','--ignore-gpu-blocklist',`--remote-debugging-port=${DEBUG_PORT}`,`--user-data-dir=${profile}`,'--window-size=1280,900'],{stdio:'ignore'});
+const chromeArgs = [
+  '--headless=new',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--enable-gpu',
+  '--use-gl=angle',
+  '--use-angle=swiftshader-webgl',
+  '--enable-unsafe-swiftshader',
+  '--disable-gpu-sandbox',
+  '--enable-webgl',
+  '--ignore-gpu-blocklist',
+  '--remote-debugging-address=127.0.0.1',
+  `--remote-debugging-port=${DEBUG_PORT}`,
+  '--remote-allow-origins=*',
+  `--user-data-dir=${profile}`,
+  '--window-size=1280,900',
+  'about:blank'
+];
+const chrome=spawn(CHROME,chromeArgs,{stdio:'ignore'});
 
-let target;
-for(let i=0;i<40&&!target;i++){try{target=(await(await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json()).find(t=>t.type==='page')}catch{}await new Promise(r=>setTimeout(r,250))}
-if(!target)throw new Error('no CDP page');
+let target, cdpVersion = null, cdpLastError = null;
+for(let i=0;i<80&&!target;i++){
+  try{
+    const vr=await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
+    if(vr.ok) cdpVersion=await vr.json();
+  }catch(e){ cdpLastError=String(e?.message||e); }
+  try{
+    const lr=await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`);
+    if(lr.ok) target=(await lr.json()).find(t=>t.type==='page');
+  }catch(e){ cdpLastError=String(e?.message||e); }
+  if(!target) await new Promise(r=>setTimeout(r,250));
+}
+if(!target)throw new Error(`no CDP page (version=${JSON.stringify(cdpVersion)}, lastError=${cdpLastError||'none'}, chrome=${CHROME})`);
 
 const ws=new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r=>ws.onopen=r);
