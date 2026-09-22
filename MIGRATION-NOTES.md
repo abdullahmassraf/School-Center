@@ -230,3 +230,19 @@ Desktop/headless checks passed:
 Responsive mobile-emulation checks also passed at 390×844 with the map renderer active and a 318×260 map surface.
 
 The temporary browser-test workflow and temporary smoke script are test-only and are removed from the final branch after verification; no new runtime dependency or production build step is retained.
+
+
+### Browser verification
+
+GitHub Actions headless Chromium smoke verification completed successfully on 2026-09-22:
+- Desktop map booted and rendered: manager ready, twin ready, 105 scene children, render calls observed.
+- Building IDs J/H/B/C/A/M all present; selection verified for all six IDs.
+- Route visibility verified.
+- Reset verified.
+- Site accent propagation verified.
+- Rain weather propagation verified after transition.
+- Manual winter-night time propagation verified.
+- Supplied car, Bus and SchoolBus payloads loaded; packed traffic mode active; two transit vehicles created.
+- Mobile viewport smoke test completed at 390×844 with a 318×260 map stage and no browser errors.
+- Fullscreen entry/exit and Drive activation/exit smoke tests completed.
+- Final smoke run: https://github.com/abdullahmassraf/School-Center/actions/runs/35748020735
