@@ -191,3 +191,19 @@ To preserve the repo's static GitHub Pages deployment and avoid a new build/depe
 Parked and road cars are rendered through `THREE.InstancedMesh` primitives extracted from one shared NormalCar1 source scene, so many vehicles share GPU geometry/material state rather than creating one independent GLTF draw hierarchy per car. The player's Drive vehicle uses one cloned GLTF scene so its light materials can be animated independently.
 
 The supplied raycast-vehicle repository was used as an implementation reference for GLTF loading, model/wheel binding patterns and vehicle-camera/light concepts. Its Cannon vehicle implementation was not copied into School Center because the Davis twin already uses Rapier physics and an established control/camera system.
+
+
+## Map render recovery — 2026-09-22
+
+The blank canvas seen after the vehicle asset deployment was traced to the new vehicle-loader integration being on the twin's top-level module path. The twin had a static GLTFLoader CDN import, which meant a loader/module failure could prevent the entire scene module from executing and leave the host iframe showing only its black canvas.
+
+The recovery changes remove that top-level loader dependency. Campus vehicle assets are now shipped as small gzip+base64 JSON payloads derived from the supplied pack geometry, decoded only after the core scene has booted. The payload is converted into Three.js BufferGeometry meshes in the twin. This keeps asset failures isolated from the core renderer and preserves the previous procedural vehicle fallback.
+
+Corrected runtime asset paths:
+- `assets/campus/cars/NormalCar1.json.gz.b64`
+- `assets/campus/transit/Bus.json.gz.b64`
+- `assets/campus/transit/SchoolBus.json.gz.b64`
+
+The source model geometry is normalized before packaging (centered on X/Z and grounded at Y=0). The bus source front is local -X; public transport placement therefore uses +90° for the +Z lane and -90° for the -Z lane so each vehicle faces its travel direction.
+
+The previously committed truncated `.glb.gz.b64` payloads were removed. They were incomplete text payloads and were not safe to keep as runtime assets.
