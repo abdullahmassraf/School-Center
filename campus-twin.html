@@ -687,6 +687,22 @@ const ROADS = [                                                    // internal 2
   { w: 8, pts: [[-66, -249], [-66, -110], [-64, -30], [-56, 10], [-56, 50], [-58, 90]], main: true },   // bus-stop spine
 ];
 const ARTERIAL = [{ w: 35, x0: -207, z0: -330, x1: -207, z1: 330 }, { w: 34, x0: -300, z0: -266, x1: 300, z1: -266 }];
+/* The two arterial ribbons used to overlap here with perpendicular UVs. The
+ * dedicated junction owns this footprint now, so there is only one asphalt
+ * surface/material at the crossing. */
+const MAIN_INTERSECTION = Object.freeze({
+  x:-207,z:-266,size:39,half:19.5,look:58,
+  stop:Object.freeze({southZ:-287.3,northZ:-244.7,westX:-228.3,eastX:-185.7})
+});
+const SIGNAL_PHASES = Object.freeze([
+  Object.freeze({name:'ns-green',duration:10,ns:'green',ew:'red'}),
+  Object.freeze({name:'ns-yellow',duration:2.2,ns:'yellow',ew:'red'}),
+  Object.freeze({name:'all-red-ns',duration:1.0,ns:'red',ew:'red'}),
+  Object.freeze({name:'ew-green',duration:10,ns:'red',ew:'green'}),
+  Object.freeze({name:'ew-yellow',duration:2.2,ns:'red',ew:'yellow'}),
+  Object.freeze({name:'all-red-ew',duration:1.0,ns:'red',ew:'red'})
+]);
+const trafficSignal={elapsed:0,index:0,phase:SIGNAL_PHASES[0].name,ns:SIGNAL_PHASES[0].ns,ew:SIGNAL_PHASES[0].ew,group:null,heads:[],posts:[],intersection:null};
 const BOUNDS = { w: 430, d: 520 };
 const POND = { cx: 104, cz: -84, rx: 55, rz: 46 };
 
@@ -841,6 +857,30 @@ function ctex(w, h, draw, o = {}) {
 }
 const speck = (g, w, h, n, r, cols, a0 = .04, a1 = .16, s = 2) => { for (let i = 0; i < n; i++) { g.globalAlpha = a0 + r() * (a1 - a0); g.fillStyle = cols[(r() * cols.length) | 0]; g.fillRect(r() * w, r() * h, 1 + r() * s, 1 + r() * s); } g.globalAlpha = 1; };
 const asphaltTex = () => ctex(512, 512, (g, w, h) => { const r = rng(3); g.fillStyle = '#41444c'; g.fillRect(0, 0, w, h); speck(g, w, h, 9000, r, ['#6d7078', '#25272c', '#8b8e96', '#2f3238']); }, { rep: [1, 1] });
+function intersectionTex() {
+  return ctex(512,512,(g,w,h)=>{
+    const r=rng(303);g.fillStyle='#3d4048';g.fillRect(0,0,w,h);speck(g,w,h,8500,r,['#6d7078','#22242a','#84878f','#31343b']);
+    /* Wheel-wear stays subtle and continuous without borrowing either road's UV. */
+    g.fillStyle='rgba(0,0,0,.065)';
+    for(const p of [.30,.70]){g.fillRect(w*p-13,0,26,h);g.fillRect(0,h*p-13,w,26);}
+    const yellow='#d8b73c',white='rgba(226,230,236,.92)';
+    g.fillStyle=yellow;
+    for(const dx of [-3,3]){g.fillRect(w*.5+dx-1.25,0,2.5,h*.26);g.fillRect(w*.5+dx-1.25,h*.74,2.5,h*.26);}
+    for(const dy of [-3,3]){g.fillRect(0,h*.5+dy-1.25,w*.26,2.5);g.fillRect(w*.74,h*.5+dy-1.25,w*.26,2.5);}
+    /* Stop bars and restrained zebra markings make the conflict area read as
+       one authored intersection while matching the arterial paint palette. */
+    g.fillStyle=white;
+    g.fillRect(w*.08,h*.20,w*.34,5);g.fillRect(w*.58,h*.80,w*.34,5);
+    g.fillRect(w*.20,h*.58,5,h*.34);g.fillRect(w*.80,h*.08,5,h*.34);
+    g.globalAlpha=.78;
+    for(let i=0;i<6;i++){
+      const q=.10+i*.055;
+      g.fillRect(w*q,h*.145,w*.032,h*.035);g.fillRect(w*(1-q-.032),h*.82,w*.032,h*.035);
+      g.fillRect(w*.145,h*q,w*.035,h*.032);g.fillRect(w*.82,h*(1-q-.032),w*.035,h*.032);
+    }
+    g.globalAlpha=1;
+  });
+}
 function roadTex(kind) {
   return ctex(128, 256, (g, w, h) => {
     const r = rng(kind === 'art' ? 5 : 9); g.fillStyle = '#3d4048'; g.fillRect(0, 0, w, h); speck(g, w, h, 2600, r, ['#6d7078', '#22242a', '#84878f']);
@@ -919,6 +959,98 @@ function ribbonGeo(pts, w, y, tile, smooth = true) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); return g;
 }
 const flat = (geo, x, y, z, ry = 0) => { geo.rotateX(-Math.PI / 2); const m = new THREE.Mesh(geo); m.position.set(x, y, z); m.rotation.y = ry; return m; };
+function setSignalLamp(material,on,color){
+  material.color.set(on?color:'#121519');
+  material.emissive.set(color);
+  material.emissiveIntensity=on?3.0:.045;
+  material.needsUpdate=true;
+}
+function applyTrafficSignalVisuals(){
+  for(const h of trafficSignal.heads){
+    const aspect=h.axis==='z'?trafficSignal.ns:trafficSignal.ew;
+    setSignalLamp(h.red,aspect==='red','#f04444');
+    setSignalLamp(h.yellow,aspect==='yellow','#f1c84b');
+    setSignalLamp(h.green,aspect==='green','#55d979');
+  }
+}
+function setTrafficSignalPhase(indexOrName,resetElapsed=true){
+  let idx=typeof indexOrName==='number'?indexOrName:SIGNAL_PHASES.findIndex(p=>p.name===indexOrName);
+  if(idx<0)idx=0;idx=((idx%SIGNAL_PHASES.length)+SIGNAL_PHASES.length)%SIGNAL_PHASES.length;
+  const p=SIGNAL_PHASES[idx];trafficSignal.index=idx;trafficSignal.phase=p.name;trafficSignal.ns=p.ns;trafficSignal.ew=p.ew;
+  if(resetElapsed)trafficSignal.elapsed=0;applyTrafficSignalVisuals();return p;
+}
+function updateTrafficSignal(dt){
+  if(!trafficSignal.group)return;
+  trafficSignal.elapsed+=dt;
+  let phase=SIGNAL_PHASES[trafficSignal.index],guard=0;
+  while(trafficSignal.elapsed>=phase.duration&&guard++<SIGNAL_PHASES.length){
+    trafficSignal.elapsed-=phase.duration;
+    trafficSignal.index=(trafficSignal.index+1)%SIGNAL_PHASES.length;
+    phase=SIGNAL_PHASES[trafficSignal.index];
+    trafficSignal.phase=phase.name;trafficSignal.ns=phase.ns;trafficSignal.ew=phase.ew;
+    applyTrafficSignalVisuals();
+  }
+}
+function makeSignalHead(parent,x,y,z,yaw,axis){
+  const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=yaw;parent.add(g);
+  const shell=std({color:'#20252b',roughness:.58,metalness:.38});
+  const housing=new THREE.Mesh(new THREE.BoxGeometry(.76,1.78,.46),shell);housing.castShadow=true;g.add(housing);
+  const visor=std({color:'#111419',roughness:.7,metalness:.25});
+  const lamps={};
+  [['red',.56,'#f04444'],['yellow',0,'#f1c84b'],['green',-.56,'#55d979']].forEach(([name,yy,color])=>{
+    const hood=new THREE.Mesh(new THREE.CylinderGeometry(.24,.24,.18,12,1,false,0,Math.PI),visor);
+    hood.rotation.x=Math.PI/2;hood.position.set(0,yy,.30);hood.castShadow=true;g.add(hood);
+    const mat=new THREE.MeshStandardMaterial({color:'#121519',emissive:color,emissiveIntensity:.045,roughness:.22,metalness:.05,toneMapped:false});
+    const lens=new THREE.Mesh(new THREE.CircleGeometry(.17,14),mat);lens.position.set(0,yy,.245);g.add(lens);lamps[name]=mat;
+  });
+  trafficSignal.heads.push({axis,group:g,...lamps});return g;
+}
+function mastBetween(parent,a,b,mat){
+  const dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz);
+  const m=new THREE.Mesh(new THREE.BoxGeometry(len,.12,.12),mat);
+  m.position.set((a[0]+b[0])*.5,4.65,(a[1]+b[1])*.5);m.rotation.y=-Math.atan2(dz,dx);m.castShadow=true;parent.add(m);
+}
+function buildTrafficSignals(){
+  const root=new THREE.Group();root.name='MainIntersectionSignals';scene.add(root);trafficSignal.group=root;
+  const poleMat=std({color:'#343a42',roughness:.52,metalness:.62});
+  const addPole=(pole,head,yaw,axis)=>{
+    const p=new THREE.Mesh(new THREE.CylinderGeometry(.12,.15,4.7,8),poleMat);p.position.set(pole[0],2.35,pole[1]);p.castShadow=true;root.add(p);
+    const base=new THREE.Mesh(new THREE.CylinderGeometry(.27,.34,.28,8),poleMat);base.position.set(pole[0],.14,pole[1]);base.castShadow=true;root.add(base);
+    mastBetween(root,pole,head,poleMat);makeSignalHead(root,head[0],4.65,head[1],yaw,axis);
+    trafficSignal.posts.push({x:pole[0],z:pole[1]});
+  };
+  /* Heads are on the far side of each approach and face back toward incoming
+     traffic: +Z north, -Z south, +X east, -X west. */
+  addPole([-225.0,-244.4],[-214.0,-246.1],Math.PI,'z');      // south approach, faces south
+  addPole([-189.0,-287.6],[-200.0,-285.9],0,'z');            // north approach, faces north
+  addPole([-185.4,-247.0],[-187.2,-258.0],-Math.PI/2,'x');   // west approach, faces west
+  addPole([-228.6,-285.0],[-226.8,-274.0],Math.PI/2,'x');    // east approach, faces east
+  applyTrafficSignalVisuals();
+}
+function arterialPieces(){
+  const h=MAIN_INTERSECTION.half,x=MAIN_INTERSECTION.x,z=MAIN_INTERSECTION.z;
+  return [
+    {w:35,pts:[[x,-330],[x,z-h]]},{w:35,pts:[[x,z+h],[x,330]]},
+    {w:34,pts:[[-300,z],[x-h,z]]},{w:34,pts:[[x+h,z],[300,z]]}
+  ];
+}
+function signalDistanceForEntity(e,coord){
+  if(!e||!e.ax)return Infinity;
+  let stop;
+  if(e.ax==='z')stop=e.d>0?MAIN_INTERSECTION.stop.southZ:MAIN_INTERSECTION.stop.northZ;
+  else stop=e.d>0?MAIN_INTERSECTION.stop.westX:MAIN_INTERSECTION.stop.eastX;
+  return (stop-coord)*e.d;
+}
+function trafficSignalSpeedLimit(e,coord,currentSpeed,baseSpeed){
+  const dist=signalDistanceForEntity(e,coord);
+  if(!Number.isFinite(dist)||dist>MAIN_INTERSECTION.look||dist<-5)return baseSpeed;
+  const aspect=e.ax==='z'?trafficSignal.ns:trafficSignal.ew;
+  if(aspect==='green'||dist<-.6)return baseSpeed;
+  const safeStop=Math.max(3,(currentSpeed*currentSpeed)/(2*5.8)+1.2);
+  if(aspect==='yellow'&&dist<safeStop)return baseSpeed;
+  return Math.min(baseSpeed,Math.sqrt(Math.max(0,2*5.8*Math.max(0,dist-1.1))));
+}
+
 
 function buildGround() {
   const gm = std({ map: grassTex(), color: '#ffffff', roughness: 1 }, .35); snowify(gm, false, 1);
@@ -927,7 +1059,11 @@ function buildGround() {
   // roads
   const artM = off(std({ map: roadTex('art'), roughness: .9 }, .3, true)), mainM = off(std({ map: roadTex('main'), roughness: .9 }, .3, true)), locM = off(std({ map: roadTex('loc'), roughness: .9 }, .3, true));
   [artM, mainM, locM].forEach(m => snowify(m, false, .55));
-  for (const a of ARTERIAL) { const m = new THREE.Mesh(ribbonGeo([[a.x0, a.z0], [a.x1, a.z1]], a.w, .06, 16, false), artM); m.receiveShadow = true; scene.add(m); }
+  for (const a of arterialPieces()) { const m = new THREE.Mesh(ribbonGeo(a.pts, a.w, .06, 16, false), artM); m.receiveShadow = true; scene.add(m); }
+  const intM=off(std({map:intersectionTex(),roughness:.9},.3,true),-1);snowify(intM,false,.55);
+  const junction=flat(new THREE.PlaneGeometry(MAIN_INTERSECTION.size,MAIN_INTERSECTION.size),MAIN_INTERSECTION.x,.071,MAIN_INTERSECTION.z);
+  junction.name='MainSignalizedIntersection';junction.material=intM;junction.receiveShadow=true;scene.add(junction);trafficSignal.intersection=junction;
+  buildTrafficSignals();
   for (const r of ROADS) { const m = new THREE.Mesh(ribbonGeo(r.pts, r.w, .07, 16), r.main ? mainM : locM); m.receiveShadow = true; scene.add(m); }
   const ringM = off(std({ map: asphaltTex(), roughness: .9 }, .3, true), -1); ringM.map.repeat.set(10, 10); snowify(ringM, false, .55);
   const ring = flat(new THREE.RingGeometry(RB.ri - .5, RB.r, 96, 1), RB.x, .075, RB.z); ring.material = ringM; ring.receiveShadow = true; scene.add(ring);
@@ -1150,7 +1286,11 @@ function updateTraffic(dt) {
   if (traffic.mode === 'packed') {
     const { cars, parkedCount, set, vehicles } = traffic;
     cars.forEach((car, i) => {
-      car.t = (car.t + car.v * dt / 640) % 1;
+      const coord0=(car.d>0?car.t:1-car.t)*640-320,current=car.signalV??car.v;
+      const limit=trafficSignalSpeedLimit(car,coord0,current,car.v),response=limit<current?5.8:2.35;
+      car.signalV=current+(limit-current)*(1-Math.exp(-dt*response));
+      if(limit<.05&&Math.abs(signalDistanceForEntity(car,coord0))<1.25)car.signalV=0;
+      car.t = (car.t + car.signalV * dt / 640) % 1;
       const s = (car.d > 0 ? car.t : 1 - car.t) * 640 - 320;
       if (car.ax === 'z') { car.x = car.f; car.z = s; car.yaw = car.d > 0 ? 0 : Math.PI; }
       else { car.z = car.f; car.x = s; car.yaw = car.d > 0 ? Math.PI / 2 : -Math.PI / 2; }
@@ -1160,7 +1300,7 @@ function updateTraffic(dt) {
     return;
   }
   const { cars, tb, tc, tl, o } = traffic;
-  cars.forEach((c, i) => { c.t = (c.t + c.v * dt / 640) % 1; const s = (c.d > 0 ? c.t : 1 - c.t) * 640 - 320; if (c.ax === 'z') { o.position.set(c.f, 0, s); o.rotation.y = c.d > 0 ? Math.PI : 0; } else { o.position.set(s, 0, c.f); o.rotation.y = c.d > 0 ? -Math.PI / 2 : Math.PI / 2; } o.updateMatrix(); tb.setMatrixAt(i, o.matrix); tc.setMatrixAt(i, o.matrix);
+  cars.forEach((c, i) => { const coord0=(c.d>0?c.t:1-c.t)*640-320,current=c.signalV??c.v,limit=trafficSignalSpeedLimit(c,coord0,current,c.v),response=limit<current?5.8:2.35;c.signalV=current+(limit-current)*(1-Math.exp(-dt*response));if(limit<.05&&Math.abs(signalDistanceForEntity(c,coord0))<1.25)c.signalV=0;c.t = (c.t + c.signalV * dt / 640) % 1; const s = (c.d > 0 ? c.t : 1 - c.t) * 640 - 320; if (c.ax === 'z') { o.position.set(c.f, 0, s); o.rotation.y = c.d > 0 ? Math.PI : 0; } else { o.position.set(s, 0, c.f); o.rotation.y = c.d > 0 ? -Math.PI / 2 : Math.PI / 2; } o.updateMatrix(); tb.setMatrixAt(i, o.matrix); tc.setMatrixAt(i, o.matrix);
     for (const sx of [-.7, .7]) { const m = MT.makeTranslation(sx, .7, -2.17).premultiply(o.matrix); tl.setMatrixAt(i * 2 + (sx > 0), m); } });
   tb.instanceMatrix.needsUpdate = tc.instanceMatrix.needsUpdate = tl.instanceMatrix.needsUpdate = true;
 }
@@ -1769,9 +1909,10 @@ function updateHover() {
 }
 function hover(id) { if (ST.hover && ST.hover !== ST.sel) Tw.to(BG[ST.hover].edgeMat, { opacity: 0, duration: .3 }); ST.hover = id; if (id && id !== ST.sel) Tw.to(BG[id].edgeMat, { opacity: .55, duration: .25 }); $('scene').classList.toggle('hover', !!id); }
 /* ═══════════ 9 · PHYSICS · DRIVE MODE (Rapier) ═══════════ */
+const DRIVE_TUNE=Object.freeze({maxForward:38,maxReverse:12,accel:30,brakeAccel:48,coastDrag:.62,powerDrag:.075,maxSteer:.58,yawGain:2.75,steerResponse:12});
 const drive = {
   on:false,R:null,world:null,body:null,car:null,packedCar:null,wheels:[],props:[],keys:{},acc:0,fixedStep:1/60,steer:0,
-  touch:{x:0,y:0,active:false,pointerId:null,deadzone:.10},
+  touch:{x:0,y:0,active:false,pointerId:null,deadzone:.08},
   npcPhysics:{ready:false,bodies:[],recoveries:0,created:0},
   physicsPrevPos:new V3(),physicsCurrPos:new V3(),physicsPrevQuat:new THREE.Quaternion(),physicsCurrQuat:new THREE.Quaternion(),
   renderPos:new V3(),renderQuat:new THREE.Quaternion(),cam:new V3(),q:new THREE.Quaternion(),fwd:new V3(),m:new THREE.Matrix4(),sc:new V3(1,1,1),
@@ -1796,7 +1937,7 @@ const TV = new V3(), TQ = new THREE.Quaternion(), driveForward = new V3();
 const mobileDriveHandlers = {};
 function readDriveInput() {
   const k=drive.keys,t=drive.touch;
-  if(t.active) return { throttle:clamp(t.y,-1,1), turn:clamp(-t.x,-1,1), handbrake:!!k.space, source:'touch' };
+  if(t.active) return { throttle:clamp(t.y,-1,1), turn:clamp(-t.x*1.14,-1,1), handbrake:!!k.space, source:'touch' };
   return { throttle:(k.w?1:0)-(k.s?1:0), turn:(k.a?1:0)-(k.d?1:0), handbrake:!!k.space, source:'keyboard' };
 }
 function resetTouchDriveInput() {
@@ -1817,10 +1958,12 @@ function updateJoystickFromPointer(e) {
   const r=joy.getBoundingClientRect(),cx=r.left+r.width*.5,cy=r.top+r.height*.5,max=Math.max(1,r.width*.5);
   let dx=e.clientX-cx,dy=e.clientY-cy,mag=Math.hypot(dx,dy);
   if(mag>max){const q=max/mag;dx*=q;dy*=q;mag=max;}
-  const raw=mag/max,dz=drive.touch.deadzone;
-  let scaled=raw<=dz?0:(raw-dz)/(1-dz);
-  if(raw>1e-5){drive.touch.x=(dx/max)*(scaled/raw);drive.touch.y=(-dy/max)*(scaled/raw);}
-  else{drive.touch.x=drive.touch.y=0;}
+  const nx=dx/max,ny=-dy/max,raw=mag/max,dz=drive.touch.deadzone;
+  /* Circular thumb travel remains visually clean, while the logical output uses
+     a square-gate remap. A diagonal can therefore deliver strong throttle AND
+     steering instead of losing ~30% of both axes to vector normalization. */
+  const radial=raw<=dz?0:Math.pow((raw-dz)/(1-dz),.86),dominant=Math.max(Math.abs(nx),Math.abs(ny),1e-5),gate=radial/dominant;
+  drive.touch.x=clamp(nx*gate,-1,1);drive.touch.y=clamp(ny*gate,-1,1);
   thumb.style.transform=`translate3d(calc(-50% + ${dx}px),calc(-50% + ${dy}px),0)`;
 }
 function wireMobileDriveControls() {
@@ -2132,6 +2275,10 @@ function updateNpcPhysicsStep(dt) {
 
     const frameNow=routeFrame(ai),forwardSpeed=Math.max(0,lv.x*frameNow.fx+lv.z*frameNow.fz);
     let target=ai.baseSpeed;
+    if(ai.kind==='car'){
+      const coord=frameNow.axis==='z'?p.z:p.x;
+      target=Math.min(target,trafficSignalSpeedLimit(e,coord,forwardSpeed,ai.baseSpeed));
+    }
     if(ai.kind!=='car'){
       if(e.stopTimer>0){e.stopTimer=Math.max(0,e.stopTimer-dt);target=0;}
       else if(!e.servedStop){
@@ -2208,6 +2355,7 @@ async function initPhysics() {
   w.createCollider(RAP.ColliderDesc.cuboid(2000, .5, 2000).setTranslation(0, -.5, 0).setFriction(.9));
   for (const k in BG) for (const s of BG[k].solids) w.createCollider(RAP.ColliderDesc.cuboid(s.hx, s.hy, s.hz).setTranslation(s.p.x, s.p.y, s.p.z).setRotation({ x: s.q.x, y: s.q.y, z: s.q.z, w: s.q.w }));
   for (const t of TR.dec.concat(TR.con)) if (Math.abs(t.x) < 215 && Math.abs(t.z) < 262) w.createCollider(RAP.ColliderDesc.cylinder(1.6, .45).setTranslation(t.x, 1.6, t.z));
+  for(const p of trafficSignal.posts)w.createCollider(RAP.ColliderDesc.cylinder(2.35,.16).setTranslation(p.x,2.35,p.z).setFriction(.8));
 
   const acc = ST.accent, g = new THREE.Group();
   const bm = new THREE.MeshStandardMaterial({ color: acc, metalness: .45, roughness: .32 });
@@ -2341,11 +2489,14 @@ async function initPhysics() {
 }
 function driveStep(dt) {
   const d=drive,b=d.body,v=b.linvel(),r=b.rotation(),input=readDriveInput();d.q.set(r.x,r.y,r.z,r.w);d.fwd.set(0,0,1).applyQuaternion(d.q);
-  const sf0=v.x*d.fwd.x+v.z*d.fwd.z,th=input.throttle;let sf=sf0+th*(th*sf0<0?38:22)*dt;sf*=Math.exp(-(Math.abs(th)>.001?.12:.8)*dt);sf=clamp(sf,-9,26);
-  const lx=(v.x-d.fwd.x*sf0)*Math.exp(-(input.handbrake?1.2:9)*dt),lz=(v.z-d.fwd.z*sf0)*Math.exp(-(input.handbrake?1.2:9)*dt);
+  const sf0=v.x*d.fwd.x+v.z*d.fwd.z,th=input.throttle;
+  let sf=sf0+th*(th*sf0<0?DRIVE_TUNE.brakeAccel:DRIVE_TUNE.accel)*dt;
+  sf*=Math.exp(-(Math.abs(th)>.001?DRIVE_TUNE.powerDrag:DRIVE_TUNE.coastDrag)*dt);sf=clamp(sf,-DRIVE_TUNE.maxReverse,DRIVE_TUNE.maxForward);
+  const lx=(v.x-d.fwd.x*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*dt),lz=(v.z-d.fwd.z*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*dt);
   b.setLinvel({x:d.fwd.x*sf+lx,y:v.y,z:d.fwd.z*sf+lz},true);
-  d.steer+=((input.turn*.42)-d.steer)*(1-Math.exp(-dt*10));
-  b.setAngvel({ x: 0, y: d.steer * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
+  d.steer+=((input.turn*DRIVE_TUNE.maxSteer)-d.steer)*(1-Math.exp(-dt*DRIVE_TUNE.steerResponse));
+  const speedSteer=lerp(1.08,.82,clamp(Math.abs(sf)/DRIVE_TUNE.maxForward,0,1));
+  b.setAngvel({ x: 0, y: d.steer * DRIVE_TUNE.yawGain * speedSteer * clamp(sf / 4.2, -1, 1), z: 0 }, true);
   d.acc += dt;
   let n = 0;
   while (d.acc >= d.fixedStep && n++ < 4) {
@@ -2397,7 +2548,7 @@ function driveStep(dt) {
   const desiredStrength=shouldChase?1:0;
   driveCamera.chaseStrength += (desiredStrength-driveCamera.chaseStrength) * (1-Math.exp(-dt*4));
   if (driveCamera.chaseStrength>0.0005) {
-    const speedFactor=clamp(Math.abs(sf0)/26,0,1);
+    const speedFactor=clamp(Math.abs(sf0)/DRIVE_TUNE.maxForward,0,1);
     const effectiveDistance=clamp(driveCamera.distance+speedFactor*driveCamera.speedDistance,driveCamera.minDistance,driveCamera.maxDistance+driveCamera.speedDistance);
     d.fwd.set(0, 0, 1).applyQuaternion(d.renderQuat).normalize();
     driveCamera.desiredPos.copy(d.anchor).addScaledVector(d.fwd,-effectiveDistance);
@@ -2558,7 +2709,7 @@ function frame(now) {
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
   maybeUpdateShadow(now);
-  updateTraffic(dt); updatePublicTransport(dt); updateRoute(dt); if ((hoverT += dt) > .08) { hoverT = 0; updateHover(); }
+  updateTrafficSignal(dt); updateTraffic(dt); updatePublicTransport(dt); updateRoute(dt); if ((hoverT += dt) > .08) { hoverT = 0; updateHover(); }
   if (ST.monument) ST.monument.material.emissiveIntensity = .9 + .5 * Math.sin(now * .002) + ST.night;
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
@@ -2664,7 +2815,8 @@ addEventListener('visibilitychange', () => {
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, AUTO, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
