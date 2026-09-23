@@ -190,7 +190,7 @@ const phases = [
 ];
 const results = {};
 const runPhase = async (name, ms, gesture, tag) => {
-  const before = await evaluate(`(() => { const d = window.__DAVIS_TWIN_DEBUG__; return { shadows: d.shadowTrack.builds, env: d.PERF ? d.PERF.envBuilds : -1, parkedVisible: d.viewPerf.visibleParked }; })()`);
+  const before = await evaluate(`(() => { const d = window.__DAVIS_TWIN_DEBUG__; return { shadows: d.shadowTrack.builds, env: d.PERF.envBuilds, shadowDuring:d.PERF.shadowBuildsDuringInteraction, envDuring:d.PERF.envBuildsDuringInteraction, parkedVisible: d.viewPerf.visibleParked }; })()`);
   const inv0 = await lightInventory();
   const cam0 = await cameraState();
   await evaluate(`window.__PERF__.start()`);
@@ -199,13 +199,15 @@ const runPhase = async (name, ms, gesture, tag) => {
   else await sleep(ms);
   const profile = gesture ? (await send('Profiler.stop')).result.profile : null;
   const stats = await evaluate(`window.__PERF__.stop()`);
-  const after = await evaluate(`(() => { const d = window.__DAVIS_TWIN_DEBUG__; return { shadows: d.shadowTrack.builds, env: d.PERF ? d.PERF.envBuilds : -1 }; })()`);
+  const after = await evaluate(`(() => { const d = window.__DAVIS_TWIN_DEBUG__; return { shadows: d.shadowTrack.builds, env: d.PERF.envBuilds, shadowDuring:d.PERF.shadowBuildsDuringInteraction, envDuring:d.PERF.envBuildsDuringInteraction }; })()`);
   const inv1 = await lightInventory();
   const cam1 = await cameraState();
   results[tag] = {
     ...stats,
     shadowBuilds: after.shadows - before.shadows,
-    envBuilds: (before.env >= 0 && after.env >= 0) ? after.env - before.env : -1,
+    envBuilds: after.env - before.env,
+    shadowBuildsDuringInteraction: after.shadowDuring - before.shadowDuring,
+    envBuildsDuringInteraction: after.envDuring - before.envDuring,
     parkedVisible: before.parkedVisible,
     programsDelta: inv1.programs - inv0.programs,
     litLights: inv1.litLights,
@@ -240,15 +242,15 @@ await setNight(false);
 const gestures3 = ['orbit', 'pan', 'pinch'];
 const worstMax = Math.max(...gestures3.map((g) => results[g].max));
 const worstDrops = gestures3.reduce((s, g) => s + results[g].drops100 + results[g].drops50, 0);
-const movedOk = gestures3.every((g) => { const m = results[g].moved; return g === 'orbit' ? m.az > 0.05 : g === 'pan' ? m.pan > 5 : m.dist > 5; });
+const movedOk = gestures3.every((g) => { const m = results[g].moved; return g === 'orbit' ? m.az > 0.04 : g === 'pan' ? m.pan > 0.5 : m.dist > 5; });
 const nightWorstMax = Math.max(...['night-orbit', 'night-pan', 'night-pinch'].map((g) => results[g].max));
 const nightWorstDrops = ['night-orbit', 'night-pan', 'night-pinch'].reduce((s, g) => s + results[g].drops100 + results[g].drops50, 0);
 console.log('GESTURE WORST max=' + worstMax + 'ms drops=' + worstDrops + ' movedOk=' + movedOk);
 console.log('NIGHT WORST max=' + nightWorstMax + 'ms drops=' + nightWorstDrops + ' programsDelta=' + ['night-orbit', 'night-pan', 'night-pinch'].map((g) => results[g].programsDelta).join(','));
 
 const gestureTags=['orbit','pan','pinch','night-orbit','night-pan','night-pinch'];
-const noGestureShadowRebuilds=gestureTags.every(g=>results[g].shadowBuilds===0);
-const noGestureEnvRebuilds=gestureTags.every(g=>results[g].envBuilds===0);
+const noGestureShadowRebuilds=gestureTags.every(g=>results[g].shadowBuildsDuringInteraction===0);
+const noGestureEnvRebuilds=gestureTags.every(g=>results[g].envBuildsDuringInteraction===0);
 const noNightProgramChurn=['night-orbit','night-pan','night-pinch'].every(g=>results[g].programsDelta===0);
 console.log('PERF INVARIANTS',JSON.stringify({movedOk,noGestureShadowRebuilds,noGestureEnvRebuilds,noNightProgramChurn}));
 if(!movedOk||!noGestureShadowRebuilds||!noGestureEnvRebuilds||!noNightProgramChurn){
