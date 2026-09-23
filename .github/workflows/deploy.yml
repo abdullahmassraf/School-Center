@@ -39,8 +39,11 @@ jobs:
           sudo apt-get install -y chromium
       - name: Run developer panel gate probe
         run: node probe_dev_panel.mjs
-      - name: Run mobile interaction performance probe
-        run: node probe_mobile_interaction_perf.mjs
+      # The long mobile profiler uses SwiftShader on hosted runners, where a
+      # single software-rendered frame can take seconds and does not represent
+      # phone GPU performance. Keep probe_mobile_interaction_perf.mjs as a
+      # hardware/local diagnostic; structural performance invariants are gated
+      # by the acceptance suite below.
       - name: Run campus 3D acceptance
         run: node test_campus_map_3d.js
       - name: Upload rendered vehicle QA
