@@ -149,6 +149,19 @@ for(const v of transitWheelFit){
 console.log("TRANSIT WHEEL GEOMETRY/AXIS",JSON.stringify(transitWheelFit));
 for(const [key,list] of [['bus',vehicleAppearance.bus],['schoolBus',vehicleAppearance.schoolBus]])if(!list.some(c=>saturation(c)>.25))throw new Error(`${key} renders as a gray shell with no distinct body paint: ${JSON.stringify(list)}`);
 console.log('MATERIAL SLOT PRESERVATION',JSON.stringify({busDistinct:distinctColors((materialBindings.bus||[]).flatMap(g=>g.materials)),schoolBusDistinct:distinctColors((materialBindings.schoolBus||[]).flatMap(g=>g.materials))}));
+/* The reported black rectangle is the native front windshield on the transit
+ * body mesh, not a wheel. Guard against reintroducing a near-black Windows
+ * material that turns those large rectangular faces opaque-looking at range. */
+for(const [key,groups] of [['bus',materialBindings.bus],['schoolBus',materialBindings.schoolBus]]){
+  const windows=(groups||[]).flatMap(g=>g.materials.filter(m=>/^windows$/i.test(m.name||'')));
+  if(!windows.length)throw new Error(key+' native Windows material missing');
+  for(const w of windows){
+    const hex=w.color||'000000',r=parseInt(hex.slice(0,2),16)/255,g=parseInt(hex.slice(2,4),16)/255,b=parseInt(hex.slice(4,6),16)/255;
+    const luma=.2126*r+.7152*g+.0722*b;
+    if(luma<.20)throw new Error(key+' front windshield regressed to a black rectangle: '+JSON.stringify({hex,luma,windows}));
+  }
+}
+console.log('TRANSIT WINDSHIELD MATERIALS: visible glass, not black');
 await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
@@ -164,6 +177,8 @@ await frameVehicle('bus',[12,3,0],'transit-bus-rear');
 await frameVehicle('schoolBus',[13,4,10],'transit-schoolbus-close');
 await frameVehicle('schoolBus',[-13,3,0],'transit-schoolbus-front');
 await frameVehicle('schoolBus',[13,3,0],'transit-schoolbus-rear');
+await frameVehicle('schoolBus',[72,38,66],'transit-schoolbus-far');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;for(const v of d.transit.vehicles){v.speed=v.key==='bus'?10.5:8.5;v.stopTimer=0;}return true})()`);
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
 const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
