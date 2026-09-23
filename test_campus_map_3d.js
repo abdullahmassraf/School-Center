@@ -310,15 +310,17 @@ console.log('MOBILE FULLSCREEN ACTIVATE UI',JSON.stringify(mobileFsUi));
 await screenshot('mobile-drive-activation');
 
 await clickSelector('.cm3d-fullscreen');
-await sleep(500);
+await waitFor(`(()=>!document.fullscreenElement&&document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')==='Enter fullscreen')()`,2500,60);
 fullscreenState=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
 if(fullscreenState.host||fullscreenState.label!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return a.hidden&&j.hidden&&!d.drive.touch.active&&d.drive.touch.pointerId===null})()`,2500,60);
 const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch}})()`);
 if(!mobileAfterExit.activateHidden||!mobileAfterExit.joystickHidden||mobileAfterExit.touch.active||mobileAfterExit.touch.x||mobileAfterExit.touch.y)throw new Error('mobile controls did not clean up on fullscreen exit: '+JSON.stringify(mobileAfterExit));
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify({...fullscreenState,mobileAfterExit}));
 
 await clickSelector('.cm3d-fullscreen');
-await sleep(400);
+await waitFor(`(()=>!!document.fullscreenElement&&window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.actualFullscreen())()`,2500,60);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return !f.document.querySelector('#mobileDriveActivate').hidden&&f.document.querySelector('#driveJoystick').hidden})()`,2500,60);
 const mobileBeforeDrive=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden}})()`);
 if(mobileBeforeDrive.activateHidden||!mobileBeforeDrive.joystickHidden)throw new Error('mobile activation control missing before Drive: '+JSON.stringify(mobileBeforeDrive));
 await clickSelectorInFrame('#mobileDriveActivate');
