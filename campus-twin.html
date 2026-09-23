@@ -580,10 +580,15 @@ function refreshVehicleLightBudget() {
   (traffic?.cars || []).forEach(car => add(car.lightRig));
   (transit?.vehicles || []).forEach(vehicle => add(vehicle.lightRig));
   vehicleLightCandidates.sort((a,b) => a._distanceSq - b._distanceSq);
-  const maxActive = tierName === 'high' ? 6 : tierName === 'medium' ? 4 : 2;
-  vehicleLightCandidates.forEach((rig, i) => {
-    const range = rig.kind === 'car' ? 95 : 135;
-    rig.dynamicEnabled = i < maxActive && rig._distanceSq <= range * range;
+  /* Point lights are the expensive part of the vehicle lighting stack because
+     every nearby StandardMaterial fragment evaluates them. In Drive on a touch
+     device keep only the closest vehicle's physical light spill; all vehicles
+     retain their native emissive lamp materials/glow, so the visible lamps do
+     not disappear. */
+  const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
+  vehicleLightCandidates.forEach((rig,i)=>{
+    const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
+    rig.dynamicEnabled=i<maxActive&&rig._distanceSq<=range*range;
   });
 }
 
@@ -817,15 +822,21 @@ const downMat = fsMat(DOWN_FS, { tSrc: { value: null }, uPx: { value: new THREE.
 const fxaaMat = fsMat(FXAA_FS, { tLdr: { value: null }, uPx: { value: new THREE.Vector2() } });
 const compMat = fsMat(COMP_FS, { tScene: { value: null }, tDepth: { value: null }, tBlur: { value: null }, tBloom: { value: null }, uNear: { value: 1 }, uFar: { value: 6000 }, uStart: { value: 300 }, uEnd: { value: 900 }, uDof: { value: 0 }, uBloom: { value: 0 }, uThr: { value: hdr ? 1.3 : .8 }, uExp: { value: .6 }, uNight: { value: 0 }, uWet: { value: 0 }, uOver: { value: 0 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } });
 const CU = compMat.uniforms, PT = {};
+/* Far-field DOF is deliberately lower-resolution on phones. The final
+ * composite is still full-resolution and uses the same depth mask, so nearby
+ * geometry/textures remain untouched while the already-blurred background
+ * costs ~75% fewer blur pixels on mobile. */
+const postPerf={blurDiv:(isMobile||isTouchDriveDevice)?4:2,bloomDiv:8};
 function buildPost() {
   for (const k of ['scene', 'a', 'b', 'c', 'd', 'ldr']) if (PT[k]) { PT[k].dispose(); if (PT[k].depthTexture) PT[k].depthTexture.dispose(); }
   const w = Math.max(2, Math.floor(innerWidth * pr)), h = Math.max(2, Math.floor(innerHeight * pr)), ty = hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
   const o = { type: ty, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false };
   PT.scene = new THREE.WebGLRenderTarget(w, h, { ...o, depthBuffer: true, depthTexture: new THREE.DepthTexture(w, h) });
-  PT.a = new THREE.WebGLRenderTarget(w >> 1, h >> 1, o); PT.b = new THREE.WebGLRenderTarget(w >> 1, h >> 1, o);
-  PT.c = new THREE.WebGLRenderTarget(Math.max(2, w >> 3), Math.max(2, h >> 3), o); PT.d = new THREE.WebGLRenderTarget(Math.max(2, w >> 3), Math.max(2, h >> 3), o);
+  const blurDiv=postPerf.blurDiv,blurW=Math.max(2,Math.floor(w/blurDiv)),blurH=Math.max(2,Math.floor(h/blurDiv));
+  PT.a = new THREE.WebGLRenderTarget(blurW, blurH, o); PT.b = new THREE.WebGLRenderTarget(blurW, blurH, o);
+  PT.c = new THREE.WebGLRenderTarget(Math.max(2, Math.floor(w/postPerf.bloomDiv)), Math.max(2, Math.floor(h/postPerf.bloomDiv)), o); PT.d = new THREE.WebGLRenderTarget(Math.max(2, Math.floor(w/postPerf.bloomDiv)), Math.max(2, Math.floor(h/postPerf.bloomDiv)), o);
   PT.ldr = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
-  PT.w = w; PT.h = h; CU.uRes.value.set(w, h); fxaaMat.uniforms.uPx.value.set(1 / w, 1 / h);
+  PT.w = w; PT.h = h; PT.blurDiv=blurDiv; CU.uRes.value.set(w, h); fxaaMat.uniforms.uPx.value.set(1 / w, 1 / h);
 }
 function pass(mat, target) { fsMesh.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
 function renderPost() {
@@ -833,7 +844,9 @@ function renderPost() {
   const doBlur = FX.dof > 0 || FX.bloom, bu = blurMat.uniforms;
   if (doBlur) {
     bu.tSrc.value = PT.scene.texture; bu.uDir.value.set(2 / PT.w, 0); pass(blurMat, PT.a);
-    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, 1.6 / PT.a.height); pass(blurMat, PT.b);
+    /* Compensate the vertical kernel for the smaller mobile blur target so the
+       apparent DOF radius stays close to the previous half-res version. */
+    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, (3.2 / PT.blurDiv) / PT.a.height); pass(blurMat, PT.b);
     if (FX.bloom) {
       downMat.uniforms.tSrc.value = PT.b.texture; downMat.uniforms.uPx.value.set(1 / PT.b.width, 1 / PT.b.height); pass(downMat, PT.c);
       bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
@@ -992,41 +1005,62 @@ function updateTrafficSignal(dt){
     applyTrafficSignalVisuals();
   }
 }
-function makeSignalHead(parent,x,y,z,yaw,axis){
-  const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=yaw;parent.add(g);
-  const shell=std({color:'#252b32',roughness:.58,metalness:.38});
-  const backplate=new THREE.Mesh(new THREE.BoxGeometry(1.00,2.16,.18),std({color:'#171b20',roughness:.68,metalness:.3}));backplate.position.z=-.16;backplate.castShadow=true;g.add(backplate);
-  const housing=new THREE.Mesh(new THREE.BoxGeometry(.82,1.92,.48),shell);housing.castShadow=true;g.add(housing);
-  const visor=std({color:'#0d1014',roughness:.72,metalness:.24});
-  const lamps={};
-  [['red',.61,'#f34d4d'],['yellow',0,'#f3cb51'],['green',-.61,'#55df7d']].forEach(([name,yy,color])=>{
-    const hood=new THREE.Mesh(new THREE.CylinderGeometry(.30,.30,.20,12,1,false,0,Math.PI),visor);
-    hood.rotation.x=Math.PI/2;hood.position.set(0,yy,.32);hood.castShadow=true;g.add(hood);
-    const mat=new THREE.MeshStandardMaterial({color:'#101318',emissive:color,emissiveIntensity:.035,roughness:.18,metalness:.03,transparent:true,opacity:.92,toneMapped:false});
-    const lens=new THREE.Mesh(new THREE.CircleGeometry(.225,16),mat);lens.position.set(0,yy,.258);g.add(lens);lamps[name]=mat;
-  });
-  trafficSignal.heads.push({axis,group:g,...lamps});return g;
-}
-function mastBetween(parent,a,b,mat){
-  const dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz);
-  const m=new THREE.Mesh(new THREE.BoxGeometry(len,.12,.12),mat);
-  m.position.set((a[0]+b[0])*.5,4.65,(a[1]+b[1])*.5);m.rotation.y=-Math.atan2(dz,dx);m.castShadow=true;parent.add(m);
-}
 function buildTrafficSignals(){
   const root=new THREE.Group();root.name='MainIntersectionSignals';scene.add(root);trafficSignal.group=root;
-  const poleMat=std({color:'#343a42',roughness:.52,metalness:.62});
-  const addPole=(pole,head,yaw,axis)=>{
-    const p=new THREE.Mesh(new THREE.CylinderGeometry(.12,.15,4.7,8),poleMat);p.position.set(pole[0],2.35,pole[1]);p.castShadow=true;root.add(p);
-    const base=new THREE.Mesh(new THREE.CylinderGeometry(.27,.34,.28,8),poleMat);base.position.set(pole[0],.14,pole[1]);base.castShadow=true;root.add(base);
-    mastBetween(root,pole,head,poleMat);makeSignalHead(root,head[0],4.65,head[1],yaw,axis);
-    trafficSignal.posts.push({x:pole[0],z:pole[1]});
+  trafficSignal.heads.length=0;trafficSignal.posts.length=0;
+  const specs=[
+    {pole:[-225.0,-244.4],head:[-214.0,-246.1],yaw:Math.PI,axis:'z'},
+    {pole:[-189.0,-287.6],head:[-200.0,-285.9],yaw:0,axis:'z'},
+    {pole:[-185.4,-247.0],head:[-187.2,-258.0],yaw:-Math.PI/2,axis:'x'},
+    {pole:[-228.6,-285.0],head:[-226.8,-274.0],yaw:Math.PI/2,axis:'x'}
+  ];
+  /* The first version built every pole, visor, housing and lamp as an
+     individual Mesh (~40 draws when the junction filled the screen). Merge
+     static metal/black pieces and instance the six lamp/aspect groups. The
+     visible geometry is unchanged, but the signal assembly is eight draws. */
+  const metalParts=[],blackParts=[],tmp=new THREE.Object3D(),local=new THREE.Object3D(),mx=new THREE.Matrix4();
+  const poleGeo=new THREE.CylinderGeometry(.12,.15,4.7,8),baseGeo=new THREE.CylinderGeometry(.27,.34,.28,8);
+  const mastGeo=new THREE.BoxGeometry(1,.12,.12),housingGeo=new THREE.BoxGeometry(.82,1.92,.48),backGeo=new THREE.BoxGeometry(1.00,2.16,.18);
+  const hoodGeo=new THREE.CylinderGeometry(.30,.30,.20,12,1,false,0,Math.PI),lensGeo=new THREE.CircleGeometry(.225,16);
+  const push=(arr,geo,m)=>{const g=geo.clone();g.applyMatrix4(m);arr.push(g);};
+  const worldPart=(arr,geo,pos,rotY=0,scale=null)=>{
+    tmp.position.set(pos[0],pos[1],pos[2]);tmp.rotation.set(0,rotY,0);tmp.scale.set(scale?.[0]||1,scale?.[1]||1,scale?.[2]||1);tmp.updateMatrix();push(arr,geo,tmp.matrix);
   };
+  const headPart=(arr,geo,headObj,pos,rotX=0)=>{
+    local.position.set(pos[0],pos[1],pos[2]);local.rotation.set(rotX,0,0);local.scale.set(1,1,1);local.updateMatrix();
+    mx.multiplyMatrices(headObj.matrix,local.matrix);push(arr,geo,mx);
+  };
+  for(const spec of specs){
+    trafficSignal.posts.push({x:spec.pole[0],z:spec.pole[1]});
+    worldPart(metalParts,poleGeo,[spec.pole[0],2.35,spec.pole[1]]);
+    worldPart(metalParts,baseGeo,[spec.pole[0],.14,spec.pole[1]]);
+    const dx=spec.head[0]-spec.pole[0],dz=spec.head[1]-spec.pole[1],len=Math.hypot(dx,dz);
+    worldPart(metalParts,mastGeo,[(spec.pole[0]+spec.head[0])*.5,4.65,(spec.pole[1]+spec.head[1])*.5],-Math.atan2(dz,dx),[len,1,1]);
+    const g=new THREE.Object3D();g.position.set(spec.head[0],4.65,spec.head[1]);g.rotation.y=spec.yaw;g.updateMatrix();root.add(g);
+    headPart(blackParts,backGeo,g,[0,0,-.16]);
+    headPart(metalParts,housingGeo,g,[0,0,0]);
+    for(const yy of [.61,0,-.61])headPart(blackParts,hoodGeo,g,[0,yy,.32],Math.PI/2);
+    trafficSignal.heads.push({axis:spec.axis,group:g});
+  }
+  const mergeParts=parts=>{const g=mergeGeometries(parts,false);parts.forEach(p=>p.dispose());return g;};
+  const metal=new THREE.Mesh(mergeParts(metalParts),std({color:'#30363e',roughness:.55,metalness:.56}));
+  const black=new THREE.Mesh(mergeParts(blackParts),std({color:'#111419',roughness:.70,metalness:.25}));
+  metal.castShadow=black.castShadow=true;root.add(metal,black);
+  const lampDefs=[['red',.61,'#f34d4d'],['yellow',0,'#f3cb51'],['green',-.61,'#55df7d']],lampMeshes=[];
+  for(const axis of ['z','x']){
+    const hs=trafficSignal.heads.filter(h=>h.axis===axis);
+    for(const [name,yy,color] of lampDefs){
+      const mat=new THREE.MeshStandardMaterial({color:'#101318',emissive:color,emissiveIntensity:.035,roughness:.18,metalness:.03,transparent:true,opacity:.92,toneMapped:false});
+      const im=new THREE.InstancedMesh(lensGeo,mat,hs.length);im.castShadow=false;
+      hs.forEach((h,i)=>{local.position.set(0,yy,.258);local.rotation.set(0,0,0);local.scale.set(1,1,1);local.updateMatrix();mx.multiplyMatrices(h.group.matrix,local.matrix);im.setMatrixAt(i,mx);h[name]=mat;});
+      im.instanceMatrix.needsUpdate=true;root.add(im);lampMeshes.push(im);
+    }
+  }
+  trafficSignal.drawMeshes=[metal,black,...lampMeshes];
+  trafficSignal.drawCalls=trafficSignal.drawMeshes.length;
+  [poleGeo,baseGeo,mastGeo,housingGeo,backGeo,hoodGeo].forEach(g=>g.dispose());
   /* Heads are on the far side of each approach and face back toward incoming
      traffic: +Z north, -Z south, +X east, -X west. */
-  addPole([-225.0,-244.4],[-214.0,-246.1],Math.PI,'z');      // south approach, faces south
-  addPole([-189.0,-287.6],[-200.0,-285.9],0,'z');            // north approach, faces north
-  addPole([-185.4,-247.0],[-187.2,-258.0],-Math.PI/2,'x');   // west approach, faces west
-  addPole([-228.6,-285.0],[-226.8,-274.0],Math.PI/2,'x');    // east approach, faces east
   applyTrafficSignalVisuals();
 }
 function arterialPieces(){
@@ -1197,6 +1231,7 @@ const ASSET_OBJECT = new THREE.Object3D();
 const ASSET_COLOR = new Col();
 
 function makeVehicleInstanceSet(sourceRoots, vehicles) {
+  const staticRoots=[];
   const roots = vehicles.map(vehicle => {
     const sourceRoot = sourceRoots[vehicle.modelIndex || 0] || sourceRoots[0];
     const root = cloneVehicleRoot(sourceRoot);
@@ -1208,6 +1243,7 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.scale.multiplyScalar(vehicle.scale || 1);
     root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
     scene.add(root);
+    if(!vehicle.ax)staticRoots.push(root);
     return root;
   });
   if (!roots.length) throw new Error('OBJ vehicle contained no usable instances.');
@@ -1218,7 +1254,15 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.rotation.y = vehicle.yaw || 0;
   };
   vehicles.forEach((vehicle, index) => update(index, vehicle));
-  return { roots, update, vehicles };
+  /* Hundreds of parked OBJ roots never move. Freeze their local transforms
+     after placement so mobile CPUs do not re-compose every parked-car matrix
+     on every animation frame. Visibility can still be toggled by Drive LOD. */
+  staticRoots.forEach(root=>{
+    root.traverse(node=>node.updateMatrix());
+    root.updateMatrixWorld(true);
+    root.traverse(node=>{node.matrixAutoUpdate=false;});
+  });
+  return { roots, update, vehicles, staticRoots };
 }
 
 function buildProceduralCars() {
@@ -1921,7 +1965,17 @@ const drive = {
   lights:[],beams:[],tailGlow:[],dust:null,dustBase:null,headLampMat:null,tailLampMat:null,packHeadMats:[],packTailMats:[],packBodyMats:[],
   objWheels:[],anchor:new V3(),prevAnchor:new V3(),orbitReady:false,initPromise:null
 };
-const drivePerf = { active: false, savedPr: 0, savedDof: 0, savedBloom: false, savedFxaa: false, maxPr: 1, lodDistSq: 280 * 280, lodEvery: 6, shadowEveryMs: 180 };
+const drivePerf = {
+  active:false,savedPr:0,savedDof:0,savedBloom:false,savedFxaa:false,maxPr:1,
+  /* Full-detail models are unchanged near the player. Phones simply stop
+     traversing distant parked-car roots sooner, where individual vehicle
+     detail is below useful screen size during Drive. Moving traffic stays
+     visible substantially farther out. */
+  parkedLodSq:(isTouchDriveDevice?165:230)*(isTouchDriveDevice?165:230),
+  movingLodSq:(isTouchDriveDevice?270:330)*(isTouchDriveDevice?270:330),
+  transitLodSq:(isTouchDriveDevice?315:380)*(isTouchDriveDevice?315:380),
+  lodEvery:isTouchDriveDevice?10:8,shadowEveryMs:180
+};
 const driveCamera = {
   userRotating: false,
   chaseStrength: 0,
@@ -2016,16 +2070,15 @@ function setDriveTrafficVisibility(visible) {
 }
 function updateDriveTrafficLod() {
   if (!drivePerf.active) return;
-  const p = drive.renderPos, maxSq = drivePerf.lodDistSq;
-  const roots = traffic?.set?.roots || [];
-  for (let i = 0; i < roots.length; i++) {
-    const root = roots[i]; if (!root) continue;
-    const dx = root.position.x - p.x, dz = root.position.z - p.z;
-    root.visible = dx * dx + dz * dz <= maxSq;
+  const p=drive.renderPos,roots=traffic?.set?.roots||[],parkedCount=traffic?.parkedCount||0;
+  for(let i=0;i<roots.length;i++){
+    const root=roots[i];if(!root)continue;
+    const dx=root.position.x-p.x,dz=root.position.z-p.z,maxSq=i<parkedCount?drivePerf.parkedLodSq:drivePerf.movingLodSq;
+    root.visible=dx*dx+dz*dz<=maxSq;
   }
-  transit?.vehicles?.forEach(vehicle => {
-    const dx = vehicle.root.position.x - p.x, dz = vehicle.root.position.z - p.z;
-    vehicle.root.visible = dx * dx + dz * dz <= maxSq * 1.35;
+  transit?.vehicles?.forEach(vehicle=>{
+    const dx=vehicle.root.position.x-p.x,dz=vehicle.root.position.z-p.z;
+    vehicle.root.visible=dx*dx+dz*dz<=drivePerf.transitLodSq;
   });
 }
 function setDrivePerformanceMode(active) {
@@ -2599,7 +2652,8 @@ async function toggleDrive() {
 }
 function updateVehicleLighting(dt,now) {
   const night = sstep(.10,.52,ST.night);
-  if (frameNo % 12 === 0) refreshVehicleLightBudget();
+  const budgetEvery=drivePerf.active?(isTouchDriveDevice?20:15):12;
+  if (frameNo % budgetEvery === 0) refreshVehicleLightBudget();
   const applyRig = rig => {
     if (!rig) return;
     rig.headMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 5.0; });
@@ -2822,11 +2876,11 @@ addEventListener('visibilitychange', () => {
 });
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
-  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, CU, stars, clouds, keyLight,
+  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
-  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
