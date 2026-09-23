@@ -580,10 +580,15 @@ function refreshVehicleLightBudget() {
   (traffic?.cars || []).forEach(car => add(car.lightRig));
   (transit?.vehicles || []).forEach(vehicle => add(vehicle.lightRig));
   vehicleLightCandidates.sort((a,b) => a._distanceSq - b._distanceSq);
-  const maxActive = tierName === 'high' ? 6 : tierName === 'medium' ? 4 : 2;
-  vehicleLightCandidates.forEach((rig, i) => {
-    const range = rig.kind === 'car' ? 95 : 135;
-    rig.dynamicEnabled = i < maxActive && rig._distanceSq <= range * range;
+  /* Point lights are the expensive part of the vehicle lighting stack because
+     every nearby StandardMaterial fragment evaluates them. In Drive on a touch
+     device keep only the closest vehicle's physical light spill; all vehicles
+     retain their native emissive lamp materials/glow, so the visible lamps do
+     not disappear. */
+  const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
+  vehicleLightCandidates.forEach((rig,i)=>{
+    const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
+    rig.dynamicEnabled=i<maxActive&&rig._distanceSq<=range*range;
   });
 }
 
@@ -1226,6 +1231,7 @@ const ASSET_OBJECT = new THREE.Object3D();
 const ASSET_COLOR = new Col();
 
 function makeVehicleInstanceSet(sourceRoots, vehicles) {
+  const staticRoots=[];
   const roots = vehicles.map(vehicle => {
     const sourceRoot = sourceRoots[vehicle.modelIndex || 0] || sourceRoots[0];
     const root = cloneVehicleRoot(sourceRoot);
@@ -1237,6 +1243,7 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.scale.multiplyScalar(vehicle.scale || 1);
     root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
     scene.add(root);
+    if(!vehicle.ax)staticRoots.push(root);
     return root;
   });
   if (!roots.length) throw new Error('OBJ vehicle contained no usable instances.');
@@ -1247,7 +1254,15 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.rotation.y = vehicle.yaw || 0;
   };
   vehicles.forEach((vehicle, index) => update(index, vehicle));
-  return { roots, update, vehicles };
+  /* Hundreds of parked OBJ roots never move. Freeze their local transforms
+     after placement so mobile CPUs do not re-compose every parked-car matrix
+     on every animation frame. Visibility can still be toggled by Drive LOD. */
+  staticRoots.forEach(root=>{
+    root.traverse(node=>node.updateMatrix());
+    root.updateMatrixWorld(true);
+    root.traverse(node=>{node.matrixAutoUpdate=false;});
+  });
+  return { roots, update, vehicles, staticRoots };
 }
 
 function buildProceduralCars() {
@@ -1950,7 +1965,17 @@ const drive = {
   lights:[],beams:[],tailGlow:[],dust:null,dustBase:null,headLampMat:null,tailLampMat:null,packHeadMats:[],packTailMats:[],packBodyMats:[],
   objWheels:[],anchor:new V3(),prevAnchor:new V3(),orbitReady:false,initPromise:null
 };
-const drivePerf = { active: false, savedPr: 0, savedDof: 0, savedBloom: false, savedFxaa: false, maxPr: 1, lodDistSq: 280 * 280, lodEvery: 6, shadowEveryMs: 180 };
+const drivePerf = {
+  active:false,savedPr:0,savedDof:0,savedBloom:false,savedFxaa:false,maxPr:1,
+  /* Full-detail models are unchanged near the player. Phones simply stop
+     traversing distant parked-car roots sooner, where individual vehicle
+     detail is below useful screen size during Drive. Moving traffic stays
+     visible substantially farther out. */
+  parkedLodSq:(isTouchDriveDevice?165:230)*(isTouchDriveDevice?165:230),
+  movingLodSq:(isTouchDriveDevice?270:330)*(isTouchDriveDevice?270:330),
+  transitLodSq:(isTouchDriveDevice?315:380)*(isTouchDriveDevice?315:380),
+  lodEvery:isTouchDriveDevice?10:8,shadowEveryMs:180
+};
 const driveCamera = {
   userRotating: false,
   chaseStrength: 0,
@@ -2045,16 +2070,15 @@ function setDriveTrafficVisibility(visible) {
 }
 function updateDriveTrafficLod() {
   if (!drivePerf.active) return;
-  const p = drive.renderPos, maxSq = drivePerf.lodDistSq;
-  const roots = traffic?.set?.roots || [];
-  for (let i = 0; i < roots.length; i++) {
-    const root = roots[i]; if (!root) continue;
-    const dx = root.position.x - p.x, dz = root.position.z - p.z;
-    root.visible = dx * dx + dz * dz <= maxSq;
+  const p=drive.renderPos,roots=traffic?.set?.roots||[],parkedCount=traffic?.parkedCount||0;
+  for(let i=0;i<roots.length;i++){
+    const root=roots[i];if(!root)continue;
+    const dx=root.position.x-p.x,dz=root.position.z-p.z,maxSq=i<parkedCount?drivePerf.parkedLodSq:drivePerf.movingLodSq;
+    root.visible=dx*dx+dz*dz<=maxSq;
   }
-  transit?.vehicles?.forEach(vehicle => {
-    const dx = vehicle.root.position.x - p.x, dz = vehicle.root.position.z - p.z;
-    vehicle.root.visible = dx * dx + dz * dz <= maxSq * 1.35;
+  transit?.vehicles?.forEach(vehicle=>{
+    const dx=vehicle.root.position.x-p.x,dz=vehicle.root.position.z-p.z;
+    vehicle.root.visible=dx*dx+dz*dz<=drivePerf.transitLodSq;
   });
 }
 function setDrivePerformanceMode(active) {
@@ -2628,7 +2652,8 @@ async function toggleDrive() {
 }
 function updateVehicleLighting(dt,now) {
   const night = sstep(.10,.52,ST.night);
-  if (frameNo % 12 === 0) refreshVehicleLightBudget();
+  const budgetEvery=drivePerf.active?(isTouchDriveDevice?20:15):12;
+  if (frameNo % budgetEvery === 0) refreshVehicleLightBudget();
   const applyRig = rig => {
     if (!rig) return;
     rig.headMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 5.0; });
