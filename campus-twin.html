@@ -267,7 +267,7 @@ function styleNativeVehicleMaterial(material, kind, meshName = '') {
       : { body: '#16869b', window: '#071b29', trim: '#1e2d35', light: '#fff0a8', wheel: '#11161b' };
     if (wheel || /wheel/.test(name)) material.color.set(colors.wheel);
     else if (/window/.test(name)) material.color.set(colors.window);
-    else if (/light/.test(name)) { material.color.set(colors.light); material.emissive = colors.light; material.emissiveIntensity = 0; }
+    else if (/light/.test(name)) { material.color.set(colors.light); material.emissive?.set(colors.light); material.emissiveIntensity = 0; }
     else if (school && /yellow/.test(name)) material.color.set(colors.body);
     else if (!school && /top|material|details/.test(name)) material.color.set(colors.body);
     else material.color.set(colors.trim);
