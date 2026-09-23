@@ -37,6 +37,10 @@ jobs:
           fi
           sudo apt-get update
           sudo apt-get install -y chromium
+      - name: Run developer panel gate probe
+        run: node probe_dev_panel.mjs
+      - name: Run mobile interaction performance probe
+        run: node probe_mobile_interaction_perf.mjs
       - name: Run campus 3D acceptance
         run: node test_campus_map_3d.js
       - name: Upload rendered vehicle QA
