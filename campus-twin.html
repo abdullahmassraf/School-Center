@@ -2074,11 +2074,12 @@ function playerThreat(ai,p,lv,rf) {
   const npcForward=lv.x*rf.fx+lv.z*rf.fz,playerForward=pv.x*rf.fx+pv.z*rf.fz;
   const closing=Math.max(.45,npcForward-playerForward);
   const look=TRAFFIC_AI.lookBase+Math.max(0,npcForward)*TRAFFIC_AI.predictionTime;
-  const corridor=ai.halfWidth+TRAFFIC_AI.playerHalfWidth+.62;
+  const playerHalfWidth=drive.colliderSize?.width*.5||TRAFFIC_AI.playerHalfWidth,playerHalfLength=drive.colliderSize?.length*.5||TRAFFIC_AI.playerHalfLength;
+  const corridor=ai.halfWidth+playerHalfWidth+.62;
   out.ahead=ahead;out.lateral=lateral;out.ttc=Infinity;out.risk=0;
-  if(ahead<-(ai.halfLength+TRAFFIC_AI.playerHalfLength)||ahead>look||Math.abs(lateral)>corridor)return out;
+  if(ahead<-(ai.halfLength+playerHalfLength)||ahead>look||Math.abs(lateral)>corridor)return out;
   const ttc=ahead<=0?0:ahead/closing;
-  const overlap=ahead<ai.halfLength+TRAFFIC_AI.playerHalfLength+.7?1:0;
+  const overlap=ahead<ai.halfLength+playerHalfLength+.7?1:0;
   const timeRisk=clamp((TRAFFIC_AI.predictionTime-ttc)/TRAFFIC_AI.predictionTime,0,1);
   const laneRisk=clamp(1-Math.abs(lateral)/corridor,0,1);
   out.ttc=ttc;out.risk=Math.max(overlap,timeRisk*laneRisk);return out;
