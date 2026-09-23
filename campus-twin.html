@@ -49,23 +49,19 @@
   .glass{background:rgba(14,16,36,.86);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.35)}
   .hud{position:absolute;z-index:5}
 
-  /* panel */
-  #panelBtn{top:calc(14px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
-
-  /* The environment panel is a developer menu: it can only be revealed with
-     the TAB key while a physical keyboard is present, and the twin only
-     counts as keyboard-present while actually fullscreen. Consumers embedding
-     the twin (and every touch user) never see it. */
-  #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s;visibility:hidden}
-  #devPanelOpen #panel{visibility:visible}
-  #panel.closed{opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
+  /* Developer environment panel. It remains in the DOM for the fullscreen
+     keyboard shortcut and QA, but is visually hidden, pointer-inert and DOM
+     inert until the trusted TAB gate opens it. */
+  #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s;visibility:hidden;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
+  body.devPanelOpen #panel:not(.closed){visibility:visible;opacity:1;transform:none;pointer-events:auto}
+  #panel.closed{visibility:hidden;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
   #panel h3{margin:0 0 7px;font-size:11.5px;font-weight:600;color:var(--ink-dim);display:flex;justify-content:space-between;align-items:center}
   .seg{display:flex;flex-wrap:wrap;gap:6px}
   .seg button,.btn{font:inherit;font-size:12px;font-weight:500;color:var(--ink);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:10px;padding:7px 10px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;transition:background .15s,border-color .15s,transform .1s}
   .seg button:hover,.btn:hover{background:rgba(255,255,255,.11)}
   .seg button:active,.btn:active{transform:scale(.97)}
   .seg button.on{background:color-mix(in srgb,var(--accent) 34%,transparent);border-color:var(--accent)}
-  .seg button:focus-visible,.btn:focus-visible,#panelBtn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .seg button:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fff;outline-offset:2px}
   input[type=range]{width:100%;accent-color:var(--accent)}
   select{font:inherit;font-size:12px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
   select option{color:#111}
@@ -158,7 +154,10 @@
     #info{left:10px;right:10px;width:auto;bottom:calc(72px + var(--safe-b))}
     #compass,#hint{display:none}
   }
-  body.embed #hint,body.embed #compass,body.embed #info,body.embed #panelBtn,body.embed #panel,body.embed #loader,body.embed #fatal{display:none!important}
+  /* The developer panel must remain available to the real embedded app when
+     the host enters fullscreen. Its own inert/visibility gate keeps it hidden
+     in every ordinary embedded view. */
+  body.embed #hint,body.embed #compass,body.embed #info,body.embed #loader,body.embed #fatal{display:none!important}
   body.embed #loader p,body.embed #loader .bar{display:none}
   @media (prefers-reduced-motion:reduce){ #info{animation:none} #loader{transition:none} }
 </style>
@@ -168,7 +167,7 @@
 <div id="app">
   <canvas id="scene" tabindex="0" aria-label="Interactive 3D map of Sheridan Davis Campus"></canvas>
 
-  <aside id="panel" class="hud glass closed" data-dev-panel aria-label="Developer environment controls">
+  <aside id="panel" class="hud glass closed" data-dev-panel aria-label="Developer environment controls" aria-hidden="true" inert>
     <section>
       <h3><span>Time of day</span><span id="timeSub"></span></h3>
       <div id="timeLabel" class="mb-2">--</div>
@@ -1767,25 +1766,26 @@ function updateEnv(dt) {
   ST.lampPool && (ST.lampPool.opacity = ST.night * .55, ST.lampHead.color.setRGB(2.6, 2.1, 1.3).multiplyScalar(.25 + .75 * ST.night));
   for (const id in BG) { const bd = BG[id]; bd.halo.material.opacity = ST.night * .55; }
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
-  /* The PMREM environment capture re-renders the whole sky into a cube map and
-     pre-filters it — a multi-millisecond synchronous spike. On mobile it used
-     to fire on its 2.5 s timer even mid-gesture, landing exactly on top of
-     orbit/pan/pinch frames. During interaction only the flag is set; the
-     rebuild runs once input goes quiet (settle path or the idle window). */
+  /* PMREM capture is expensive, so on phones defer it only while the camera is
+     actively moving. Never defer the first environment map, and once movement
+     settles rebuild exactly once so reflections/ambient lighting are current. */
   const now = performance.now();
   const envDue = (envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500);
-  if (envDue && !mobileProfile) {
+  const deferEnv = mobileProfile && !!envRT && (interaction.controlsActive || interaction.cameraTransition || now - interaction.lastInput < 220);
+  if (envDue && !deferEnv) {
     updateEnv.last = now; lastEnvT = sd.y; envDirty = false;
     skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture;
-    if (window.__DAVIS_TWIN_DEBUG__?.PERF) window.__DAVIS_TWIN_DEBUG__.PERF.envBuilds++;
+    PERF.envBuilds++;
   } else if (envDue) {
     envDirty = true;
   }
 }
+/* Counters are intentionally tiny and allocation-free; QA uses them to prove
+   camera gestures do not trigger hidden shadow/PMREM rebuilds. */
+const PERF = { envBuilds: 0 };
 /* `builds` counts real shadow-map regenerations; the regression suite uses it
    to prove camera motion no longer triggers them. */
 const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred: false, builds: 0 };
-if (window.__DAVIS_TWIN_DEBUG__ && !window.__DAVIS_TWIN_DEBUG__.PERF) window.__DAVIS_TWIN_DEBUG__.PERF = { envBuilds: 0 };
 /* Re-rendering the directional shadow map mid-gesture is the largest single
    synchronous GPU spike during orbit/pan/zoom, because it re-draws every shadow
    caster in the campus. Hold the last valid map while the user is moving, then
@@ -2011,9 +2011,10 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
     settled = true;
     clearTimeout(timer);
     interaction.cameraTransition = false;
-    /* A fly-to is also a camera move: restore full parked detail and flush any
-       shadow rebuild that was held back for the duration of the animation. */
+    /* A fly-to is also a camera move: restore full parked detail and flush
+       deferred environment/shadow work once, after the animation settles. */
     updateViewTrafficLod(true);
+    if (envDirty) { updateEnv.last = 0; updateEnv(0); }
     if (shadowTrack.deferred) maybeUpdateShadow(performance.now(), true);
     onComplete?.();
   };
@@ -2907,34 +2908,37 @@ addEventListener('keyup', e => { const m = { KeyW: 'w', ArrowUp: 'w', KeyS: 's',
 
 /* ═══════════ 10 · UI · TIME · LOOP · BOOT ═══════════ */
 const tour = { on: false, i: 0, t: 0 }; let ready = false, sliderDrag = false;
-const panel = open => { document.getElementById('panel').classList.toggle('closed', !open); };
-window.__PANEL_TRACE = window.__PANEL_TRACE || [];
-{ const _t = panel; window.panel = _t; }
-/* The environment panel is a developer menu. It is reachable ONLY by pressing
-   TAB on a physical keyboard while the twin is actually fullscreen — never by
-   touch, and never in an embedded page. The panel stays in the DOM so the QA
-   suite can drive it, but stays invisible and unreachable for everyone else. */
-function refreshDevPanelAvailability(open) {
-  const keyboard = matchMedia('(hover:hover) and (pointer:fine)').matches && navigator.maxTouchPoints === 0;
-  document.body.classList.toggle('devPanelOpen', !!open && actualFullscreen() && keyboard);
-}
-addEventListener('keydown', e => {
-  if (e.code !== 'Tab') return;
-  const wasOpen = document.body.classList.contains('devPanelOpen');
-  refreshDevPanelAvailability(true);
-  if (!wasOpen || !document.body.classList.contains('devPanelOpen')) return;
-  e.preventDefault();
-  const p = document.getElementById('panel');
-  const opening = p.classList.contains('closed');
-  panel(opening);
-  if (opening) {
-    markUserInteraction();
-    const first = p.querySelector('input,select,button');
-    if (first) first.focus({ preventScroll: true });
+const devPanel = $('panel');
+/* A trusted TAB keydown is the browser-level evidence that a keyboard is
+   actually being used. Touch alone cannot open this menu. The panel is inert
+   whenever closed so hidden controls can never receive focus through normal
+   tab navigation or scripting mistakes. */
+function panel(open, { focus = false } = {}) {
+  const next = !!open && actualFullscreen();
+  devPanel.classList.toggle('closed', !next);
+  document.body.classList.toggle('devPanelOpen', next);
+  devPanel.inert = !next;
+  devPanel.setAttribute('aria-hidden', next ? 'false' : 'true');
+  if (!next) {
+    if (devPanel.contains(document.activeElement)) $('scene')?.focus({ preventScroll: true });
+    return false;
   }
-}, true);
-addEventListener('keyup', e => { if (e.code === 'Tab') refreshDevPanelAvailability(false); }, true);
-addEventListener('blur', () => refreshDevPanelAvailability(false));
+  if (focus) devPanel.querySelector('input,select,button')?.focus({ preventScroll: true });
+  return true;
+}
+function onDevPanelKey(e) {
+  if (e.code === 'Escape' && document.body.classList.contains('devPanelOpen')) {
+    e.preventDefault(); e.stopPropagation(); panel(false); return;
+  }
+  if (e.code !== 'Tab' || e.repeat || !e.isTrusted) return;
+  /* Once open, TAB remains ordinary keyboard navigation inside the panel. */
+  if (devPanel.contains(e.target)) return;
+  if (!actualFullscreen()) { panel(false); return; }
+  e.preventDefault(); e.stopPropagation(); markUserInteraction();
+  panel(true, { focus: true });
+}
+addEventListener('keydown', onDevPanelKey, true);
+addEventListener('blur', () => panel(false));
 function setAccent(hex) {
   if (!/^#?[0-9a-f]{3,8}$/i.test(String(hex).replace('#', '')) && !hex) return; ST.accent.set(hex); const css = '#' + ST.accent.getHexString(); document.documentElement.style.setProperty('--accent', css);
   for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
@@ -2979,7 +2983,7 @@ function wireUI() {
   if (e.key.toLowerCase() === 'c') toggleDrive();
 });
   new MutationObserver(() => { const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); if (v && v.toLowerCase() !== '#' + ST.accent.getHexString()) setAccent(v); }).observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] });
-  if (innerWidth > 720 && !Q.has('embed')) panel(true);
+  panel(false);
 }
 let last = performance.now(), fAcc = 0, fN = 0, lastAdj = 0, clkT = 0;
 let frameNo = 0, hoverT = 0, lastAz = 9; const needle = $('compassNeedle');
@@ -3047,7 +3051,7 @@ async function boot() {
 }
 function onFullscreenChange() {
   const fs=actualFullscreen();
-  if(!fs) resetTouchDriveInput();
+  if(!fs){resetTouchDriveInput();panel(false);}
   syncMobileDriveUI();
   if(!fs&&drive.on) void toggleDrive();
 }
@@ -3082,7 +3086,7 @@ addEventListener('message', e => {
   else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
   else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; markUserInteraction(); }
   else if (d.type === 'campus:fullscreen-state') {
-    if(!d.value) resetTouchDriveInput();
+    if(!d.value){resetTouchDriveInput();panel(false);}
     syncMobileDriveUI();
     if (!d.value && drive.on) void toggleDrive();
     if (!document.hidden) {
@@ -3106,7 +3110,7 @@ addEventListener('message', e => {
 });
 addEventListener('visibilitychange', () => {
   renderPaused = document.hidden;
-  if(renderPaused){resetTouchDriveInput();return;}
+  if(renderPaused){resetTouchDriveInput();panel(false);return;}
   markUserInteraction();
   interaction.cameraTransition = false;
   if (frameId) cancelAnimationFrame(frameId);
@@ -3114,11 +3118,11 @@ addEventListener('visibilitychange', () => {
 });
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
-  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, tierName, CU, stars, clouds, keyLight, shadowTrack, viewPerf, maybeUpdateShadow, updateViewTrafficLod, mobileNpcLightPool, updateMobileNpcLightPool,
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, tierName, CU, stars, clouds, keyLight, PERF, shadowTrack, viewPerf, maybeUpdateShadow, updateViewTrafficLod, mobileNpcLightPool, updateMobileNpcLightPool,
   interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, applyVehicleLightRig, lightingNight, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
-  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod, panel,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
