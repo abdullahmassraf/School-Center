@@ -804,7 +804,7 @@ const TIERS = {
 };
 const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : mobileProfile ? 'medium' : 'high');
 const T=TIERS[tierName],baseFX={dof:mobileProfile?0:T.dof,bloom:T.bloom,fxaa:T.fxaa,se:T.se},FX={...baseFX};
-const qualityDpr=mobileProfile?(tierName==='low'?1.15:1.6):T.dpr;
+const qualityDpr=mobileProfile?(tierName==='low'?1.35:1.6):T.dpr;
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, stencil: false, powerPreference: 'high-performance' }); }
 catch (e) { fatal('WebGL unavailable', 'This browser or device could not create a WebGL context. Try enabling hardware acceleration.'); throw e; }
@@ -2176,7 +2176,7 @@ function setDrivePerformanceMode(active) {
     drivePerf.savedDof = FX.dof;
     drivePerf.savedBloom = FX.bloom;
     drivePerf.savedFxaa = FX.fxaa;
-    drivePerf.maxPr=mobileProfile?Math.min(qualityDpr,tierName==='low'?1.1:1.5):(tierName==='high'?1.35:tierName==='medium'?1.2:1);
+    drivePerf.maxPr=mobileProfile?Math.min(qualityDpr,tierName==='low'?1.3:1.5):(tierName==='high'?1.35:tierName==='medium'?1.2:1);
     const nextPr = Math.min(pr, drivePerf.maxPr);
     // Driving is a near-camera experience. Keep native geometry/material detail
     // intact while disabling the costly blur stack, FXAA pass and distant shadows.
@@ -2867,7 +2867,7 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr),floor=mobileProfile?Math.min(cap,tierName==='low'?1.0:(drivePerf.active?1.35:1.45)):.8;
+  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr),floor=mobileProfile?Math.min(cap,tierName==='low'?1.2:(drivePerf.active?1.35:1.45)):.8;
     if(now-lastAdj>2000){
       /* Never solve a transient camera-motion spike by dropping a phone all
          the way to 0.7 DPR. Preserve sharpness first; shed optional bloom,
