@@ -2258,7 +2258,7 @@ addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
   interaction, AUTO, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
-  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors,
+  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
