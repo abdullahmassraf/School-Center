@@ -182,6 +182,12 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
+/* Make the close/front/rear/far artifact set explicitly daylight rather than
+ * inheriting whatever the wall clock happens to be during CI. */
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+await sleep(650);
+const dayState=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night`);
+if(dayState>.22)throw new Error('daylight visual pass did not reach day state: '+dayState);
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
@@ -194,6 +200,12 @@ await frameVehicle('schoolBus',[-11,4.4,7.5],'transit-schoolbus-close');
 await frameVehicle('schoolBus',[-9,2.6,0],'transit-schoolbus-front');
 await frameVehicle('schoolBus',[9,2.6,0],'transit-schoolbus-rear');
 await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-far');
+/* Dusk pass catches distance/post-processing artifacts that can be invisible
+ * in full day or full night. */
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='1160';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+await sleep(650);
+await frameVehicle('bus',[-38,20,24],'transit-bus-sunset-far');
+await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-sunset-far');
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;d.__qaVisibility=null;}for(const v of d.transit.vehicles){v.speed=v.key==='bus'?10.5:8.5;v.stopTimer=0;}return true})()`);
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
@@ -255,6 +267,7 @@ console.log('FULLSCREEN ENTER',JSON.stringify(fullscreenState));
 const mobileFsUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return{touch:d.isTouchDriveDevice,activateHidden:a.hidden,joystickHidden:j.hidden,activateRect:a.getBoundingClientRect().toJSON()}})()`);
 if(!mobileFsUi.touch||mobileFsUi.activateHidden||!mobileFsUi.joystickHidden||mobileFsUi.activateRect.width<44||mobileFsUi.activateRect.height<44)throw new Error('mobile fullscreen Drive affordance failed: '+JSON.stringify(mobileFsUi));
 console.log('MOBILE FULLSCREEN ACTIVATE UI',JSON.stringify(mobileFsUi));
+await screenshot('mobile-drive-activation');
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(500);
@@ -275,8 +288,10 @@ if(!mobileDriveUi.activateHidden||mobileDriveUi.joystickHidden||mobileDriveUi.si
 console.log('MOBILE DRIVE ACTIVATED',JSON.stringify(mobileDriveUi));
 
 const touchMove=await joystickTouch(.48,.84,520);
-const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel(),j=d.document?.querySelector?.('#driveJoystick');return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer}})()`);
+const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer}})()`);
 if(!touchState.touch.active||touchState.input.source!=='touch'||touchState.input.throttle<.55||touchState.input.turn>-.15||touchState.speed<.15||touchState.steer>-.02)throw new Error('joystick did not drive/steer responsively: '+JSON.stringify(touchState));
+const multiTouch=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,j=f.document.querySelector('#driveJoystick'),r=j.getBoundingClientRect(),before={...d.drive.touch};j.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.right-5,clientY:r.bottom-5}));j.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.left+5,clientY:r.top+5}));return{before,after:{...d.drive.touch}}})()`);
+if(multiTouch.after.pointerId!==multiTouch.before.pointerId||Math.abs(multiTouch.after.x-multiTouch.before.x)>.001||Math.abs(multiTouch.after.y-multiTouch.before.y)>.001)throw new Error('second touch stole joystick control: '+JSON.stringify(multiTouch));
 await screenshot('mobile-drive-joystick-active');
 await joystickRelease();await sleep(120);
 const touchReleased=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,t=d.drive.touch,thumb=f.document.querySelector('#driveJoystickThumb');return{active:t.active,x:t.x,y:t.y,pointer:t.pointerId,thumb:thumb.style.transform}})()`);
@@ -291,6 +306,9 @@ if(resizeReset.active||resizeReset.pointer!==null||resizeReset.x||resizeReset.y)
 console.log('MOBILE JOYSTICK INPUT/CLEANUP',JSON.stringify({touchState,touchReleased,touchCancelled,resizeReset}));
 let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar,npcBodies:d.drive.npcPhysics.bodies.length,npcCreated:d.drive.npcPhysics.created}})()`);
 if(!drive.on||!drive.fs||!drive.packed||drive.npcBodies<14||drive.npcCreated!==drive.npcBodies)throw new Error(`fullscreen Drive/NPC physics failed: ${JSON.stringify({drive,errors})}`);
+const playerCollider=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{visual:d.drive.nativeVisualSize,collider:d.drive.colliderSize}})()`);
+if(!playerCollider.visual||!playerCollider.collider||Math.abs(playerCollider.collider.width/playerCollider.visual[0]-.92)>.08||Math.abs(playerCollider.collider.length/playerCollider.visual[2]-.92)>.08)throw new Error('player collider is stale or mismatched to the native car: '+JSON.stringify(playerCollider));
+console.log('PLAYER COLLIDER FROM NATIVE MODEL',JSON.stringify(playerCollider));
 const npcColliders=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.npcPhysics.bodies.map(a=>({kind:a.kind,size:a.size,halfWidth:a.halfWidth,halfLength:a.halfLength,finite:[a.body.translation().x,a.body.translation().y,a.body.translation().z,a.body.linvel().x,a.body.linvel().y,a.body.linvel().z].every(Number.isFinite)}))})()`);
 if(npcColliders.length<14||npcColliders.some(a=>!a.finite||a.halfWidth<.6||a.halfLength<1.5||a.halfLength<a.halfWidth))throw new Error('NPC colliders do not match vehicle footprints: '+JSON.stringify(npcColliders));
 console.log('NPC PHYSICS COLLIDERS',JSON.stringify(npcColliders));
@@ -309,7 +327,7 @@ console.log('NPC TRAJECTORY AVOIDANCE',JSON.stringify({avoidState,sideSafe}));
 
 /* High-speed contact uses Rapier CCD on both bodies. Hold one NPC stationary,
  * send the player into it, and require finite state + transferred momentum. */
-const collisionSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[1].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;d.__qaCollisionBase=ai.baseSpeed;ai.baseSpeed=0;ai.targetSpeed=0;ai.body.setLinvel({x:0,y:0,z:0},true);ai.body.setAngvel({x:0,y:0,z:0},true);const gap=ai.halfLength+d.TRAFFIC_AI.playerHalfLength+.45;/* Put both chassis on the same physics ground plane. The player collider is offset upward from its rigid-body origin; y=1.2 would suspend it above the NPC collider and test visual overlap instead of physical contact. */b.setTranslation({x:p.x-rf.fx*gap,y:p.y,z:p.z-rf.fz*gap},true);b.setRotation({x:0,y:Math.sin(Math.atan2(rf.fx,rf.fz)/2),z:0,w:Math.cos(Math.atan2(rf.fx,rf.fz)/2)},true);b.setLinvel({x:rf.fx*25,y:0,z:rf.fz*25},true);b.setAngvel({x:0,y:0,z:0},true);return{gap,base:d.__qaCollisionBase,y:p.y}})()`);
+const collisionSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[1].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;d.__qaCollisionBase=ai.baseSpeed;ai.baseSpeed=0;ai.targetSpeed=0;ai.body.setLinvel({x:0,y:0,z:0},true);ai.body.setAngvel({x:0,y:0,z:0},true);const gap=ai.halfLength+(d.drive.colliderSize?.length*.5||d.TRAFFIC_AI.playerHalfLength)+.45;/* Put both chassis on the same physics ground plane. The player collider is offset upward from its rigid-body origin; y=1.2 would suspend it above the NPC collider and test visual overlap instead of physical contact. */b.setTranslation({x:p.x-rf.fx*gap,y:p.y,z:p.z-rf.fz*gap},true);b.setRotation({x:0,y:Math.sin(Math.atan2(rf.fx,rf.fz)/2),z:0,w:Math.cos(Math.atan2(rf.fx,rf.fz)/2)},true);b.setLinvel({x:rf.fx*25,y:0,z:rf.fz*25},true);b.setAngvel({x:0,y:0,z:0},true);return{gap,base:d.__qaCollisionBase,y:p.y}})()`);
 await sleep(700);
 const collisionState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[1].physics,p=ai.body.translation(),pv=d.drive.body.translation(),v=ai.body.linvel(),dv=d.drive.body.linvel(),vals=[p.x,p.y,p.z,pv.x,pv.y,pv.z,v.x,v.y,v.z,dv.x,dv.y,dv.z];return{finite:vals.every(Number.isFinite),npcSpeed:Math.hypot(v.x,v.z),playerSpeed:Math.hypot(dv.x,dv.z),separation:Math.hypot(p.x-pv.x,p.z-pv.z),recoveries:d.drive.npcPhysics.recoveries}})()`);
 if(!collisionState.finite||collisionState.npcSpeed<.25||collisionState.separation<1.5||collisionState.playerSpeed>40)throw new Error('high-speed player/NPC collision was unstable or transferred no momentum: '+JSON.stringify(collisionState));
