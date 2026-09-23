@@ -2880,7 +2880,7 @@ if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
-  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
