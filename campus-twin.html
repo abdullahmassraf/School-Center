@@ -315,6 +315,18 @@ function prepareVehicleInstance(root, { color = null } = {}) {
       if (wheelNode || /wheel/.test(lower)) {
         mat.color?.set(lower.includes('grey') ? '#b8c4cf' : '#111820');
         mat.roughness = .72; mat.metalness = .18; result.wheels.push(mat);
+      } else if (/window|windshield|glass/.test(lower)) {
+        /* Native car glass shipped nearly pure black. That made windshields
+         * read as detached black rectangles at night and at medium distance.
+         * Keep the original glass geometry/material slots but give them a
+         * restrained blue-grey tint and a tiny ambient emissive floor. */
+        mat.color?.set('#284354');
+        if (mat.emissive?.set) mat.emissive.set('#07131b');
+        else if (mat.emissive !== undefined) mat.emissive = new Col('#07131b');
+        if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = .14;
+        mat.specular?.set?.('#7fa7ba');
+        if ('shininess' in mat) mat.shininess = 76;
+        mat.roughness = .2; mat.metalness = .04;
       } else if (color && CAR_PAINT_MATERIAL.test(name)) {
         mat.color?.set(color);
         mat.emissive = mat.color.clone();
