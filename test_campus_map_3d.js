@@ -191,7 +191,12 @@ await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.docu
 await sleep(650);
 const dayState=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night`);
 if(dayState>.22)throw new Error('daylight visual pass did not reach day state: '+dayState);
+const dofQa=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.__qaSavedDof=d.FX.dof;d.FX.dof=.6;return{saved:d.__qaSavedDof,active:d.FX.dof,blurDiv:d.postPerf.blurDiv}})()`);
+await sleep(180);
+const dofUniform=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.CU.uDof.value`);
+if(dofQa.active<.5||dofQa.blurDiv!==4||dofUniform<.5)throw new Error('forced mobile DOF QA did not activate: '+JSON.stringify({dofQa,dofUniform}));
 await screenshot('mobile-dof-day-overview');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=d.__qaSavedDof;return d.FX.dof})()`);
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
