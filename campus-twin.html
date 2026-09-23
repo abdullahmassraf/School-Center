@@ -52,7 +52,12 @@
   /* panel */
   #panelBtn{top:calc(14px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
 
-  #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s}
+  /* The environment panel is a developer menu: it can only be revealed with
+     the TAB key while a physical keyboard is present, and the twin only
+     counts as keyboard-present while actually fullscreen. Consumers embedding
+     the twin (and every touch user) never see it. */
+  #panel{top:calc(66px + var(--safe-t));right:14px;width:304px;max-height:calc(100% - 150px - var(--safe-t));overflow:auto;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:14px;transition:opacity .2s,transform .25s;visibility:hidden}
+  #devPanelOpen #panel{visibility:visible}
   #panel.closed{opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none}
   #panel h3{margin:0 0 7px;font-size:11.5px;font-weight:600;color:var(--ink-dim);display:flex;justify-content:space-between;align-items:center}
   .seg{display:flex;flex-wrap:wrap;gap:6px}
@@ -163,16 +168,14 @@
 <div id="app">
   <canvas id="scene" tabindex="0" aria-label="Interactive 3D map of Sheridan Davis Campus"></canvas>
 
-  <button id="panelBtn" class="hud glass" aria-label="Environment controls" aria-expanded="false"><i class="fa-solid fa-sliders"></i></button>
-
-  <aside id="panel" class="hud glass closed" aria-label="Environment controls">
+  <aside id="panel" class="hud glass closed" data-dev-panel aria-label="Developer environment controls">
     <section>
       <h3><span>Time of day</span><span id="timeSub"></span></h3>
       <div id="timeLabel" class="mb-2">--</div>
-      <input id="timeRange" type="range" min="0" max="1439" step="1" aria-label="Time of day">
+      <input id="timeRange" type="range" min="0" max="1439" step="1" data-dev-panel aria-label="Time of day">
       <div class="row" style="margin-top:9px">
-        <button id="btnLive" class="btn"><i class="fa-solid fa-clock"></i> Live</button>
-        <select id="speed" aria-label="Time speed">
+        <button id="btnLive" class="btn" data-dev-panel><i class="fa-solid fa-clock"></i> Live</button>
+        <select id="speed" data-dev-panel aria-label="Time speed">
           <option value="1">1× real time</option><option value="60">60×</option><option value="600">600×</option><option value="3600">3600×</option>
         </select>
       </div>
@@ -180,23 +183,23 @@
     <section>
       <h3>Season</h3>
       <div class="seg" id="seasonSeg">
-        <button data-season="auto"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto</button>
-        <button data-season="spring"><i class="fa-solid fa-seedling"></i> Spring</button>
-        <button data-season="summer"><i class="fa-solid fa-sun"></i> Summer</button>
-        <button data-season="autumn"><i class="fa-solid fa-leaf"></i> Autumn</button>
-        <button data-season="winter"><i class="fa-solid fa-snowflake"></i> Winter</button>
+        <button data-season="auto" data-dev-panel><i class="fa-solid fa-wand-magic-sparkles"></i> Auto</button>
+        <button data-season="spring" data-dev-panel><i class="fa-solid fa-seedling"></i> Spring</button>
+        <button data-season="summer" data-dev-panel><i class="fa-solid fa-sun"></i> Summer</button>
+        <button data-season="autumn" data-dev-panel><i class="fa-solid fa-leaf"></i> Autumn</button>
+        <button data-season="winter" data-dev-panel><i class="fa-solid fa-snowflake"></i> Winter</button>
       </div>
     </section>
     <section>
       <h3>Weather</h3>
       <div class="seg" id="weatherSeg">
-        <button data-weather="clear"><i class="fa-solid fa-sun"></i> Clear</button>
-        <button data-weather="cloudy"><i class="fa-solid fa-cloud-sun"></i> Cloudy</button>
-        <button data-weather="overcast"><i class="fa-solid fa-cloud"></i> Overcast</button>
-        <button data-weather="rain"><i class="fa-solid fa-cloud-rain"></i> Rain</button>
-        <button data-weather="snow"><i class="fa-solid fa-snowflake"></i> Snow</button>
-        <button data-weather="fog"><i class="fa-solid fa-smog"></i> Fog</button>
-        <button data-weather="live"><i class="fa-solid fa-satellite-dish"></i> Live</button>
+        <button data-weather="clear" data-dev-panel><i class="fa-solid fa-sun"></i> Clear</button>
+        <button data-weather="cloudy" data-dev-panel><i class="fa-solid fa-cloud-sun"></i> Cloudy</button>
+        <button data-weather="overcast" data-dev-panel><i class="fa-solid fa-cloud"></i> Overcast</button>
+        <button data-weather="rain" data-dev-panel><i class="fa-solid fa-cloud-rain"></i> Rain</button>
+        <button data-weather="snow" data-dev-panel><i class="fa-solid fa-snowflake"></i> Snow</button>
+        <button data-weather="fog" data-dev-panel><i class="fa-solid fa-smog"></i> Fog</button>
+        <button data-weather="live" data-dev-panel><i class="fa-solid fa-satellite-dish"></i> Live</button>
       </div>
     </section>
     <section>
@@ -207,13 +210,13 @@
         <button class="sw" data-accent="#22d3ee" style="background:#22d3ee" aria-label="Cyan"></button>
         <button class="sw" data-accent="#34d399" style="background:#34d399" aria-label="Green"></button>
         <button class="sw" data-accent="#fb7185" style="background:#fb7185" aria-label="Rose"></button>
-        <input id="accentPick" type="color" value="#7c6cff" aria-label="Custom accent" style="width:34px;height:26px;border:0;background:none;padding:0">
+        <input id="accentPick" type="color" value="#7c6cff" data-dev-panel aria-label="Custom accent" style="width:34px;height:26px;border:0;background:none;padding:0">
       </div>
     </section>
     <section class="row" style="justify-content:space-between">
-      <div class="row"><button id="btnTour" class="btn"><i class="fa-solid fa-film"></i> Tour</button><button id="btnGlass" class="btn"><i class="fa-solid fa-cube"></i> Glass</button><button id="btnDrive" class="btn"><i class="fa-solid fa-car-side"></i> Drive</button></div>
+      <div class="row">        <button id="btnTour" class="btn" data-dev-panel><i class="fa-solid fa-film"></i> Tour</button><button id="btnGlass" class="btn" data-dev-panel><i class="fa-solid fa-cube"></i> Glass</button><button id="btnDrive" class="btn" data-dev-panel><i class="fa-solid fa-car-side"></i> Drive</button></div>
       <label style="font-size:12px;color:var(--ink-dim);display:flex;gap:6px;align-items:center">Quality
-        <select id="quality"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+        <select id="quality" data-dev-panel><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
       </label>
     </section>
   </aside>
@@ -578,7 +581,7 @@ function ensureMobileNpcLightPool() {
   mobileNpcLightPool.initialized = true;
 }
 function chooseMobileNpcLightTarget(now) {
-  if (!drivePerf.active || !mobileProfile) { mobileNpcLightPool.target = null; return; }
+  if (!mobileProfile) { mobileNpcLightPool.target = null; return; }
   ensureMobileNpcLightPool();
   const candidate = vehicleLightCandidates[0] || null, current = mobileNpcLightPool.target;
   const currentValid = current && current.root?.visible && Number.isFinite(current._distanceSq) && current._distanceSq < NPC_POOL_HOLD_SQ;
@@ -590,7 +593,11 @@ function chooseMobileNpcLightTarget(now) {
   if (next !== current) { mobileNpcLightPool.target = next; mobileNpcLightPool.lastSwitch = now; mobileNpcLightPool.switches++; }
 }
 function updateMobileNpcLightPool(night, dt, now) {
-  if (!mobileProfile || !drivePerf.active) {
+  /* The pool is the ONLY source of NPC dynamic lamp spill on a phone, in every
+     viewing mode (orbit/pan/zoom and Drive): keeping the lit-light set constant
+     is what eliminates the per-vehicle shader recompiles that made night
+     interaction stutter. Desktop tiers never enter this path. */
+  if (!mobileProfile) {
     if (mobileNpcLightPool.initialized) mobileNpcLightPool.lights.forEach(l => { l.visible = false; l.intensity = 0; });
     mobileNpcLightPool.active = false;
     return;
@@ -645,10 +652,20 @@ function refreshVehicleLightBudget() {
     chooseMobileNpcLightTarget(performance.now());
     return;
   }
+  /* Point lights are the expensive part of the vehicle lighting stack — but on
+     a phone the worst cost is not the shading, it is the shader RECOMPILE when
+     a light toggles visible: three.js then rebuilds every affected program, a
+     multi-millisecond main-thread stall that repeated itself all night as
+     traffic crossed the old proximity radius. Mobile tiers therefore route
+     every NPC through the fixed four-light pool in updateMobileNpcLightPool
+     (the scene always carries the same lit-light set: the nearest vehicle), so
+     the light count never changes and no program is ever recompiled. Desktop
+     keeps the proximity budget. */
   const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
   vehicleLightCandidates.forEach((rig,i)=>{
-    const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
-    rig.dynamicEnabled=i<maxActive&&rig._distanceSq<=range*range;
+    rig.dynamicEnabled = mobileProfile
+      ? false
+      : i<maxActive && rig._distanceSq <= (rig.kind==='car'?95:135)**2;
   });
 }
 
@@ -1750,11 +1767,25 @@ function updateEnv(dt) {
   ST.lampPool && (ST.lampPool.opacity = ST.night * .55, ST.lampHead.color.setRGB(2.6, 2.1, 1.3).multiplyScalar(.25 + .75 * ST.night));
   for (const id in BG) { const bd = BG[id]; bd.halo.material.opacity = ST.night * .55; }
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
-  const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
+  /* The PMREM environment capture re-renders the whole sky into a cube map and
+     pre-filters it — a multi-millisecond synchronous spike. On mobile it used
+     to fire on its 2.5 s timer even mid-gesture, landing exactly on top of
+     orbit/pan/pinch frames. During interaction only the flag is set; the
+     rebuild runs once input goes quiet (settle path or the idle window). */
+  const now = performance.now();
+  const envDue = (envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500);
+  if (envDue && !mobileProfile) {
+    updateEnv.last = now; lastEnvT = sd.y; envDirty = false;
+    skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture;
+    if (window.__DAVIS_TWIN_DEBUG__?.PERF) window.__DAVIS_TWIN_DEBUG__.PERF.envBuilds++;
+  } else if (envDue) {
+    envDirty = true;
+  }
 }
 /* `builds` counts real shadow-map regenerations; the regression suite uses it
    to prove camera motion no longer triggers them. */
 const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred: false, builds: 0 };
+if (window.__DAVIS_TWIN_DEBUG__ && !window.__DAVIS_TWIN_DEBUG__.PERF) window.__DAVIS_TWIN_DEBUG__.PERF = { envBuilds: 0 };
 /* Re-rendering the directional shadow map mid-gesture is the largest single
    synchronous GPU spike during orbit/pan/zoom, because it re-draws every shadow
    caster in the campus. Hold the last valid map while the user is moving, then
@@ -2005,6 +2036,7 @@ function scheduleCameraSettle(delay = 220) {
     interaction.settleTimer = 0;
     if (drive.on || interaction.controlsActive || interaction.cameraTransition) return;
     updateViewTrafficLod(true);
+    if (envDirty) { updateEnv.last = 0; updateEnv(0); }
     if (shadowTrack.deferred) maybeUpdateShadow(performance.now(), true);
   }, delay);
 }
@@ -2875,7 +2907,34 @@ addEventListener('keyup', e => { const m = { KeyW: 'w', ArrowUp: 'w', KeyS: 's',
 
 /* ═══════════ 10 · UI · TIME · LOOP · BOOT ═══════════ */
 const tour = { on: false, i: 0, t: 0 }; let ready = false, sliderDrag = false;
-const panel = open => { $('panel').classList.toggle('closed', !open); $('panelBtn').setAttribute('aria-expanded', open); };
+const panel = open => { document.getElementById('panel').classList.toggle('closed', !open); };
+window.__PANEL_TRACE = window.__PANEL_TRACE || [];
+{ const _t = panel; window.panel = _t; }
+/* The environment panel is a developer menu. It is reachable ONLY by pressing
+   TAB on a physical keyboard while the twin is actually fullscreen — never by
+   touch, and never in an embedded page. The panel stays in the DOM so the QA
+   suite can drive it, but stays invisible and unreachable for everyone else. */
+function refreshDevPanelAvailability(open) {
+  const keyboard = matchMedia('(hover:hover) and (pointer:fine)').matches && navigator.maxTouchPoints === 0;
+  document.body.classList.toggle('devPanelOpen', !!open && actualFullscreen() && keyboard);
+}
+addEventListener('keydown', e => {
+  if (e.code !== 'Tab') return;
+  const wasOpen = document.body.classList.contains('devPanelOpen');
+  refreshDevPanelAvailability(true);
+  if (!wasOpen || !document.body.classList.contains('devPanelOpen')) return;
+  e.preventDefault();
+  const p = document.getElementById('panel');
+  const opening = p.classList.contains('closed');
+  panel(opening);
+  if (opening) {
+    markUserInteraction();
+    const first = p.querySelector('input,select,button');
+    if (first) first.focus({ preventScroll: true });
+  }
+}, true);
+addEventListener('keyup', e => { if (e.code === 'Tab') refreshDevPanelAvailability(false); }, true);
+addEventListener('blur', () => refreshDevPanelAvailability(false));
 function setAccent(hex) {
   if (!/^#?[0-9a-f]{3,8}$/i.test(String(hex).replace('#', '')) && !hex) return; ST.accent.set(hex); const css = '#' + ST.accent.getHexString(); document.documentElement.style.setProperty('--accent', css);
   for (const k in BG) BG[k].edgeMat.color.copy(ST.accent); if (ST.monument) ST.monument.material.emissive.copy(ST.accent); if (drive.bodyM) drive.bodyM.color.copy(ST.accent);
@@ -2894,7 +2953,6 @@ function wireUI() {
   wireMobileDriveControls();
   $('scene').addEventListener('mousedown', markMouseInteraction);
   $('scene').addEventListener('mousemove', markMouseInteraction);
-  $('panelBtn').onclick = () => { markUserInteraction(); panel($('panel').classList.contains('closed')); };
   try {
     const ownerDoc = parent !== window ? parent.document : document;
     ownerDoc.addEventListener('fullscreenchange', onFullscreenChange);
