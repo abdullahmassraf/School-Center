@@ -214,6 +214,26 @@ if(transitBefore.every((v,i)=>Math.abs(v-transitAfter[i])<.1))throw new Error(`p
 console.log('TRANSIT MOTION',JSON.stringify({before:transitBefore,after:transitAfter}));
 console.log('BOOT',JSON.stringify(boot));
 
+/* The arterial crossing must be one authored surface, with four correctly
+ * oriented signal heads rather than the old pair of overlapping road ribbons. */
+const intersection=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,s=d.trafficSignal,m=d.MAIN_INTERSECTION;return{mesh:s.intersection?.name,size:m.size,heads:s.heads.map(h=>({axis:h.axis,yaw:h.group.rotation.y})),posts:s.posts.length,phase:s.phase,ns:s.ns,ew:s.ew}})()`);
+if(intersection.mesh!=='MainSignalizedIntersection'||intersection.posts!==4||intersection.heads.length!==4||intersection.size<38)throw new Error('main intersection surface/signal build failed: '+JSON.stringify(intersection));
+const expectedHead=[['z',Math.PI],['z',0],['x',-Math.PI/2],['x',Math.PI/2]];
+intersection.heads.forEach((h,i)=>{if(h.axis!==expectedHead[i][0]||Math.abs(Math.atan2(Math.sin(h.yaw-expectedHead[i][1]),Math.cos(h.yaw-expectedHead[i][1])))>.01)throw new Error('traffic signal head faces the wrong approach: '+JSON.stringify(intersection));});
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.setTrafficSignalPhase('ns-green');d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(250);await screenshot('main-intersection-day-top');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.camera.position.set(m.x+2,7,m.z-49);d.controls.target.set(m.x,3.1,m.z);d.controls.update();return true})()`);await sleep(220);await screenshot('main-intersection-signals');
+
+/* Existing non-Drive traffic must obey the signal too. Put one northbound car
+ * just before the south stop line, hold its axis red, then release it on green. */
+const signalNpcSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars.find(c=>c.ax==='z'&&c.d>0),stop=d.MAIN_INTERSECTION.stop.southZ,coord=stop-7;c.t=(coord+320)/640;c.signalV=c.v;d.setTrafficSignalPhase('ew-green');return{base:c.v,stop,coord,index:d.traffic.cars.indexOf(c)}})()`);
+await sleep(900);
+const signalNpcRed=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars[${signalNpcSetup.index}],dist=d.signalDistanceForEntity(c,c.z);return{speed:c.signalV,base:c.v,z:c.z,dist,phase:d.trafficSignal.phase}})()`);
+if(signalNpcRed.phase!=='ew-green'||signalNpcRed.speed>=signalNpcRed.base*.8||signalNpcRed.dist<-.7)throw new Error('NPC failed to slow/hold for a red traffic light: '+JSON.stringify({signalNpcSetup,signalNpcRed}));
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.setTrafficSignalPhase('ns-green')`);await sleep(900);
+const signalNpcGreen=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars[${signalNpcSetup.index}];return{speed:c.signalV,base:c.v,phase:d.trafficSignal.phase}})()`);
+if(signalNpcGreen.phase!=='ns-green'||signalNpcGreen.speed<=signalNpcRed.speed+.4)throw new Error('NPC did not resume after its traffic light turned green: '+JSON.stringify({signalNpcRed,signalNpcGreen}));
+console.log('SIGNALIZED INTERSECTION/NPC COMPLIANCE',JSON.stringify({intersection,signalNpcRed,signalNpcGreen}));
+
 /* Sunset/night lighting regression: moving NPC cars, commute buses and their
  * lamp materials must become active when the sun is below the horizon. */
 await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='0';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value})()`);
@@ -287,9 +307,10 @@ const mobileDriveUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.co
 if(!mobileDriveUi.activateHidden||mobileDriveUi.joystickHidden||mobileDriveUi.size[0]<88||mobileDriveUi.size[0]>155)throw new Error('mobile joystick visibility/size failed: '+JSON.stringify(mobileDriveUi));
 console.log('MOBILE DRIVE ACTIVATED',JSON.stringify(mobileDriveUi));
 
-const touchMove=await joystickTouch(.48,.84,520);
-const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer}})()`);
-if(!touchState.touch.active||touchState.input.source!=='touch'||touchState.input.throttle<.55||touchState.input.turn>-.15||touchState.speed<.15||touchState.steer>-.02)throw new Error('joystick did not drive/steer responsively: '+JSON.stringify(touchState));
+const touchMove=await joystickTouch(.72,.92,520);
+const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer,tune:d.DRIVE_TUNE}})()`);
+if(!touchState.touch.active||touchState.input.source!=='touch'||touchState.input.throttle<.78||touchState.input.turn>-.62||touchState.speed<3||touchState.steer>-.25)throw new Error('joystick diagonal throttle/steering is still too weak: '+JSON.stringify(touchState));
+if(touchState.tune.maxForward<36||touchState.tune.maxSteer<.55||touchState.tune.yawGain<2.6)throw new Error('Drive speed/turning tune regressed: '+JSON.stringify(touchState.tune));
 const multiTouch=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,j=f.document.querySelector('#driveJoystick'),r=j.getBoundingClientRect(),before={...d.drive.touch};j.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.right-5,clientY:r.bottom-5}));j.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.left+5,clientY:r.top+5}));return{before,after:{...d.drive.touch}}})()`);
 if(multiTouch.after.pointerId!==multiTouch.before.pointerId||Math.abs(multiTouch.after.x-multiTouch.before.x)>.001||Math.abs(multiTouch.after.y-multiTouch.before.y)>.001)throw new Error('second touch stole joystick control: '+JSON.stringify(multiTouch));
 await screenshot('mobile-drive-joystick-active');
@@ -312,6 +333,12 @@ console.log('PLAYER COLLIDER FROM NATIVE MODEL',JSON.stringify(playerCollider));
 const npcColliders=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.npcPhysics.bodies.map(a=>({kind:a.kind,size:a.size,halfWidth:a.halfWidth,halfLength:a.halfLength,finite:[a.body.translation().x,a.body.translation().y,a.body.translation().z,a.body.linvel().x,a.body.linvel().y,a.body.linvel().z].every(Number.isFinite)}))})()`);
 if(npcColliders.length<14||npcColliders.some(a=>!a.finite||a.halfWidth<.6||a.halfLength<1.5||a.halfLength<a.halfWidth))throw new Error('NPC colliders do not match vehicle footprints: '+JSON.stringify(npcColliders));
 console.log('NPC PHYSICS COLLIDERS',JSON.stringify(npcColliders));
+
+/* The same signal rule must govern Rapier NPCs during Drive mode. */
+const physicsSignal=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars.find(c=>c.ax==='z'&&c.d>0).physics,e=ai.entity,stop=d.MAIN_INTERSECTION.stop.southZ,p=ai.body.translation(),b=d.drive.body;d.__qaSignal={p:ai.body.translation(),r:ai.body.rotation(),v:ai.body.linvel(),player:b.translation(),playerV:b.linvel()};ai.body.setTranslation({x:e.f,y:p.y,z:stop-4.5},true);ai.body.setLinvel({x:0,y:0,z:6},true);b.setTranslation({x:120,y:1.2,z:120},true);b.setLinvel({x:0,y:0,z:0},true);d.setTrafficSignalPhase('ew-green');const red=d.trafficSignalSpeedLimit(e,stop-4.5,6,ai.baseSpeed);d.updateNpcPhysicsStep(1/60);const redTarget=ai.targetSpeed;d.setTrafficSignalPhase('ns-green');const green=d.trafficSignalSpeedLimit(e,stop-4.5,6,ai.baseSpeed);const q=d.__qaSignal;ai.body.setTranslation(q.p,true);ai.body.setRotation(q.r,true);ai.body.setLinvel(q.v,true);b.setTranslation(q.player,true);b.setLinvel(q.playerV,true);return{red,redTarget,green,base:ai.baseSpeed}})()`);
+if(physicsSignal.red>=physicsSignal.base*.75||physicsSignal.redTarget>physicsSignal.red+.2||Math.abs(physicsSignal.green-physicsSignal.base)>.01)throw new Error('Rapier NPC signal compliance failed: '+JSON.stringify(physicsSignal));
+console.log('RAPIER NPC SIGNAL COMPLIANCE',JSON.stringify(physicsSignal));
+
 /* Predictive NPC avoidance: a player directly in the lane must produce
  * braking/avoidance, while the same player well beside the lane must not. */
 const npcScenario=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[0].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;d.__qaPlayer={p:b.translation(),r:b.rotation(),v:b.linvel(),w:b.angvel()};d.__qaNpc={p:ai.body.translation(),r:ai.body.rotation(),v:ai.body.linvel(),base:ai.baseSpeed};b.setTranslation({x:p.x+rf.fx*10,y:1.2,z:p.z+rf.fz*10},true);b.setLinvel({x:0,y:0,z:0},true);b.setAngvel({x:0,y:0,z:0},true);ai.body.setLinvel({x:rf.fx*ai.baseSpeed,y:0,z:rf.fz*ai.baseSpeed},true);return{base:ai.baseSpeed,rf,p:[p.x,p.y,p.z]}})()`);
