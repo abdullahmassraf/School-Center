@@ -1786,13 +1786,14 @@ function updateEnv(dt) {
     updateEnv.last = now; lastEnvT = sd.y; envDirty = false;
     skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture;
     PERF.envBuilds++;
+    if (interaction.controlsActive) PERF.envBuildsDuringInteraction++;
   } else if (envDue) {
     envDirty = true;
   }
 }
 /* Counters are intentionally tiny and allocation-free; QA uses them to prove
    camera gestures do not trigger hidden shadow/PMREM rebuilds. */
-const PERF = { envBuilds: 0 };
+const PERF = { envBuilds: 0, envBuildsDuringInteraction: 0, shadowBuildsDuringInteraction: 0 };
 /* `builds` counts real shadow-map regenerations; the regression suite uses it
    to prove camera motion no longer triggers them. */
 const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred: false, builds: 0 };
@@ -1812,6 +1813,7 @@ function maybeUpdateShadow(now, force = false) {
   shadowTrack.target.copy(controls.target);
   shadowTrack.dir.copy(keyDir);
   shadowTrack.at = now; shadowTrack.deferred = false; shadowTrack.builds++;
+  if (interaction.controlsActive) PERF.shadowBuildsDuringInteraction++;
 }
 function updateShadow() {
   const S = clamp(camDist * .8, 60, 300), cam = keyLight.shadow.camera; if (Math.abs(cam.right - S) > 2) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 10; cam.far = 1300; cam.updateProjectionMatrix(); }
