@@ -443,11 +443,19 @@ console.log("DRIVE WHEEL LAYOUT",JSON.stringify(wheelLayout));
 if(wheelMapping.length!==3||!wheelMapping.some(w=>/FrontLeftWheel/i.test(w.node))||!wheelMapping.some(w=>/FrontRightWheel/i.test(w.node))||!wheelMapping.some(w=>/BackWheels/i.test(w.node)))throw new Error('native wheel groups were not mapped: '+JSON.stringify(wheelMapping));
 const wheelBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
 const wheelContinuousBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>pivot.rotation.x)`);
-await key('KeyW',false); await key('KeyA',false); await sleep(500);
-const wheelAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
+await key('KeyW',false); await key('KeyA',false);
+/* Wait on the actual Drive state rather than a fixed wall-clock delay. On a
+ * busy software-rendered CI frame, 500 ms can contain very few animation
+ * frames even though input handling and wheel steering are correct. */
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.drive.body?.linvel?.();return Math.abs(d.drive.steer)>.08&&v&&Math.hypot(v.x,v.z)>.5})()`,2400,50);
+const wheelAfterState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{steer:d.drive.steer,wheels:d.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))}})()`);
+const wheelAfter=wheelAfterState.wheels;
+await sleep(220);
 const wheelContinuousAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>pivot.rotation.x)`);
 await key('KeyA'); await key('KeyW');
-if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.max(...wheelContinuousAfter.map((x,i)=>Math.abs(x-wheelContinuousBefore[i])))<.15||Math.abs(wheelAfter[0].y-wheelBefore[0].y)<.01||Math.abs(wheelAfter[1].y-wheelBefore[1].y)<.01)throw new Error(`native wheel visuals did not roll continuously/steer: ${JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelContinuousBefore,wheelContinuousAfter})}`);
+const steerVisual=Math.min(Math.abs(wheelAfter[0].y-wheelBefore[0].y),Math.abs(wheelAfter[1].y-wheelBefore[1].y));
+const frontSync=Math.max(Math.abs(wheelAfter[0].y-wheelAfterState.steer),Math.abs(wheelAfter[1].y-wheelAfterState.steer));
+if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.max(...wheelContinuousAfter.map((x,i)=>Math.abs(x-wheelContinuousBefore[i])))<.15||Math.abs(wheelAfterState.steer)<.08||steerVisual<.05||frontSync>.04)throw new Error(`native wheel visuals did not roll continuously/follow Drive steering: ${JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelContinuousBefore,wheelContinuousAfter,driveSteer:wheelAfterState.steer,steerVisual,frontSync})}`);
 const wheelMaterials=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.flatMap(({node})=>{const out=[];node.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&out.push(m.color.getHexString()))}});return out})`);
 if(!wheelMaterials.some(c=>c==='111820'||c==='9aa5b1'))throw new Error(`native wheel materials were not made visible: ${JSON.stringify(wheelMaterials)}`);
 console.log('NATIVE WHEELS',JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelMaterials}));
