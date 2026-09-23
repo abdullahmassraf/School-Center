@@ -106,16 +106,28 @@ const key=async(code,up=true)=>{
   await send('Input.dispatchKeyEvent',{type:'keyDown',code,key:code,key:code==='Escape'?'Escape':code.replace('Key',''),windowsVirtualKeyCode:code==='Escape'?27:code==='KeyD'?68:0});
   if(up) await send('Input.dispatchKeyEvent',{type:'keyUp',code,key:code==='Escape'?'Escape':code.replace('Key',''),windowsVirtualKeyCode:code==='Escape'?27:code==='KeyD'?68:0});
 };
+const framePoint=async(selector,nx=.5,ny=.5)=>ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame,fb=f.getBoundingClientRect(),b=f.contentWindow.document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:fb.left+b.left+b.width*${nx},y:fb.top+b.top+b.height*${ny},w:b.width,h:b.height}})()`);
+const joystickTouch=async(x,y,hold=320)=>{
+  const c=await framePoint('#driveJoystick',.5,.5),radius=Math.min(c.w,c.h)*.42,id=7;
+  await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:c.x,y:c.y,id,radiusX:8,radiusY:8,force:1}]});
+  await sleep(40);
+  await send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:c.x+x*radius,y:c.y-y*radius,id,radiusX:8,radiusY:8,force:1}]});
+  if(hold)await sleep(hold);
+  return{center:c,radius,id};
+};
+const joystickRelease=async()=>send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+
 
 await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
-await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html`});
+await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
+await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html?touchtest=1`});
 
 let ready=false;
 for(let i=0;i<120&&!ready;i++){await sleep(500);ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`)}
 if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 
-const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen');return{ready:m.ready,embed:new URL(m.frame.src).searchParams.get('embed'),ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
-if(boot.embed!=='1'||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
+const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),u=new URL(m.frame.src);return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
+if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
 for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Error(`missing building ${id}`);
 for(let i=0;i<100;i++){
   const loaded=await ev(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ASSET_STATE;return s.car!=='pending'&&s.transit.bus!=='pending'&&s.transit.schoolBus!=='pending'})()`);
@@ -170,6 +182,12 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
+/* Make the close/front/rear/far artifact set explicitly daylight rather than
+ * inheriting whatever the wall clock happens to be during CI. */
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+await sleep(650);
+const dayState=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night`);
+if(dayState>.22)throw new Error('daylight visual pass did not reach day state: '+dayState);
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
@@ -182,6 +200,12 @@ await frameVehicle('schoolBus',[-11,4.4,7.5],'transit-schoolbus-close');
 await frameVehicle('schoolBus',[-9,2.6,0],'transit-schoolbus-front');
 await frameVehicle('schoolBus',[9,2.6,0],'transit-schoolbus-rear');
 await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-far');
+/* Dusk pass catches distance/post-processing artifacts that can be invisible
+ * in full day or full night. */
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='1160';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+await sleep(650);
+await frameVehicle('bus',[-38,20,24],'transit-bus-sunset-far');
+await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-sunset-far');
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;d.__qaVisibility=null;}for(const v of d.transit.vehicles){v.speed=v.key==='bus'?10.5:8.5;v.stopTimer=0;}return true})()`);
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
@@ -240,19 +264,77 @@ await sleep(600);
 let fullscreenState=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.__DAVIS_TWIN_DEBUG__.camera.aspect,expected:f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientWidth/f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientHeight,calls:f.__DAVIS_TWIN_DEBUG__.renderer.info.render.calls}})()`);
 if(!fullscreenState.host||!fullscreenState.twin||fullscreenState.label!=='Exit fullscreen'||Math.abs(fullscreenState.aspect-fullscreenState.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fullscreenState)}`);
 console.log('FULLSCREEN ENTER',JSON.stringify(fullscreenState));
+const mobileFsUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return{touch:d.isTouchDriveDevice,activateHidden:a.hidden,joystickHidden:j.hidden,activateRect:a.getBoundingClientRect().toJSON()}})()`);
+if(!mobileFsUi.touch||mobileFsUi.activateHidden||!mobileFsUi.joystickHidden||mobileFsUi.activateRect.width<44||mobileFsUi.activateRect.height<44)throw new Error('mobile fullscreen Drive affordance failed: '+JSON.stringify(mobileFsUi));
+console.log('MOBILE FULLSCREEN ACTIVATE UI',JSON.stringify(mobileFsUi));
+await screenshot('mobile-drive-activation');
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(500);
 fullscreenState=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
 if(fullscreenState.host||fullscreenState.label!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
-console.log('FULLSCREEN EXIT BUTTON',JSON.stringify(fullscreenState));
+const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch}})()`);
+if(!mobileAfterExit.activateHidden||!mobileAfterExit.joystickHidden||mobileAfterExit.touch.active||mobileAfterExit.touch.x||mobileAfterExit.touch.y)throw new Error('mobile controls did not clean up on fullscreen exit: '+JSON.stringify(mobileAfterExit));
+console.log('FULLSCREEN EXIT BUTTON',JSON.stringify({...fullscreenState,mobileAfterExit}));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(400);
-await key('KeyD');
-await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.on&&!!d.drive.packedCar})()`,12000,150);
-let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
-if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify({drive,errors})}`);
+const mobileBeforeDrive=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden}})()`);
+if(mobileBeforeDrive.activateHidden||!mobileBeforeDrive.joystickHidden)throw new Error('mobile activation control missing before Drive: '+JSON.stringify(mobileBeforeDrive));
+await clickSelectorInFrame('#mobileDriveActivate');
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.on&&!!d.drive.packedCar&&d.drive.npcPhysics.ready})()`,16000,150);
+const mobileDriveUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,j=f.document.querySelector('#driveJoystick'),a=f.document.querySelector('#mobileDriveActivate'),r=j.getBoundingClientRect();return{activateHidden:a.hidden,joystickHidden:j.hidden,size:[r.width,r.height],opacity:getComputedStyle(j).opacity}})()`);
+if(!mobileDriveUi.activateHidden||mobileDriveUi.joystickHidden||mobileDriveUi.size[0]<88||mobileDriveUi.size[0]>155)throw new Error('mobile joystick visibility/size failed: '+JSON.stringify(mobileDriveUi));
+console.log('MOBILE DRIVE ACTIVATED',JSON.stringify(mobileDriveUi));
+
+const touchMove=await joystickTouch(.48,.84,520);
+const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer}})()`);
+if(!touchState.touch.active||touchState.input.source!=='touch'||touchState.input.throttle<.55||touchState.input.turn>-.15||touchState.speed<.15||touchState.steer>-.02)throw new Error('joystick did not drive/steer responsively: '+JSON.stringify(touchState));
+const multiTouch=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,j=f.document.querySelector('#driveJoystick'),r=j.getBoundingClientRect(),before={...d.drive.touch};j.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.right-5,clientY:r.bottom-5}));j.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:99,pointerType:'touch',clientX:r.left+5,clientY:r.top+5}));return{before,after:{...d.drive.touch}}})()`);
+if(multiTouch.after.pointerId!==multiTouch.before.pointerId||Math.abs(multiTouch.after.x-multiTouch.before.x)>.001||Math.abs(multiTouch.after.y-multiTouch.before.y)>.001)throw new Error('second touch stole joystick control: '+JSON.stringify(multiTouch));
+await screenshot('mobile-drive-joystick-active');
+await joystickRelease();await sleep(120);
+const touchReleased=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,t=d.drive.touch,thumb=f.document.querySelector('#driveJoystickThumb');return{active:t.active,x:t.x,y:t.y,pointer:t.pointerId,thumb:thumb.style.transform}})()`);
+if(touchReleased.active||touchReleased.pointer!==null||Math.abs(touchReleased.x)>.001||Math.abs(touchReleased.y)>.001||!touchReleased.thumb.includes('-50%'))throw new Error('joystick release left stuck input: '+JSON.stringify(touchReleased));
+await joystickTouch(-.65,.15,60);await send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await sleep(80);
+const touchCancelled=await ev(`(()=>{const t=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.touch;return{active:t.active,x:t.x,y:t.y,pointer:t.pointerId}})()`);
+if(touchCancelled.active||touchCancelled.pointer!==null||touchCancelled.x||touchCancelled.y)throw new Error('pointer cancellation left stuck joystick input: '+JSON.stringify(touchCancelled));
+await joystickTouch(.2,.7,50);await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.dispatchEvent(new Event('resize'))`);await sleep(80);
+const resizeReset=await ev(`(()=>{const t=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.touch;return{active:t.active,x:t.x,y:t.y,pointer:t.pointerId}})()`);
+await send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+if(resizeReset.active||resizeReset.pointer!==null||resizeReset.x||resizeReset.y)throw new Error('resize/orientation cleanup failed: '+JSON.stringify(resizeReset));
+console.log('MOBILE JOYSTICK INPUT/CLEANUP',JSON.stringify({touchState,touchReleased,touchCancelled,resizeReset}));
+let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar,npcBodies:d.drive.npcPhysics.bodies.length,npcCreated:d.drive.npcPhysics.created}})()`);
+if(!drive.on||!drive.fs||!drive.packed||drive.npcBodies<14||drive.npcCreated!==drive.npcBodies)throw new Error(`fullscreen Drive/NPC physics failed: ${JSON.stringify({drive,errors})}`);
+const playerCollider=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{visual:d.drive.nativeVisualSize,collider:d.drive.colliderSize}})()`);
+if(!playerCollider.visual||!playerCollider.collider||Math.abs(playerCollider.collider.width/playerCollider.visual[0]-.92)>.08||Math.abs(playerCollider.collider.length/playerCollider.visual[2]-.92)>.08)throw new Error('player collider is stale or mismatched to the native car: '+JSON.stringify(playerCollider));
+console.log('PLAYER COLLIDER FROM NATIVE MODEL',JSON.stringify(playerCollider));
+const npcColliders=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.npcPhysics.bodies.map(a=>({kind:a.kind,size:a.size,halfWidth:a.halfWidth,halfLength:a.halfLength,finite:[a.body.translation().x,a.body.translation().y,a.body.translation().z,a.body.linvel().x,a.body.linvel().y,a.body.linvel().z].every(Number.isFinite)}))})()`);
+if(npcColliders.length<14||npcColliders.some(a=>!a.finite||a.halfWidth<.6||a.halfLength<1.5||a.halfLength<a.halfWidth))throw new Error('NPC colliders do not match vehicle footprints: '+JSON.stringify(npcColliders));
+console.log('NPC PHYSICS COLLIDERS',JSON.stringify(npcColliders));
+/* Predictive NPC avoidance: a player directly in the lane must produce
+ * braking/avoidance, while the same player well beside the lane must not. */
+const npcScenario=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[0].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;d.__qaPlayer={p:b.translation(),r:b.rotation(),v:b.linvel(),w:b.angvel()};d.__qaNpc={p:ai.body.translation(),r:ai.body.rotation(),v:ai.body.linvel(),base:ai.baseSpeed};b.setTranslation({x:p.x+rf.fx*10,y:1.2,z:p.z+rf.fz*10},true);b.setLinvel({x:0,y:0,z:0},true);b.setAngvel({x:0,y:0,z:0},true);ai.body.setLinvel({x:rf.fx*ai.baseSpeed,y:0,z:rf.fz*ai.baseSpeed},true);return{base:ai.baseSpeed,rf,p:[p.x,p.y,p.z]}})()`);
+await sleep(650);
+const avoidState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[0].physics,v=ai.body.linvel(),p=ai.body.translation(),rf=d.routeFrame(ai);d.camera.position.set(p.x-rf.fx*13+rf.rx*9,p.y+6,p.z-rf.fz*13+rf.rz*9);d.controls.target.set(p.x,p.y+1,p.z);d.controls.update();return{urgency:ai.urgency,target:ai.targetSpeed,base:ai.baseSpeed,side:ai.avoidSide,offset:ai.targetOffset,speed:Math.hypot(v.x,v.z)}})()`);
+if(avoidState.urgency<.18||avoidState.target>=avoidState.base*.92)throw new Error('NPC failed predictive braking/avoidance for player in lane: '+JSON.stringify(avoidState));
+await screenshot('npc-predictive-avoidance');
+
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[0].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;b.setTranslation({x:p.x+rf.fx*7+rf.rx*10,y:1.2,z:p.z+rf.fz*7+rf.rz*10},true);b.setLinvel({x:0,y:0,z:0},true);return true})()`);await sleep(1250);
+const sideSafe=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[0].physics;return{urgency:ai.urgency,target:ai.targetSpeed,base:ai.baseSpeed,offset:ai.targetOffset}})()`);
+if(sideSafe.urgency>.08||sideSafe.target<sideSafe.base*.7)throw new Error('NPC swerved/braked for a player safely beside the road: '+JSON.stringify(sideSafe));
+console.log('NPC TRAJECTORY AVOIDANCE',JSON.stringify({avoidState,sideSafe}));
+
+/* High-speed contact uses Rapier CCD on both bodies. Hold one NPC stationary,
+ * send the player into it, and require finite state + transferred momentum. */
+const collisionSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[1].physics,rf=d.routeFrame(ai),p=ai.body.translation(),b=d.drive.body;d.__qaCollisionBase=ai.baseSpeed;ai.baseSpeed=0;ai.targetSpeed=0;ai.body.setLinvel({x:0,y:0,z:0},true);ai.body.setAngvel({x:0,y:0,z:0},true);const gap=ai.halfLength+(d.drive.colliderSize?.length*.5||d.TRAFFIC_AI.playerHalfLength)+.45;/* Put both chassis on the same physics ground plane. The player collider is offset upward from its rigid-body origin; y=1.2 would suspend it above the NPC collider and test visual overlap instead of physical contact. */b.setTranslation({x:p.x-rf.fx*gap,y:p.y,z:p.z-rf.fz*gap},true);b.setRotation({x:0,y:Math.sin(Math.atan2(rf.fx,rf.fz)/2),z:0,w:Math.cos(Math.atan2(rf.fx,rf.fz)/2)},true);b.setLinvel({x:rf.fx*25,y:0,z:rf.fz*25},true);b.setAngvel({x:0,y:0,z:0},true);return{gap,base:d.__qaCollisionBase,y:p.y}})()`);
+await sleep(700);
+const collisionState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,ai=d.traffic.cars[1].physics,p=ai.body.translation(),pv=d.drive.body.translation(),v=ai.body.linvel(),dv=d.drive.body.linvel(),vals=[p.x,p.y,p.z,pv.x,pv.y,pv.z,v.x,v.y,v.z,dv.x,dv.y,dv.z];return{finite:vals.every(Number.isFinite),npcSpeed:Math.hypot(v.x,v.z),playerSpeed:Math.hypot(dv.x,dv.z),separation:Math.hypot(p.x-pv.x,p.z-pv.z),recoveries:d.drive.npcPhysics.recoveries}})()`);
+if(!collisionState.finite||collisionState.npcSpeed<.25||collisionState.separation<1.5||collisionState.playerSpeed>40)throw new Error('high-speed player/NPC collision was unstable or transferred no momentum: '+JSON.stringify(collisionState));
+await screenshot('npc-player-collision');
+console.log('NPC COLLISION RESPONSE',JSON.stringify({collisionSetup,collisionState}));
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,a=d.traffic.cars[1].physics;a.baseSpeed=d.__qaCollisionBase;d.resetNpcPhysicsFromRoutes();const q=d.__qaPlayer,b=d.drive.body;if(q){b.setTranslation(q.p,true);b.setRotation(q.r,true);b.setLinvel(q.v,true);b.setAngvel(q.w,true);}return true})()`);await sleep(160);
+
 const driveLightRig=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=d.drive.lightRig;return{
   head:r?.headAnchors?.map((p,i)=>({anchor:[p.x,p.y,p.z],light:[r.headLights[i]?.position.x,r.headLights[i]?.position.y,r.headLights[i]?.position.z]})),
   tail:r?.tailAnchors?.map((p,i)=>({anchor:[p.x,p.y,p.z],light:[r.tailLights[i]?.position.x,r.tailLights[i]?.position.y,r.tailLights[i]?.position.z]})),
@@ -319,7 +401,9 @@ await key('Escape');
 await sleep(900);
 const afterEsc=await ev(`(()=>({fs:!!document.fullscreenElement,drive:window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on}))()`);
 if(afterEsc.fs||afterEsc.drive)throw new Error(`Escape did not leave a non-driving non-fullscreen state: ${JSON.stringify(afterEsc)}`);
-console.log('ESCAPE EXIT',JSON.stringify(afterEsc));
+const mobileAfterEscape=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:{...d.drive.touch},npcCreated:d.drive.npcPhysics.created,npcBodies:d.drive.npcPhysics.bodies.length}})()`);
+if(!mobileAfterEscape.activateHidden||!mobileAfterEscape.joystickHidden||mobileAfterEscape.touch.active||mobileAfterEscape.npcCreated!==mobileAfterEscape.npcBodies)throw new Error('Drive cleanup/physics reuse failed: '+JSON.stringify(mobileAfterEscape));
+console.log('ESCAPE EXIT',JSON.stringify({afterEsc,mobileAfterEscape}));
 
 await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
 await sleep(300);
@@ -369,6 +453,9 @@ const afterManual=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DA
 if(afterManual>=beforeManual*.65&&afterManual>.18)throw new Error(`manual input did not suppress cinematic idle: ${beforeManual}->${afterManual}`);
 console.log('CINEMATIC MANUAL OVERRIDE',JSON.stringify({before:beforeManual,after:afterManual}));
 
+const finalPhysics=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{created:d.drive.npcPhysics.created,bodies:d.drive.npcPhysics.bodies.length,recoveries:d.drive.npcPhysics.recoveries,finite:d.drive.npcPhysics.bodies.every(a=>{const p=a.body.translation(),v=a.body.linvel();return[p.x,p.y,p.z,v.x,v.y,v.z].every(Number.isFinite)})}})()`);
+if(finalPhysics.created!==finalPhysics.bodies||finalPhysics.bodies<14||!finalPhysics.finite)throw new Error('NPC physics leaked/duplicated or became non-finite: '+JSON.stringify(finalPhysics));
+console.log('NPC PHYSICS LIFECYCLE',JSON.stringify(finalPhysics));
 if(errors.length)throw new Error(`browser console errors: ${errors.slice(0,5).join(' | ')}`);
 console.log('NO CONSOLE ERRORS');
 
