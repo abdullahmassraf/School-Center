@@ -140,8 +140,9 @@ const clickSelector=async selector=>{
 };
 const key=async(code,up=true)=>{
   await ev('window.__SC_CAMPUS_MAP_3D__.frame.focus()');
-  await send('Input.dispatchKeyEvent',{type:'keyDown',code,key:code,key:code==='Escape'?'Escape':code.replace('Key',''),windowsVirtualKeyCode:code==='Escape'?27:code==='KeyD'?68:0});
-  if(up) await send('Input.dispatchKeyEvent',{type:'keyUp',code,key:code==='Escape'?'Escape':code.replace('Key',''),windowsVirtualKeyCode:code==='Escape'?27:code==='KeyD'?68:0});
+  const keyName=code==='Escape'?'Escape':code.replace('Key',''),vk=code==='Escape'?27:code==='Tab'?9:code==='KeyD'?68:0;
+  await send('Input.dispatchKeyEvent',{type:'keyDown',code,key:keyName,windowsVirtualKeyCode:vk});
+  if(up) await send('Input.dispatchKeyEvent',{type:'keyUp',code,key:keyName,windowsVirtualKeyCode:vk});
 };
 const framePoint=async(selector,nx=.5,ny=.5)=>ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame,fb=f.getBoundingClientRect(),b=f.contentWindow.document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:fb.left+b.left+b.width*${nx},y:fb.top+b.top+b.height*${ny},w:b.width,h:b.height}})()`);
 const joystickTouch=async(x,y,hold=320)=>{
@@ -321,6 +322,10 @@ if(shadowGesture.during.builds!==0||!shadowGesture.during.deferred)throw new Err
 if(shadowGesture.settled.builds!==1||shadowGesture.settled.deferred)throw new Error('shadow map was not refreshed exactly once after the gesture settled: '+JSON.stringify(shadowGesture));
 console.log('CAMERA SHADOW DEFERRAL',JSON.stringify(shadowGesture));
 
+const envGesture=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,e=f.document.querySelector('#timeRange'),saved=e.value;d.PERF.envBuilds=0;e.value=String((+saved+17)%1440);e.dispatchEvent(new Event('input',{bubbles:true}));d.updateEnv.last=0;d.interaction.controlsActive=true;d.interaction.lastInput=performance.now();d.updateEnv(0);const during=d.PERF.envBuilds;d.interaction.controlsActive=false;d.interaction.lastInput=performance.now()-1000;d.updateEnv.last=0;d.updateEnv(0);const settled=d.PERF.envBuilds;e.value=saved;e.dispatchEvent(new Event('input',{bubbles:true}));d.updateEnv.last=0;d.updateEnv(0);return{during,settled,final:d.PERF.envBuilds}})()`);
+if(envGesture.during!==0||envGesture.settled!==1)throw new Error('mobile PMREM was not deferred during camera motion and flushed once at rest: '+JSON.stringify(envGesture));
+console.log('CAMERA ENVIRONMENT DEFERRAL',JSON.stringify(envGesture));
+
 const closeLod=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.updateViewTrafficLod(true);const roots=d.traffic.set.roots,pc=d.traffic.parkedCount;return{visible:roots.slice(0,pc).filter(r=>r.visible).length,total:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length}})()`);
 if(closeLod.visible>=closeLod.total*.85)throw new Error('a close camera view did not cull distant parked cars: '+JSON.stringify(closeLod));
 if(closeLod.frozen!==closeLod.total)throw new Error('parked transform freeze regressed: '+JSON.stringify(closeLod));
@@ -425,6 +430,17 @@ const resetInFullscreen=await ev(`(()=>({fs:!!document.fullscreenElement,focusId
 if(!resetInFullscreen.fs||resetInFullscreen.focusId!==null||resetInFullscreen.pressed!=='true')throw new Error('reset inside fullscreen broke the fullscreen state: '+JSON.stringify(resetInFullscreen));
 console.log('RESET INSIDE FULLSCREEN',JSON.stringify(resetInFullscreen));
 console.log('FULLSCREEN ENTER',JSON.stringify(fullscreenState));
+
+/* The developer menu must work through the real embedded-host fullscreen path:
+ * trusted TAB opens/focuses it, while the normal embedded state keeps it inert. */
+await key('Tab');await sleep(100);
+const devPanelInFullscreen=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,p=f.document.querySelector('#panel'),cs=f.getComputedStyle(p);return{visible:cs.visibility==='visible',closed:p.classList.contains('closed'),gate:f.document.body.classList.contains('devPanelOpen'),inert:p.inert,aria:p.getAttribute('aria-hidden'),focused:p.contains(f.document.activeElement),focusId:f.document.activeElement?.id||null}})()`);
+if(!devPanelInFullscreen.visible||devPanelInFullscreen.closed||!devPanelInFullscreen.gate||devPanelInFullscreen.inert||devPanelInFullscreen.aria!=='false'||!devPanelInFullscreen.focused)throw new Error('embedded fullscreen TAB did not open the developer panel: '+JSON.stringify(devPanelInFullscreen));
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.panel(false)`);await sleep(60);
+const devPanelClosed=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,p=f.document.querySelector('#panel');return{closed:p.classList.contains('closed'),gate:f.document.body.classList.contains('devPanelOpen'),inert:p.inert,aria:p.getAttribute('aria-hidden'),focused:p.contains(f.document.activeElement)}})()`);
+if(!devPanelClosed.closed||devPanelClosed.gate||!devPanelClosed.inert||devPanelClosed.aria!=='true'||devPanelClosed.focused)throw new Error('developer panel cleanup failed inside fullscreen: '+JSON.stringify(devPanelClosed));
+console.log('EMBEDDED DEV PANEL GATE',JSON.stringify({devPanelInFullscreen,devPanelClosed}));
+
 /* The host notifies the twin of fullscreen through postMessage, and a software
  * rendered frame can take ~500 ms, so the message may sit behind a frame in the
  * task queue. Wait for the state rather than racing it with a fixed sleep. */
@@ -439,8 +455,9 @@ await sleep(500);
 fullscreenState=await ev(`(()=>{const b=document.querySelector('.cm3d-fullscreen');return{host:!!document.fullscreenElement,label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),title:b?.getAttribute('title'),overflow:document.body.style.overflow}})()`);
 if(fullscreenState.host||fullscreenState.label!=='Toggle Fullscreen'||fullscreenState.pressed!=='false'||fullscreenState.title!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
 await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;const a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return a.hidden&&j.hidden})()`,6000,150);
-const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch}})()`);
+const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,p=f.document.querySelector('#panel');return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch,devPanel:{closed:p.classList.contains('closed'),gate:f.document.body.classList.contains('devPanelOpen'),inert:p.inert,aria:p.getAttribute('aria-hidden')}}})()`);
 if(!mobileAfterExit.activateHidden||!mobileAfterExit.joystickHidden||mobileAfterExit.touch.active||mobileAfterExit.touch.x||mobileAfterExit.touch.y)throw new Error('mobile controls did not clean up on fullscreen exit: '+JSON.stringify(mobileAfterExit));
+if(!mobileAfterExit.devPanel.closed||mobileAfterExit.devPanel.gate||!mobileAfterExit.devPanel.inert||mobileAfterExit.devPanel.aria!=='true')throw new Error('developer panel stayed reachable after fullscreen exit: '+JSON.stringify(mobileAfterExit));
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify({...fullscreenState,mobileAfterExit}));
 
 await clickSelector('.cm3d-fullscreen');
