@@ -170,7 +170,7 @@ const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').p
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
 const frameVehicle=async(key,offset,name)=>{
-  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3());d.camera.position.set(p.x+${offset[0]},p.y+${offset[1]},p.z+${offset[2]});d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray()}})()`);
+  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});d.AUTO.on=false;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3());d.camera.position.set(p.x+${offset[0]},p.y+${offset[1]},p.z+${offset[2]});d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(350);await screenshot(name);
 };
 await frameVehicle('bus',[12,4,9],'transit-bus-close');
@@ -211,8 +211,8 @@ if(activeDynamic>6)throw new Error('vehicle dynamic-light budget exceeded: '+JSO
 console.log('NIGHT VEHICLE LIGHTS',JSON.stringify({night:nightLights.night,activeDynamic}));
 
 const nearRig=async(kind)=>{
-  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"},p=r.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.set(p.x+5,p.y+3,p.z+5);d.controls.target.copy(p);d.controls.update();return true})()`);
-  await sleep(450);
+  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"},p=r.root.getWorldPosition(new d.THREE.Vector3());d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.camera.position.set(p.x+5,p.y+3,p.z+5);d.controls.target.copy(p);d.controls.update();d.refreshVehicleLightBudget();return true})()`);
+  await sleep(120);
   return ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"};return{head:r.headLights.map(l=>({i:l.intensity,v:l.visible})),tail:r.tailLights.map(l=>({i:l.intensity,v:l.visible}))}})()`);
 };
 const nearTraffic=await nearRig('traffic'),nearBus=await nearRig('bus');
