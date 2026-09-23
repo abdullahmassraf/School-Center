@@ -17,6 +17,11 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+env:
+  # run_attempt changes on a rerun while run_id does not, so this stays unique
+  # even when the same workflow run is retried.
+  PAGES_ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+
 jobs:
   test:
     name: Campus 3D regression
@@ -60,9 +65,12 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: ${{ env.PAGES_ARTIFACT_NAME }}
           path: '.'
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
 
