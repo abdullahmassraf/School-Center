@@ -334,7 +334,10 @@ async function loadObjModel(objUrl, mtlUrl, kind) {
     source.traverse(mesh => {
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      /* Do not receive the low-resolution shadow map on moving vehicles.
+       * Vehicle self-shadowing was producing intermittent rectangular black
+       * patches on bus/car faces as the camera moved or zoomed out. */
+      mesh.receiveShadow = false;
       mesh.frustumCulled = true;
       const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       list.forEach(material => {
@@ -355,6 +358,99 @@ async function loadObjModel(objUrl, mtlUrl, kind) {
   try { return await promise; } catch (error) { vehicleCache.delete(key); throw error; }
 }
 function cloneVehicleRoot(sourceRoot) { return sourceRoot.clone(true); }
+
+function materialGroupBoundsInRoot(root, predicate) {
+  const bounds = new THREE.Box3();
+  root.updateMatrixWorld(true);
+  const invRoot = root.matrixWorld.clone().invert();
+  const point = new V3();
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.geometry?.attributes?.position) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const geometry = mesh.geometry, position = geometry.attributes.position, index = geometry.index;
+    const groups = geometry.groups?.length
+      ? geometry.groups
+      : [{ start: 0, count: index ? index.count : position.count, materialIndex: 0 }];
+    const toRoot = invRoot.clone().multiply(mesh.matrixWorld);
+    for (const group of groups) {
+      const material = mats[group.materialIndex];
+      if (!material || !predicate(String(material.name || '').toLowerCase())) continue;
+      const end = group.start + group.count;
+      for (let i = group.start; i < end; i++) {
+        const vertex = index ? index.getX(i) : i;
+        point.fromBufferAttribute(position, vertex).applyMatrix4(toRoot);
+        bounds.expandByPoint(point);
+      }
+    }
+  });
+  return bounds.isEmpty() ? null : bounds;
+}
+
+function vehicleLampAnchors(root, kind) {
+  root.updateMatrixWorld(true);
+  const worldBox = new THREE.Box3().setFromObject(root), invRoot = root.matrixWorld.clone().invert();
+  const bodyMin = worldBox.min.clone().applyMatrix4(invRoot), bodyMax = worldBox.max.clone().applyMatrix4(invRoot);
+  const isCar = kind === 'car', axis = isCar ? 'z' : 'x', lateral = isCar ? 'x' : 'z';
+
+  const pair = (bounds, front) => {
+    const minA=bounds.min[axis], maxA=bounds.max[axis], spanA=Math.max(.08,maxA-minA);
+    const minL=bounds.min[lateral], maxL=bounds.max[lateral], spanL=Math.max(.08,maxL-minL);
+    const axial=front ? maxA-spanA*.02 : minA+spanA*.02, y=(bounds.min.y+bounds.max.y)*.5;
+    const left=(minL+maxL)*.5-spanL*.34, right=(minL+maxL)*.5+spanL*.34;
+    return [-1,1].map(side=>{const p=new V3();p[axis]=axial;p[lateral]=side<0?left:right;p.y=y;return p;});
+  };
+
+  if (isCar) {
+    const head=materialGroupBoundsInRoot(root,n=>/headlights?|headlight/.test(n));
+    const tail=materialGroupBoundsInRoot(root,n=>/taillights?|tail\s*lights?/.test(n));
+    return { head:pair(head||new THREE.Box3(bodyMin,bodyMax),true), tail:pair(tail||new THREE.Box3(bodyMin,bodyMax),false) };
+  }
+
+  const lights=materialGroupBoundsInRoot(root,n=>/lights?/.test(n))||new THREE.Box3(bodyMin,bodyMax);
+  const minA=lights.min[axis], maxA=lights.max[axis], spanA=Math.max(.08,maxA-minA);
+  const minL=lights.min[lateral], maxL=lights.max[lateral], spanL=Math.max(.08,maxL-minL);
+  const side=Math.min(.46,spanL*.34), y=(lights.min.y+lights.max.y)*.5;
+  const frontA=maxA-spanA*.02, rearA=minA+spanA*.02;
+  return {
+    head:[-1,1].map(sideSign=>{const p=new V3();p[axis]=frontA;p[lateral]=sideSign*side;p.y=y;return p;}),
+    tail:[-1,1].map(sideSign=>{const p=new V3();p[axis]=rearA;p[lateral]=sideSign*side;p.y=y;return p;})
+  };
+}
+
+function attachVehicleLightRig(root, kind, { player=false } = {}) {
+  const anchors=vehicleLampAnchors(root,kind), group=new THREE.Group();
+  group.name='VehicleLightRig'; root.add(group);
+  const headLights=[],tailLights=[],headMaterials=[],tailMaterials=[];
+  root.traverse(mesh=>{
+    if(!mesh.isMesh||!mesh.material)return;
+    const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+    mats.forEach(mat=>{
+      const n=String(mat?.name||'').toLowerCase();
+      if(kind==='car'){
+        if(/headlights?|headlight/.test(n))headMaterials.push(mat);
+        if(/taillights?|tail\s*lights?/.test(n))tailMaterials.push(mat);
+      }else if(/lights?/.test(n))headMaterials.push(mat);
+    });
+  });
+  anchors.head.forEach(pos=>{
+    const light=player
+      ? new THREE.SpotLight('#fff4cf',0,28,.30,.72,1.65)
+      : new THREE.PointLight('#fff4cf',0,kind==='car'?11:15,2);
+    light.position.copy(pos); light.castShadow=false; group.add(light);
+    if(player){
+      const target=new THREE.Object3D(); target.position.copy(pos); target[axisForVehicle(kind)] += 18; root.add(target);
+      light.target=target; light.userData.target=target;
+    }
+    headLights.push(light);
+  });
+  anchors.tail.forEach(pos=>{
+    const light=new THREE.PointLight('#ff2832',0,kind==='car'?7:9,2);
+    light.position.copy(pos); light.castShadow=false; group.add(light); tailLights.push(light);
+  });
+  const out={root,kind,player,headAnchors:anchors.head,tailAnchors:anchors.tail,headLights,tailLights,headMaterials:[...new Set(headMaterials)],tailMaterials:[...new Set(tailMaterials)]};
+  root.userData.vehicleLightRig=out; return out;
+}
+function axisForVehicle(kind){ return kind==='car'?'z':'x'; }
 function setAssetState(key, value, error) {
   if (key === 'bus' || key === 'schoolBus') ASSET_STATE.transit[key] = value;
   else ASSET_STATE[key] = value;
@@ -771,13 +867,13 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
   const roots = vehicles.map(vehicle => {
     const sourceRoot = sourceRoots[vehicle.modelIndex || 0] || sourceRoots[0];
     const root = cloneVehicleRoot(sourceRoot);
-    prepareVehicleInstance(root, { color: vehicle.col });
+    root.userData.vehicleMaterials = prepareVehicleInstance(root, { color: vehicle.col });
     root.userData.vehicleModel = vehicle.modelName || sourceRoot.name;
     root.userData.vehicleColor = vehicle.col || null;
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
-    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = true; } });
+    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
     scene.add(root);
     return root;
   });
@@ -833,6 +929,15 @@ async function buildCars() {
     const vehicles = parked.concat(moving);
     const set = makeVehicleInstanceSet(sources, vehicles);
     set.vehicles = vehicles;
+    moving.forEach((car, i) => {
+      const root=set.roots[parked.length+i];
+      if(!root)return;
+      const rig=attachVehicleLightRig(root,'car');
+      const styled=root.userData.vehicleMaterials;
+      rig.headMaterials=styled?.head||rig.headMaterials;
+      rig.tailMaterials=styled?.tail||rig.tailMaterials;
+      car.lightRig=rig;
+    });
     traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles, modelCount: sources.length, modelNames: CAMPUS_ASSETS.carVariants.map(([name]) => name) };
     if (drivePerf.active) setDriveVehicleShadowMode(false);
     setAssetState('car', 'loaded');
@@ -880,8 +985,10 @@ async function buildPublicTransport() {
       root.scale.multiplyScalar(spec.scale);
       const wheelRigs = fitNativeTransitWheels(root, spec.key === 'schoolBus' ? 'school-bus' : 'bus');
       root.userData.nativeWheelRigs = wheelRigs;
+      root.traverse(mesh => { if (mesh.isMesh) mesh.receiveShadow=false; });
+      const lightRig = attachVehicleLightRig(root, spec.key === 'schoolBus' ? 'school-bus' : 'bus');
       scene.add(root);
-      transit.vehicles.push({ root, wheelRigs, ...spec, stopTimer: 0, servedStop: false });
+      transit.vehicles.push({ root, wheelRigs, lightRig, ...spec, stopTimer: 0, servedStop: false });
       if (drivePerf.active) setDriveVehicleShadowMode(false);
       setAssetState(spec.key, 'loaded');
     });
@@ -1669,19 +1776,18 @@ async function initPhysics() {
     console.warn('[campus-assets] Drive model unavailable; using procedural car visual:', e);
   }
 
-  // v4: headlights are additive light-cone + ground-pool meshes.
-  drive.beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uI: { value: 0 }, uCol: { value: new Col('#ffe4b5') } },
-    vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv=uv; vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.); vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }',
-    fragmentShader: 'uniform float uI; uniform vec3 uCol; varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ float f=pow(abs(dot(normalize(vN),normalize(vV))),1.5); gl_FragColor=vec4(uCol*pow(vUv.y,1.4)*f*.5*uI,1.); }' });
-  for (const x of [-.64, .64]) { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.12, 3.4, 26, 20, 1, true).rotateX(Math.PI / 2).translate(0, 0, 13), drive.beamMat); cone.position.set(x, .8, 2.1); cone.frustumCulled = false; g.add(cone); }
-  drive.poolM = new THREE.MeshBasicMaterial({ map: ST.glow || (ST.glow = glowTex()), color: '#ffe0aa', blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
-  g.add(new THREE.Mesh(new THREE.PlaneGeometry(9, 24).rotateX(-Math.PI / 2).translate(0, .08, 13), drive.poolM));
-  // Fine illuminated dust/moisture motes inside the headlight cones.
-  { const n=110, rr=rng(7474), pos=new Float32Array(n*3), base=new Float32Array(n*3); for(let i=0;i<n;i++){const side=i%2?1:-1, z=3+rr()*25, spread=(Math.abs(z)+2)*.10, x=side*.64+(rr()-.5)*spread, y=.35+rr()*1.15+(rr()-.5)*.15;pos.set([x,y,z],i*3);base.set([x,y,z],i*3);}
-    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
-    const matp=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.28,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
-    const dust=new THREE.Points(geo,matp);dust.frustumCulled=false;dust.renderOrder=8;g.add(dust);drive.dust=dust;drive.dustBase=base;
+  /* Native Drive light rig: the beam origin is derived from the actual
+   * Headlights/TailLights material groups, not from procedural dimensions. */
+  if (!drive.packedCar) throw new Error('Drive packed car missing before light rig creation');
+  drive.lightRig = attachVehicleLightRig(drive.packedCar,'car',{player:true});
+  const dn=84,drr=rng(7474),dpos=new Float32Array(dn*3);
+  for(let i=0;i<dn;i++){
+    const anchor=drive.lightRig.headAnchors[i<dn/2?0:1],j=i*3,t=(drr()*.9+.1)*18;
+    dpos[j]=anchor.x+(drr()-.5)*.26; dpos[j+1]=anchor.y+(drr()-.5)*.24; dpos[j+2]=anchor.z+t;
   }
+  const dgeo=new THREE.BufferGeometry(); dgeo.setAttribute('position',new THREE.BufferAttribute(dpos,3));
+  const dmat=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.18,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+  drive.dust=new THREE.Points(dgeo,dmat); drive.dust.frustumCulled=false; drive.dust.renderOrder=8; drive.lightRig.root.add(drive.dust);
   drive.wheels = [[-1, -1.35], [1, -1.35], [-1, 1.35], [1, 1.35]].map(([sx, z]) => { const wh = P(new THREE.CylinderGeometry(.44, .44, .34, 16).rotateZ(Math.PI / 2), tm, sx * .98, .44, z, 'wheel'); return wh; });
   if (drive.packedCar) drive.wheels.forEach(wheel => wheel.visible = false);
 
@@ -1802,15 +1908,25 @@ async function toggleDrive() {
   bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
 }
 function updateVehicleLighting(dt,now) {
-  if (!drive.car || !drive.car.visible) return;
-  const night=sstep(.08,.72,ST.night), haze=clamp(W.fog*.8+W.rain*.42+W.snow*.18,0,1);
-  if(drive.headLampMat)drive.headLampMat.emissiveIntensity=night*5.2; if(drive.tailLampMat)drive.tailLampMat.emissiveIntensity=night*4.4;
-  drive.packHeadMats?.forEach(m => m.emissiveIntensity = night * 5.2);
-  drive.packTailMats?.forEach(m => m.emissiveIntensity = night * 4.4);
-  if(drive.beamMat)drive.beamMat.uniforms.uI.value=night*(.7+.8*haze); if(drive.poolM)drive.poolM.opacity=night*.6;
-  if (drive.dust) {
-    drive.dust.material.opacity=night*(.13+.42*haze); if(night<.02) return; const a=drive.dust.geometry.attributes.position, base=drive.dustBase;
-    for(let i=0;i<a.count;i++){const z0=base[i*3+2], phase=(now*.00036+i*.037)%1, z=3+(((z0-3)+phase*6)%25);a.setXYZ(i,base[i*3]+Math.sin(now*.0017+i)*.025,base[i*3+1]+Math.sin(now*.0021+i*.7)*.035,z);}
+  const night=sstep(.10,.52,ST.night);
+  const applyRig=rig=>{
+    if(!rig)return;
+    rig.headMaterials?.forEach(m=>{if(m?.emissiveIntensity!==undefined)m.emissiveIntensity=night*5.2;});
+    rig.tailMaterials?.forEach(m=>{if(m?.emissiveIntensity!==undefined)m.emissiveIntensity=night*4.5;});
+    rig.headLights?.forEach(l=>{l.intensity=night*(rig.player?3.2:(rig.kind==='car'?1.0:1.8));});
+    rig.tailLights?.forEach(l=>{l.intensity=night*(rig.player?.85:.55);});
+  };
+  applyRig(drive.lightRig);
+  (traffic?.cars||[]).forEach(car=>applyRig(car.lightRig));
+  (transit?.vehicles||[]).forEach(vehicle=>applyRig(vehicle.lightRig));
+  if(drive.dust){
+    drive.dust.material.opacity=night*.30;
+    const a=drive.dust.geometry.attributes.position;
+    for(let i=0;i<a.count;i++){
+      const anchor=drive.lightRig?.headAnchors[i<a.count/2?0:1]; if(!anchor)continue;
+      const j=i*3,phase=(now*.0009+i*.71)%1;
+      a.setXYZ(i,anchor.x+Math.sin(now*.0017+i)*.03,anchor.y+Math.sin(now*.0021+i*.7)*.05,anchor.z+phase*18);
+    }
     a.needsUpdate=true;
   }
 }
