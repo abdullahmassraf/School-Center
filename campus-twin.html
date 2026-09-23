@@ -2315,6 +2315,7 @@ async function initPhysics() {
   drive.packedCar.updateMatrixWorld(true);
   const playerSize=new THREE.Box3().setFromObject(drive.packedCar).getSize(new V3());
   const playerHalfX=clamp(playerSize.x*.46,.72,1.20),playerHalfZ=clamp(playerSize.z*.46,1.55,2.45),playerHalfY=clamp(playerSize.y*.38,.38,.72);
+  drive.nativeVisualSize=playerSize.toArray();
   drive.colliderSize={width:playerHalfX*2,height:playerHalfY*2,length:playerHalfZ*2};
   drive.collider=w.createCollider(RAP.ColliderDesc.cuboid(playerHalfX,playerHalfY,playerHalfZ).setTranslation(0,playerHalfY,0).setMass(1180).setFriction(.72).setRestitution(.04),drive.body);
   // physical props: cones, crates, balls
