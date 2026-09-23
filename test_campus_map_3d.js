@@ -120,6 +120,10 @@ const joystickRelease=async()=>send('Input.dispatchTouchEvent',{type:'touchEnd',
 
 await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
 await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
+/* Exercise the mobile renderer at a real high-density display ratio. The CSS
+ * viewport stays unchanged so the rest of the interaction suite is stable,
+ * while devicePixelRatio=2 verifies that scene DPR is no longer pinned to 1. */
+await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:2,mobile:false});
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html?touchtest=1`});
 
 let ready=false;
@@ -183,7 +187,7 @@ const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').p
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
 const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{profile:d.mobileProfile,qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.FX.dof,bloom:d.FX.bloom,touch:d.isTouchDriveDevice}})()`);
-if(!postBudget.touch||!postBudget.profile||postBudget.qualityDpr<1.3||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
+if(!postBudget.touch||!postBudget.profile||postBudget.deviceDpr<1.9||postBudget.qualityDpr<1.3||postBudget.pr<1.29||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
 console.log('MOBILE SHARP POST BUDGET',JSON.stringify(postBudget));
 /* Make the close/front/rear/far artifact set explicitly daylight rather than
  * inheriting whatever the wall clock happens to be during CI. */
