@@ -33,7 +33,10 @@
     --glass:rgba(13,15,34,.62);
     --line:rgba(255,255,255,.09);
     --safe-t:env(safe-area-inset-top,0px);
+    --safe-r:env(safe-area-inset-right,0px);
     --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-l:env(safe-area-inset-left,0px);
+    --joy-size:clamp(88px,17vmin,132px);
   }
   *{box-sizing:border-box}
   [hidden]{display:none!important}
@@ -98,6 +101,55 @@
   #compass span{position:absolute;top:2px;left:50%;transform:translateX(-50%);color:#ff6b7a;font-size:10px}
   #hint{right:14px;bottom:calc(20px + var(--safe-b));font-size:11.5px;color:var(--ink-dim);text-align:right;pointer-events:none;text-shadow:0 1px 8px #000}
   #perf{left:14px;top:calc(76px + var(--safe-t));font:11px ui-monospace,Menlo,monospace;color:#9fffc4;background:rgba(0,0,0,.55);padding:6px 8px;border-radius:8px;white-space:pre}
+
+  /* Mobile/tablet Drive controls. The visible affordance is intentionally
+     quiet; the physical hit target remains comfortably thumb-sized. */
+  #mobileDriveActivate{
+    position:absolute;z-index:8;left:calc(12px + var(--safe-l));bottom:calc(12px + var(--safe-b));
+    width:54px;height:54px;border:0;padding:0;background:transparent;color:var(--accent);
+    display:grid;place-items:center;touch-action:manipulation;cursor:pointer;opacity:.42;
+    transition:opacity .18s ease,transform .18s ease;filter:drop-shadow(0 0 8px color-mix(in srgb,var(--accent) 28%,transparent));
+  }
+  #mobileDriveActivate::before{
+    content:"";width:22px;height:22px;border-radius:7px;border:1px solid color-mix(in srgb,var(--accent) 54%,rgba(255,255,255,.18));
+    background:color-mix(in srgb,var(--accent) 9%,rgba(7,9,20,.34));box-shadow:inset 0 0 0 1px rgba(255,255,255,.035);
+  }
+  #mobileDriveActivate::after{
+    content:"";position:absolute;width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--accent) 72%,white);
+    opacity:.58;
+  }
+  #mobileDriveActivate:active{opacity:.78;transform:scale(.96)}
+  #mobileDriveActivate:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 72%,white);outline-offset:-7px;border-radius:16px}
+
+  #driveJoystick{
+    position:absolute;z-index:8;left:calc(14px + var(--safe-l));bottom:calc(14px + var(--safe-b));
+    width:var(--joy-size);height:var(--joy-size);border-radius:50%;touch-action:none;user-select:none;-webkit-user-select:none;
+    opacity:.115;transition:opacity .16s ease,filter .16s ease;filter:none;
+    border:1px solid color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.08));
+    background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--accent) 5%,transparent) 0 52%,rgba(7,9,20,.035) 53% 100%);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);contain:layout paint;
+  }
+  #driveJoystick.active{
+    opacity:.58;filter:drop-shadow(0 0 9px color-mix(in srgb,var(--accent) 34%,transparent));
+    border-color:color-mix(in srgb,var(--accent) 64%,rgba(255,255,255,.12));
+  }
+  #driveJoystickThumb{
+    position:absolute;left:50%;top:50%;width:34%;height:34%;border-radius:50%;
+    transform:translate3d(-50%,-50%,0);will-change:transform;pointer-events:none;
+    border:1px solid color-mix(in srgb,var(--accent) 58%,rgba(255,255,255,.18));
+    background:color-mix(in srgb,var(--accent) 11%,rgba(12,15,31,.5));
+    box-shadow:0 0 7px color-mix(in srgb,var(--accent) 18%,transparent);
+    transition:box-shadow .14s ease,background .14s ease;
+  }
+  #driveJoystick.active #driveJoystickThumb{
+    background:color-mix(in srgb,var(--accent) 18%,rgba(12,15,31,.62));
+    box-shadow:0 0 10px color-mix(in srgb,var(--accent) 38%,transparent);
+  }
+  @media (min-width:700px) and (pointer:coarse){
+    :root{--joy-size:clamp(112px,14vmin,154px)}
+    #driveJoystick{left:calc(20px + var(--safe-l));bottom:calc(20px + var(--safe-b))}
+    #mobileDriveActivate{left:calc(18px + var(--safe-l));bottom:calc(18px + var(--safe-b));width:60px;height:60px}
+  }
 
   /* loader / fatal */
   #loader,#fatal{position:absolute;inset:0;z-index:20;display:grid;place-content:center;justify-items:center;gap:16px;background:radial-gradient(1200px 700px at 50% 40%,#151a3a,#070914);transition:opacity .7s .1s}
@@ -207,6 +259,10 @@
   <nav id="dock" class="hud glass" aria-label="Buildings"></nav>
   <div id="hint" class="hud">Drag to orbit · Right-drag to pan · Scroll to zoom</div>
   <div id="perf" class="hud" hidden></div>
+  <button id="mobileDriveActivate" type="button" aria-label="Start driving" title="Start driving" hidden></button>
+  <div id="driveJoystick" role="application" aria-label="Driving joystick" hidden>
+    <div id="driveJoystickThumb" aria-hidden="true"></div>
+  </div>
 
   <div id="loader"><div class="spin"></div><p id="loadMsg">Preparing campus…</p><div class="bar"><i id="loadBar"></i></div></div>
   <div id="fatal" hidden><h2 id="fatalTitle">Couldn't start the 3D view</h2><p id="fatalMsg"></p></div>
@@ -665,6 +721,9 @@ const clockFmt = new Intl.DateTimeFormat('en-CA', { timeZone: CAMPUS.tz, weekday
 /* ═══════════ 2 · RENDERER · POST · CAMERA ═══════════ */
 const fatal = (t, m) => { const f = $('fatal'); $('fatalTitle').textContent = t; $('fatalMsg').textContent = m; f.hidden = false; $('loader').hidden = true; };
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (matchMedia('(pointer:coarse)').matches && innerWidth < 900);
+const TOUCH_DRIVE_TEST = DEBUG && Q.has('touchtest');
+const coarseNoHover = matchMedia?.('(hover:none) and (pointer:coarse)').matches === true;
+const isTouchDriveDevice = TOUCH_DRIVE_TEST || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && coarseNoHover);
 const weak = isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 3) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
 // v4 budget: one scene pass + a handful of tiny half/eighth-res passes. No MSAA, no AO pass, no second depth render, no dynamic spot lights.
 const TIERS = {
@@ -1706,7 +1765,15 @@ function updateHover() {
 }
 function hover(id) { if (ST.hover && ST.hover !== ST.sel) Tw.to(BG[ST.hover].edgeMat, { opacity: 0, duration: .3 }); ST.hover = id; if (id && id !== ST.sel) Tw.to(BG[id].edgeMat, { opacity: .55, duration: .25 }); $('scene').classList.toggle('hover', !!id); }
 /* ═══════════ 9 · PHYSICS · DRIVE MODE (Rapier) ═══════════ */
-const drive = { on: false, R: null, world: null, body: null, car: null, packedCar: null, wheels: [], props: [], keys: {}, acc: 0, fixedStep: 1 / 60, steer: 0, physicsPrevPos: new V3(), physicsCurrPos: new V3(), physicsPrevQuat: new THREE.Quaternion(), physicsCurrQuat: new THREE.Quaternion(), renderPos: new V3(), renderQuat: new THREE.Quaternion(), cam: new V3(), q: new THREE.Quaternion(), fwd: new V3(), m: new THREE.Matrix4(), sc: new V3(1, 1, 1), lights: [], beams: [], tailGlow: [], dust: null, dustBase: null, headLampMat: null, tailLampMat: null, packHeadMats: [], packTailMats: [], packBodyMats: [], objWheels: [], anchor: new V3(), prevAnchor: new V3(), orbitReady: false, initPromise: null };
+const drive = {
+  on:false,R:null,world:null,body:null,car:null,packedCar:null,wheels:[],props:[],keys:{},acc:0,fixedStep:1/60,steer:0,
+  touch:{x:0,y:0,active:false,pointerId:null,deadzone:.10},
+  npcPhysics:{ready:false,bodies:[],recoveries:0,created:0},
+  physicsPrevPos:new V3(),physicsCurrPos:new V3(),physicsPrevQuat:new THREE.Quaternion(),physicsCurrQuat:new THREE.Quaternion(),
+  renderPos:new V3(),renderQuat:new THREE.Quaternion(),cam:new V3(),q:new THREE.Quaternion(),fwd:new V3(),m:new THREE.Matrix4(),sc:new V3(1,1,1),
+  lights:[],beams:[],tailGlow:[],dust:null,dustBase:null,headLampMat:null,tailLampMat:null,packHeadMats:[],packTailMats:[],packBodyMats:[],
+  objWheels:[],anchor:new V3(),prevAnchor:new V3(),orbitReady:false,initPromise:null
+};
 const drivePerf = { active: false, savedPr: 0, savedDof: 0, savedBloom: false, savedFxaa: false, maxPr: 1, lodDistSq: 280 * 280, lodEvery: 6, shadowEveryMs: 180 };
 const driveCamera = {
   userRotating: false,
@@ -1722,6 +1789,72 @@ const driveCamera = {
   delta: new V3()
 };
 const TV = new V3(), TQ = new THREE.Quaternion(), driveForward = new V3();
+const mobileDriveHandlers = {};
+function readDriveInput() {
+  const k=drive.keys,t=drive.touch;
+  if(t.active) return { throttle:clamp(t.y,-1,1), turn:clamp(-t.x,-1,1), handbrake:!!k.space, source:'touch' };
+  return { throttle:(k.w?1:0)-(k.s?1:0), turn:(k.a?1:0)-(k.d?1:0), handbrake:!!k.space, source:'keyboard' };
+}
+function resetTouchDriveInput() {
+  const t=drive.touch;t.x=0;t.y=0;t.active=false;t.pointerId=null;
+  const joy=$('driveJoystick'),thumb=$('driveJoystickThumb');
+  joy?.classList.remove('active');
+  if(thumb) thumb.style.transform='translate3d(-50%,-50%,0)';
+}
+function syncMobileDriveUI() {
+  const fs=actualFullscreen(),allowed=isTouchDriveDevice&&fs;
+  const activate=$('mobileDriveActivate'),joy=$('driveJoystick');
+  if(activate) activate.hidden=!(allowed&&!drive.on);
+  if(joy) joy.hidden=!(allowed&&drive.on);
+  if(!allowed||!drive.on) resetTouchDriveInput();
+}
+function updateJoystickFromPointer(e) {
+  const joy=$('driveJoystick'),thumb=$('driveJoystickThumb'); if(!joy||!thumb)return;
+  const r=joy.getBoundingClientRect(),cx=r.left+r.width*.5,cy=r.top+r.height*.5,max=Math.max(1,r.width*.5);
+  let dx=e.clientX-cx,dy=e.clientY-cy,mag=Math.hypot(dx,dy);
+  if(mag>max){const q=max/mag;dx*=q;dy*=q;mag=max;}
+  const raw=mag/max,dz=drive.touch.deadzone;
+  let scaled=raw<=dz?0:(raw-dz)/(1-dz);
+  if(raw>1e-5){drive.touch.x=(dx/max)*(scaled/raw);drive.touch.y=(-dy/max)*(scaled/raw);}
+  else{drive.touch.x=drive.touch.y=0;}
+  thumb.style.transform=`translate3d(calc(-50% + ${dx}px),calc(-50% + ${dy}px),0)`;
+}
+function wireMobileDriveControls() {
+  const activate=$('mobileDriveActivate'),joy=$('driveJoystick');
+  if(!activate||!joy)return;
+  mobileDriveHandlers.activate=()=>{markUserInteraction();if(isTouchDriveDevice&&actualFullscreen()&&!drive.on)void toggleDrive();};
+  mobileDriveHandlers.down=e=>{
+    if(!drive.on||!actualFullscreen()||drive.touch.pointerId!==null)return;
+    drive.touch.pointerId=e.pointerId;drive.touch.active=true;joy.classList.add('active');
+    try{joy.setPointerCapture(e.pointerId);}catch{}
+    updateJoystickFromPointer(e);e.preventDefault();markUserInteraction();
+  };
+  mobileDriveHandlers.move=e=>{if(!drive.touch.active||e.pointerId!==drive.touch.pointerId)return;updateJoystickFromPointer(e);e.preventDefault();};
+  mobileDriveHandlers.end=e=>{
+    if(drive.touch.pointerId!==null&&e.pointerId!==drive.touch.pointerId)return;
+    try{if(drive.touch.pointerId!==null&&joy.hasPointerCapture?.(drive.touch.pointerId))joy.releasePointerCapture(drive.touch.pointerId);}catch{}
+    resetTouchDriveInput();e.preventDefault?.();
+  };
+  mobileDriveHandlers.blur=resetTouchDriveInput;
+  mobileDriveHandlers.resize=()=>{if(drive.touch.active)resetTouchDriveInput();syncMobileDriveUI();};
+  activate.addEventListener('click',mobileDriveHandlers.activate);
+  joy.addEventListener('pointerdown',mobileDriveHandlers.down);
+  joy.addEventListener('pointermove',mobileDriveHandlers.move);
+  joy.addEventListener('pointerup',mobileDriveHandlers.end);
+  joy.addEventListener('pointercancel',mobileDriveHandlers.end);
+  joy.addEventListener('lostpointercapture',mobileDriveHandlers.end);
+  addEventListener('blur',mobileDriveHandlers.blur);
+  addEventListener('resize',mobileDriveHandlers.resize,{passive:true});
+  syncMobileDriveUI();
+}
+function unwireMobileDriveControls() {
+  const activate=$('mobileDriveActivate'),joy=$('driveJoystick'),h=mobileDriveHandlers;
+  activate?.removeEventListener('click',h.activate);
+  joy?.removeEventListener('pointerdown',h.down);joy?.removeEventListener('pointermove',h.move);
+  joy?.removeEventListener('pointerup',h.end);joy?.removeEventListener('pointercancel',h.end);joy?.removeEventListener('lostpointercapture',h.end);
+  removeEventListener('blur',h.blur);removeEventListener('resize',h.resize);resetTouchDriveInput();
+}
+
 function setDriveVehicleShadowMode(cast) {
   const roots = traffic?.set?.roots || [];
   roots.forEach(root => root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
@@ -1955,11 +2088,11 @@ async function initPhysics() {
   return drive.initPromise;
 }
 function driveStep(dt) {
-  const d = drive, k = d.keys, b = d.body, v = b.linvel(), r = b.rotation(); d.q.set(r.x, r.y, r.z, r.w); d.fwd.set(0, 0, 1).applyQuaternion(d.q);
-  const sf0 = v.x * d.fwd.x + v.z * d.fwd.z, th = (k.w ? 1 : 0) - (k.s ? 1 : 0); let sf = sf0 + th * (th * sf0 < 0 ? 38 : 22) * dt; sf *= Math.exp(-(th ? .12 : .8) * dt); sf = clamp(sf, -9, 26);
-  const lx = (v.x - d.fwd.x * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt), lz = (v.z - d.fwd.z * sf0) * Math.exp(-(k.space ? 1.2 : 9) * dt);
-  b.setLinvel({ x: d.fwd.x * sf + lx, y: v.y, z: d.fwd.z * sf + lz }, true);
-  d.steer += ((((k.a ? 1 : 0) - (k.d ? 1 : 0)) * .42) - d.steer) * (1 - Math.exp(-dt * 10));
+  const d=drive,b=d.body,v=b.linvel(),r=b.rotation(),input=readDriveInput();d.q.set(r.x,r.y,r.z,r.w);d.fwd.set(0,0,1).applyQuaternion(d.q);
+  const sf0=v.x*d.fwd.x+v.z*d.fwd.z,th=input.throttle;let sf=sf0+th*(th*sf0<0?38:22)*dt;sf*=Math.exp(-(Math.abs(th)>.001?.12:.8)*dt);sf=clamp(sf,-9,26);
+  const lx=(v.x-d.fwd.x*sf0)*Math.exp(-(input.handbrake?1.2:9)*dt),lz=(v.z-d.fwd.z*sf0)*Math.exp(-(input.handbrake?1.2:9)*dt);
+  b.setLinvel({x:d.fwd.x*sf+lx,y:v.y,z:d.fwd.z*sf+lz},true);
+  d.steer+=((input.turn*.42)-d.steer)*(1-Math.exp(-dt*10));
   b.setAngvel({ x: 0, y: d.steer * 2.2 * clamp(sf / 5, -1, 1), z: 0 }, true);
   d.acc += dt;
   let n = 0;
@@ -2028,7 +2161,7 @@ function driveStep(dt) {
 async function toggleDrive() {
   const bt = $('btnDrive');
   if (drive.on) {
-    drive.on = false; setDrivePerformanceMode(false); controls.enableDamping = driveSavedDamping; controls.enabled = true; controls.enablePan = true; controls.minDistance=25; controls.maxDistance=780; controls.minPolarAngle=.12; controls.maxPolarAngle=1.45;
+    drive.on = false; resetTouchDriveInput(); syncNpcRoutesFromPhysics(); setDrivePerformanceMode(false); controls.enableDamping = driveSavedDamping; controls.enabled = true; controls.enablePan = true; controls.minDistance=25; controls.maxDistance=780; controls.minPolarAngle=.12; controls.maxPolarAngle=1.45;
     // Deliberately keep drive.car visible: overview/building cameras now show it at its last driven position.
     bt.classList.remove('on'); driveCamera.userRotating=false; driveCamera.chaseStrength=0; driveCamera.zoomUntil=0; $('hint').textContent = 'Drag to orbit · Right-drag to pan · Scroll to zoom';
     const ownerDoc=parent!==window ? parent.document : document;
@@ -2036,7 +2169,7 @@ async function toggleDrive() {
     flyTo(OV.pos, OV.tgt, 2); return;
   }
   try { bt.disabled = true; if (!drive.world) await initPhysics(); } catch (e) { console.warn('Rapier failed to load', e); bt.innerHTML = '<i class="fa-solid fa-car-side"></i> Offline'; setTimeout(() => { bt.innerHTML = '<i class="fa-solid fa-car-side"></i> Drive'; }, 2500); bt.disabled = false; return; }
-  bt.disabled = false; select(null, false); tour.on = false; drive.on = true; drive.car.visible = true; controls.enabled = true; controls.enablePan=false; controls.minDistance=4.8; controls.maxDistance=42; controls.minPolarAngle=.18; controls.maxPolarAngle=1.46;
+  bt.disabled = false; select(null, false); tour.on = false; drive.on = true; drive.car.visible = true; ensureNpcPhysics(); resetNpcPhysicsFromRoutes(); controls.enabled = true; controls.enablePan=false; controls.minDistance=4.8; controls.maxDistance=42; controls.minPolarAngle=.18; controls.maxPolarAngle=1.46;
   Tw.kill(camera.position); Tw.kill(controls.target);
   const p=drive.body.translation(), qr=drive.body.rotation();
   drive.q.set(qr.x,qr.y,qr.z,qr.w);
@@ -2050,7 +2183,7 @@ async function toggleDrive() {
   controls.enableDamping = false;
   controls.target.copy(drive.anchor); camera.position.copy(new V3(0,6.7,-13.5).applyQuaternion(drive.q).add(drive.anchor)); controls.update();
   driveCamera.distance=clamp(camera.position.distanceTo(drive.anchor),driveCamera.minDistance,driveCamera.maxDistance);
-  bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
+  bt.classList.add('on'); $('hint').textContent = isTouchDriveDevice ? 'Drag joystick to drive · Drag scene to orbit · Pinch to zoom · Esc exits' : 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false); syncMobileDriveUI();
 }
 function updateVehicleLighting(dt,now) {
   const night = sstep(.10,.52,ST.night);
@@ -2124,6 +2257,7 @@ const markPointerInteraction = () => {
 const markMouseInteraction = e => { if(e.type==='mousedown'||e.buttons) markPointerInteraction(); };
 function wireUI() {
   document.addEventListener('pointerdown', markPointerInteraction, true);
+  wireMobileDriveControls();
   $('scene').addEventListener('mousedown', markMouseInteraction);
   $('scene').addEventListener('mousemove', markMouseInteraction);
   $('panelBtn').onclick = () => { markUserInteraction(); panel($('panel').classList.contains('closed')); };
@@ -2208,7 +2342,10 @@ async function boot() {
   if (DEBUG) console.info('Davis twin ready', { tier: tierName, pr });
 }
 function onFullscreenChange() {
-  if (!actualFullscreen() && drive.on) void toggleDrive();
+  const fs=actualFullscreen();
+  if(!fs) resetTouchDriveInput();
+  syncMobileDriveUI();
+  if(!fs&&drive.on) void toggleDrive();
 }
 const post = m => { try { if (parent !== window) parent.postMessage({ source: 'davis-twin', ...m }, HOST_ORIGIN); } catch {} };
 addEventListener('davis:select', e => post({ type: 'select', id: e.detail.id }));
@@ -2216,6 +2353,7 @@ window.DavisTwin = window.CampusTwin = { select: id => select(id ? String(id).to
 let renderPaused = false, frameId = 0;
 const disposeTwin = () => {
   document.removeEventListener('pointerdown', markPointerInteraction, true);
+  unwireMobileDriveControls();
   $('scene')?.removeEventListener('mousedown', markMouseInteraction);
   $('scene')?.removeEventListener('mousemove', markMouseInteraction);
   try {
@@ -2238,6 +2376,8 @@ addEventListener('message', e => {
   else if (d.type === 'campus:theme' && (d.value === 'light' || d.value === 'dark')) { ST.theme = d.value; document.body.dataset.hostTheme = d.value; }
   else if (d.type === 'campus:autoorbit') { AUTO.on = !REDUCED_MOTION && !!d.value; markUserInteraction(); }
   else if (d.type === 'campus:fullscreen-state') {
+    if(!d.value) resetTouchDriveInput();
+    syncMobileDriveUI();
     if (!d.value && drive.on) void toggleDrive();
     if (!document.hidden) {
       renderPaused=false;
@@ -2260,7 +2400,7 @@ addEventListener('message', e => {
 });
 addEventListener('visibilitychange', () => {
   renderPaused = document.hidden;
-  if (renderPaused) return;
+  if(renderPaused){resetTouchDriveInput();return;}
   markUserInteraction();
   interaction.cameraTransition = false;
   if (frameId) cancelAnimationFrame(frameId);
@@ -2271,6 +2411,7 @@ if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
   interaction, AUTO, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
