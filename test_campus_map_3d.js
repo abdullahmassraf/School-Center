@@ -481,7 +481,7 @@ if(afterManual>=beforeManual*.65&&afterManual>.18)throw new Error(`manual input 
 console.log('CINEMATIC MANUAL OVERRIDE',JSON.stringify({before:beforeManual,after:afterManual}));
 
 const finalPhysics=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{created:d.drive.npcPhysics.created,bodies:d.drive.npcPhysics.bodies.length,recoveries:d.drive.npcPhysics.recoveries,finite:d.drive.npcPhysics.bodies.every(a=>{const p=a.body.translation(),v=a.body.linvel();return[p.x,p.y,p.z,v.x,v.y,v.z].every(Number.isFinite)})}})()`);
-if(finalPhysics.created!==finalPhysics.bodies||finalPhysics.bodies<14||!finalPhysics.finite)throw new Error('NPC physics leaked/duplicated or became non-finite: '+JSON.stringify(finalPhysics));
+if(finalPhysics.created!==finalPhysics.bodies||finalPhysics.bodies<14||!finalPhysics.finite||finalPhysics.recoveries>8)throw new Error('NPC physics leaked/duplicated, became non-finite, or entered a recovery loop: '+JSON.stringify(finalPhysics));
 console.log('NPC PHYSICS LIFECYCLE',JSON.stringify(finalPhysics));
 if(errors.length)throw new Error(`browser console errors: ${errors.slice(0,5).join(' | ')}`);
 console.log('NO CONSOLE ERRORS');
