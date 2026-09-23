@@ -604,7 +604,13 @@ function updateMobileNpcLightPool(night, dt, now) {
   ensureMobileNpcLightPool(); chooseMobileNpcLightTarget(now);
   const rig = mobileNpcLightPool.target, ls = mobileNpcLightPool.lights, lit = night > .015;
   mobileNpcLightPool.active = !!rig && lit;
-  if (!rig || !lit) { ls.forEach(l => { l.visible = false; l.intensity = 0; }); return; }
+  if (!lit) { ls.forEach(l => { l.visible = false; l.intensity = 0; }); return; }
+  /* Once night lighting is active keep all four pooled lights visible even when
+     the camera temporarily has no eligible NPC. Zero intensity is enough to
+     remove their contribution while preserving the renderer's light count, so
+     zooming across the reach boundary cannot trigger a shader-program rebuild. */
+  ls.forEach(l => { l.visible = true; });
+  if (!rig) { ls.forEach(l => { l.intensity = 0; }); return; }
   const alpha = 1 - Math.exp(-dt * 20), kind = rig.kind;
   const anchors = [rig.headAnchors?.[0], rig.headAnchors?.[1], rig.tailAnchors?.[0], rig.tailAnchors?.[1]];
   anchors.forEach((a, i) => {
