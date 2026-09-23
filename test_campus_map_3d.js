@@ -120,10 +120,6 @@ const joystickRelease=async()=>send('Input.dispatchTouchEvent',{type:'touchEnd',
 
 await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
 await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
-/* Exercise the mobile renderer at a real high-density display ratio. The CSS
- * viewport stays unchanged so the rest of the interaction suite is stable,
- * while devicePixelRatio=2 verifies that scene DPR is no longer pinned to 1. */
-await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:2,mobile:false});
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html?touchtest=1`});
 
 let ready=false;
@@ -186,6 +182,11 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
+/* Validate phone-density sharpness in a focused pass, then return the heavy
+ * physics/visual suite to 1x so SwiftShader speed is not mistaken for a game
+ * regression. */
+await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:2,mobile:false});
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return devicePixelRatio>1.9&&d.renderer.getPixelRatio()>1.29})()`,4000,80);
 const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{profile:d.mobileProfile,qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.FX.dof,bloom:d.FX.bloom,touch:d.isTouchDriveDevice}})()`);
 if(!postBudget.touch||!postBudget.profile||postBudget.deviceDpr<1.9||postBudget.qualityDpr<1.3||postBudget.pr<1.29||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
 console.log('MOBILE SHARP POST BUDGET',JSON.stringify(postBudget));
@@ -199,6 +200,8 @@ await sleep(180);
 const sharpOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.FX.dof,uniform:d.CU.uDof.value,pr:d.renderer.getPixelRatio(),qualityDpr:d.qualityDpr}})()`);
 if(sharpOverview.dof!==0||sharpOverview.uniform!==0||sharpOverview.qualityDpr<1.3)throw new Error('mobile overview is not staying sharp: '+JSON.stringify(sharpOverview));
 await screenshot('mobile-sharp-day-overview');
+await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return devicePixelRatio<1.1&&d.renderer.getPixelRatio()<1.1})()`,4000,80);
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
