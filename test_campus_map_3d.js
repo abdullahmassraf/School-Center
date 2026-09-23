@@ -77,9 +77,12 @@ const QA_DIR=path.join(ROOT,'qa-artifacts');fs.mkdirSync(QA_DIR,{recursive:true}
 const screenshot=async name=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;if(d){d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;}document.querySelector('#cm3d-mount iframe')?.scrollIntoView({block:'center',inline:'center'});return true})()`);
   await sleep(220);
-  const clip=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__?.frame,r=f?.getBoundingClientRect?.();return r&&r.width>4&&r.height>4?{x:Math.max(0,r.left),y:Math.max(0,r.top),width:Math.min(innerWidth-r.left,r.width),height:Math.min(innerHeight-r.top,r.height),scale:1}:null})()`);
+  /* CDP clip coordinates are page-space. The old helper passed viewport-space
+   * iframe bounds after scrolling, so CI captured unrelated page sections even
+   * though the 3D camera assertions passed. */
+  const clip=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__?.frame,r=f?.getBoundingClientRect?.();return r&&r.width>4&&r.height>4?{x:scrollX+r.left,y:scrollY+r.top,width:r.width,height:r.height,scale:1}:null})()`);
   if(!clip)throw new Error('campus map iframe clip unavailable for screenshot');
-  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true,clip});
+  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,fromSurface:true,clip});
   const out=path.join(QA_DIR,name+'.png');
   fs.writeFileSync(out,Buffer.from(shot.result.data,'base64'));
   console.log('SCREENSHOT',out);
@@ -190,20 +193,31 @@ console.log('BOOT',JSON.stringify(boot));
  * lamp materials must become active when the sun is below the horizon. */
 await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='0';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value})()`);
 await sleep(700);
-const nightLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{
+const nightLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const matState=r=>({head:r?.headMaterials?.map(m=>m.emissiveIntensity)||[],tail:r?.tailMaterials?.map(m=>m.emissiveIntensity)||[],shared:r?.sharedLampMaterials?.map(m=>m.emissiveIntensity)||[],headGlow:r?.headGlows?.map(g=>g.material.opacity)||[],tailGlow:r?.tailGlows?.map(g=>g.material.opacity)||[],headDynamic:r?.headLights?.map(l=>({i:l.intensity,v:l.visible}))||[],tailDynamic:r?.tailLights?.map(l=>({i:l.intensity,v:l.visible}))||[]});return{
   night:d.ST.night,
-  traffic:(d.traffic?.cars||[]).slice(0,3).map(c=>({head:c.lightRig?.headLights?.map(l=>l.intensity)||[],tail:c.lightRig?.tailLights?.map(l=>l.intensity)||[]})),
-  transit:(d.transit?.vehicles||[]).map(v=>{let receive=true;v.root.traverse(o=>{if(o.isMesh&&o.receiveShadow)receive=false});return{key:v.key,head:v.lightRig?.headLights?.map(l=>l.intensity)||[],tail:v.lightRig?.tailLights?.map(l=>l.intensity)||[],receiveShadow:receive}})
+  traffic:(d.traffic?.cars||[]).map(c=>matState(c.lightRig)),
+  transit:(d.transit?.vehicles||[]).map(v=>{let receive=true;v.root.traverse(o=>{if(o.isMesh&&o.receiveShadow)receive=false});return{key:v.key,receiveShadow:receive,...matState(v.lightRig)}})
 }})()`);
 if(nightLights.night<.85)throw new Error('night time did not produce a strong night state: '+JSON.stringify(nightLights));
 for(const car of nightLights.traffic){
-  if(!car.head.length||!car.head.some(v=>v>0)||!car.tail.length||!car.tail.some(v=>v>0))throw new Error('moving NPC vehicle lights did not activate: '+JSON.stringify(nightLights));
+  if(!car.head.length||!car.head.some(v=>v>0)||!car.tail.length||!car.tail.some(v=>v>0))throw new Error('moving NPC emissive lamps did not activate: '+JSON.stringify(car));
 }
 for(const bus of nightLights.transit){
-  if(!bus.head.length||!bus.head.some(v=>v>0)||!bus.tail.length||!bus.tail.some(v=>v>0))throw new Error('commute vehicle lights did not activate: '+JSON.stringify(nightLights));
-  if(!bus.receiveShadow)throw new Error('commute vehicle shadow receiver is still enabled: '+JSON.stringify(nightLights));
+  if(!bus.shared.length||!bus.shared.some(v=>v>0)||!bus.headGlow.every(v=>v>.1)||!bus.tailGlow.every(v=>v>.1))throw new Error('commute emissive/glow lamps did not activate: '+JSON.stringify(bus));
+  if(!bus.receiveShadow)throw new Error('commute vehicle shadow receiver is still enabled: '+JSON.stringify(bus));
 }
-console.log('NIGHT VEHICLE LIGHTS',JSON.stringify(nightLights));
+const activeDynamic=[...nightLights.traffic,...nightLights.transit].filter(r=>r.headDynamic.some(l=>l.v&&l.i>0)||r.tailDynamic.some(l=>l.v&&l.i>0)).length;
+if(activeDynamic>6)throw new Error('vehicle dynamic-light budget exceeded: '+JSON.stringify({activeDynamic,nightLights}));
+console.log('NIGHT VEHICLE LIGHTS',JSON.stringify({night:nightLights.night,activeDynamic}));
+
+const nearRig=async(kind)=>{
+  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"},p=r.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.set(p.x+5,p.y+3,p.z+5);d.controls.target.copy(p);d.controls.update();return true})()`);
+  await sleep(450);
+  return ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"};return{head:r.headLights.map(l=>({i:l.intensity,v:l.visible})),tail:r.tailLights.map(l=>({i:l.intensity,v:l.visible}))}})()`);
+};
+const nearTraffic=await nearRig('traffic'),nearBus=await nearRig('bus');
+for(const [kind,state] of [['traffic',nearTraffic],['bus',nearBus]])if(!state.head.some(l=>l.v&&l.i>0)||!state.tail.some(l=>l.v&&l.i>0))throw new Error(kind+' near-camera dynamic lights did not activate: '+JSON.stringify(state));
+console.log('NEAR VEHICLE DYNAMIC LIGHTS',JSON.stringify({nearTraffic,nearBus}));
 const transitLampSemantics=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.transit.vehicles.map(v=>({key:v.key,head:v.lightRig.headAnchors.map(p=>p.toArray()),tail:v.lightRig.tailAnchors.map(p=>p.toArray()),forward:v.lightRig.forward.toArray(),headGlow:v.lightRig.headGlows.map(g=>g.material.opacity),tailGlow:v.lightRig.tailGlows.map(g=>g.material.opacity)}))})()`);
 for(const v of transitLampSemantics){
   if(!(v.forward[0]<-.9&&v.head.every(p=>p[0]<0)&&v.tail.every(p=>p[0]>0)))throw new Error('transit front/rear lamp anchors do not follow native -X front: '+JSON.stringify(v));
