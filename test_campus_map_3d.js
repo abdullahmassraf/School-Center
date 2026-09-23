@@ -165,12 +165,12 @@ console.log('BOOT',JSON.stringify(boot));
 
 /* Sunset/night lighting regression: moving NPC cars, commute buses and their
  * lamp materials must become active when the sun is below the horizon. */
-await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.DavisTwin.setTime('2025-01-15T00:00:00-05:00')`);
-await sleep(900);
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='0';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value})()`);
+await sleep(700);
 const nightLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{
   night:d.ST.night,
   traffic:(d.traffic?.cars||[]).slice(0,3).map(c=>({head:c.lightRig?.headLights?.map(l=>l.intensity)||[],tail:c.lightRig?.tailLights?.map(l=>l.intensity)||[]})),
-  transit:(d.transit?.vehicles||[]).map(v=>({key:v.key,head:v.lightRig?.headLights?.map(l=>l.intensity)||[],tail:v.lightRig?.tailLights?.map(l=>l.intensity)||[],receiveShadow:v.root.traverse?.(()=>{})}))
+  transit:(d.transit?.vehicles||[]).map(v=>{let receive=true;v.root.traverse(o=>{if(o.isMesh&&o.receiveShadow)receive=false});return{key:v.key,head:v.lightRig?.headLights?.map(l=>l.intensity)||[],tail:v.lightRig?.tailLights?.map(l=>l.intensity)||[],receiveShadow:receive}})
 }})()`);
 if(nightLights.night<.85)throw new Error('night time did not produce a strong night state: '+JSON.stringify(nightLights));
 for(const car of nightLights.traffic){
@@ -178,6 +178,7 @@ for(const car of nightLights.traffic){
 }
 for(const bus of nightLights.transit){
   if(!bus.head.length||!bus.head.some(v=>v>0)||!bus.tail.length||!bus.tail.some(v=>v>0))throw new Error('commute vehicle lights did not activate: '+JSON.stringify(nightLights));
+  if(!bus.receiveShadow)throw new Error('commute vehicle shadow receiver is still enabled: '+JSON.stringify(nightLights));
 }
 console.log('NIGHT VEHICLE LIGHTS',JSON.stringify(nightLights));
 
