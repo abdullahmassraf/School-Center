@@ -107,7 +107,10 @@ export class CampusMap3DManager {
   _syncFullscreenState(active=!!document.fullscreenElement){
     if(!this.fullscreenBtn)return;
     this.fullscreenBtn.innerHTML=fullscreenSvg(active);
-    this.fullscreenBtn.setAttribute('aria-label',active?'Exit fullscreen':'Enter fullscreen');
+    /* The accessible name stays a stable action ("Toggle Fullscreen") so the
+     * control reads as one toggle; the live state is exposed via aria-pressed
+     * and the title carries the concrete next action. */
+    this.fullscreenBtn.setAttribute('aria-label','Toggle Fullscreen');
     this.fullscreenBtn.title=active?'Exit fullscreen':'Enter fullscreen';
     this.fullscreenBtn.setAttribute('aria-pressed',String(active));
   }
@@ -130,8 +133,16 @@ export class CampusMap3DManager {
 
   _installLegacyHud(){
     const hud=document.createElement('div');hud.className='cm3d-hud';
-    hud.innerHTML='<button class="cm3d-reset" type="button" title="Reset view" aria-label="Reset campus view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button><button class="cm3d-path-toggle is-hidden" type="button" title="Toggle wayfinding paths" aria-label="Toggle wayfinding paths"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h4"/></svg></button><button class="cm3d-fullscreen" type="button" title="Enter fullscreen" aria-label="Enter fullscreen" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>';
-    this.mount.appendChild(hud);this.resetBtn=hud.querySelector('.cm3d-reset');this.pathBtn=hud.querySelector('.cm3d-path-toggle');this.fullscreenBtn=hud.querySelector('.cm3d-fullscreen');
+    /* Reset and Fullscreen are one continuous pill with two independent halves.
+     * The wayfinding toggle sits beside the pill (it only appears once a
+     * building is selected) so the pill always reads as a single widget. */
+    hud.innerHTML='<button class="cm3d-path-toggle is-hidden" type="button" title="Toggle wayfinding paths" aria-label="Toggle wayfinding paths"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h4"/></svg></button>'
+      +'<div class="cm3d-pill" role="group" aria-label="Map view controls">'
+      +'<button class="cm3d-reset" type="button" title="Reset view" aria-label="Reset View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>'
+      +'<span class="cm3d-pill-sep" aria-hidden="true"></span>'
+      +'<button class="cm3d-fullscreen" type="button" title="Enter fullscreen" aria-label="Toggle Fullscreen" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>'
+      +'</div>';
+    this.mount.appendChild(hud);this.resetBtn=hud.querySelector('.cm3d-reset');this.pathBtn=hud.querySelector('.cm3d-path-toggle');this.fullscreenBtn=hud.querySelector('.cm3d-fullscreen');this.pill=hud.querySelector('.cm3d-pill');
     this.fullscreenBtn.onclick=e=>{e.stopPropagation();void this._toggleFullscreen()};this._syncFullscreenState();
     this.resetBtn.onclick=e=>{e.stopPropagation();this.reset()};
     this.pathBtn.onclick=e=>{e.stopPropagation();this._routeVisible=!this._routeVisible;this._post({type:'campus:routeVisible',value:this._routeVisible});this.pathBtn.classList.toggle('is-off',!this._routeVisible)};

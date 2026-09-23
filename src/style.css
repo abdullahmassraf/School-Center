@@ -3852,26 +3852,40 @@ main#view-host,
    an automatic no-WebGL fallback with no user-facing switch.) */
 .cm-stage-3d{position:relative;width:100%;max-width:700px;margin:0 auto;border-radius:20px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,rgba(138,112,237,.18),transparent 58%),linear-gradient(145deg,#121524,#0a0c14 72%);border:1px solid rgba(138,112,237,.24);box-shadow:0 24px 55px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.08)}
 .cm3d-mount:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(6,182,212,.06),transparent 42%),linear-gradient(180deg,rgba(255,255,255,.035),transparent 24%);z-index:1}
-.cm3d-mount{position:relative;width:100%;aspect-ratio:930/640;min-height:320px;max-height:560px;cursor:grab;touch-action:none}
+/* Shared HUD geometry. The weather chip and the top-right control pill both
+   take their top offset and height from these tokens, so their vertical centers
+   stay identical on desktop, tablet, portrait/landscape phone, narrow widths
+   and in fullscreen without per-breakpoint offsets. */
+.cm3d-mount{--cm3d-hud-top:calc(12px + env(safe-area-inset-top,0px));--cm3d-hud-h:32px;--cm3d-hud-half:38px;position:relative;width:100%;aspect-ratio:930/640;min-height:320px;max-height:560px;cursor:grab;touch-action:none}
 .cm3d-mount:active{cursor:grabbing}
 .cm3d-canvas{display:block;width:100%!important;height:100%!important}
 .cm3d-loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:.85rem;background:rgba(16,23,53,.5);pointer-events:none}
-.cm3d-weather{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px));z-index:4;display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(18,21,36,.72);backdrop-filter:blur(12px);box-shadow:0 8px 20px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.08);color:var(--ink);pointer-events:none}
+.cm3d-weather{position:absolute;top:var(--cm3d-hud-top);left:calc(12px + env(safe-area-inset-left,0px));z-index:4;display:inline-flex;align-items:center;gap:7px;height:var(--cm3d-hud-h);padding:0 12px;box-sizing:border-box;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(30,35,42,.86);backdrop-filter:blur(14px);box-shadow:0 8px 20px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.08);color:var(--ink);pointer-events:none}
 .cm3d-weather-icon{display:inline-flex;color:#67e8f9}
 .cm3d-weather-icon svg{width:15px;height:15px}
 .cm3d-weather-temp{font-family:'Space Grotesk',var(--font-body,inherit);font-size:.78rem;font-weight:700;letter-spacing:.01em;line-height:1}
-.cm3d-hud{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:calc(14px + env(safe-area-inset-right,0px));display:flex;gap:8px;z-index:4}
-.cm3d-hud button{width:32px;height:32px;min-width:32px;padding:0;display:grid;place-items:center;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(16,23,53,.72);color:var(--ink);cursor:pointer;backdrop-filter:blur(6px);transition:background .16s ease,transform .16s ease}
-.cm3d-hud button:hover{background:rgba(16,23,53,.9);transform:translateY(-1px)}
-.cm3d-hud button svg{width:17px;height:17px}
-.cm3d-hud button.is-off{opacity:.45}
-.cm3d-hud button.is-hidden{display:none}
-.cm3d-hud button.cm3d-fullscreen{width:32px;height:32px;min-width:32px}
+.cm3d-hud{position:absolute;top:var(--cm3d-hud-top);right:calc(12px + env(safe-area-inset-right,0px));display:flex;align-items:center;gap:8px;height:var(--cm3d-hud-h);z-index:4}
+/* The Reset and Fullscreen halves live inside one continuous pill: a single
+   rounded container with no seam, split by a hairline separator. Both halves
+   keep their own hit target, hover, pressed and focus-visible state. */
+.cm3d-hud .cm3d-pill{display:inline-flex;align-items:stretch;height:var(--cm3d-hud-h);box-sizing:border-box;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(30,35,42,.86);backdrop-filter:blur(14px);box-shadow:0 8px 20px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.08);overflow:hidden}
+.cm3d-hud .cm3d-pill button{width:var(--cm3d-hud-half);height:100%;min-width:0;padding:0;display:grid;place-items:center;border:0;border-radius:0;background:transparent;color:var(--ink);cursor:pointer;transition:background .16s ease,color .16s ease}
+.cm3d-hud .cm3d-pill button:hover{background:rgba(255,255,255,.09);color:#fff}
+.cm3d-hud .cm3d-pill button:active{background:rgba(255,255,255,.15)}
+.cm3d-hud .cm3d-pill button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.cm3d-hud .cm3d-pill button svg{width:17px;height:17px}
+.cm3d-pill-sep{width:1px;flex:none;background:rgba(255,255,255,.13);margin:7px 0}
+.cm3d-hud>button{width:var(--cm3d-hud-h);height:var(--cm3d-hud-h);min-width:var(--cm3d-hud-h);padding:0;display:grid;place-items:center;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(30,35,42,.86);color:var(--ink);cursor:pointer;backdrop-filter:blur(14px);transition:background .16s ease}
+.cm3d-hud>button:hover{background:rgba(48,54,63,.9)}
+.cm3d-hud>button svg{width:17px;height:17px}
+.cm3d-hud>button.is-off{opacity:.45}
+.cm3d-hud>button.is-hidden{display:none}
 .cm3d-mount .cm3d-fullscreen{font-size:14px}
 .cm-stage-3d:fullscreen{position:fixed;inset:0;width:100vw;max-width:none;height:100vh;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#000;overflow:hidden;box-shadow:none}
 .cm-stage-3d:fullscreen .cm3d-mount{width:100%;height:100%;min-height:0;max-height:none;aspect-ratio:auto}
-.cm-stage-3d:fullscreen .cm3d-hud{top:calc(14px + env(safe-area-inset-top,0px));right:calc(14px + env(safe-area-inset-right,0px))}
-.cm-stage-3d:fullscreen .cm3d-weather{top:calc(12px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px))}
+.cm-stage-3d:fullscreen .cm3d-mount{--cm3d-hud-top:calc(16px + env(safe-area-inset-top,0px));--cm3d-hud-h:38px;--cm3d-hud-half:44px}
+.cm-stage-3d:fullscreen .cm3d-hud{right:calc(16px + env(safe-area-inset-right,0px))}
+.cm-stage-3d:fullscreen .cm3d-weather{left:calc(16px + env(safe-area-inset-left,0px))}
 .cm-stage-3d:fullscreen .cm3d-loading{border-radius:0}
 .cm-map-fullscreen{overflow:hidden}
 
@@ -3886,6 +3900,6 @@ main#view-host,
 .cm3d-unavailable p:first-of-type{color:var(--ink);font-weight:700}
 .cm3d-unavailable p:last-of-type{font-size:.72rem;color:var(--muted-dim, var(--muted))}
 
-@media(max-width:720px){.cm3d-mount{min-height:260px}.cm3d-hud button{width:34px;height:34px}.cm3d-weather{top:10px;left:10px;padding:6px 10px;gap:6px}.cm3d-weather-icon svg{width:13px;height:13px}.cm3d-weather-temp{font-size:.72rem}}
+@media(max-width:720px){.cm3d-mount{min-height:260px;--cm3d-hud-top:calc(10px + env(safe-area-inset-top,0px));--cm3d-hud-h:36px;--cm3d-hud-half:42px}.cm3d-hud{right:calc(10px + env(safe-area-inset-right,0px))}.cm3d-weather{left:calc(10px + env(safe-area-inset-left,0px));padding:0 10px;gap:6px}.cm3d-weather-icon svg{width:13px;height:13px}.cm3d-weather-temp{font-size:.72rem}.cm3d-pill-sep{margin:8px 0}}
 
 .search-target-highlight{outline:2px solid var(--accent);outline-offset:4px;box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 18%,transparent),0 12px 40px rgba(0,0,0,.28);transition:outline .2s ease,box-shadow .2s ease;}

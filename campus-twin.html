@@ -568,6 +568,73 @@ function vehicleLampAnchors(root, kind) {
 }
 
 const vehicleLightCandidates = [];
+/* Fixed four-light pool for the nearest lit vehicle.
+   Previously the closest NPC was handed real PointLights by adding/removing
+   them from the scene, which mutated the light list and produced a perceptible
+   hitch every time the "nearest" vehicle changed. The pool is created once and
+   the same four objects are simply moved onto the selected rig's lamp anchors.
+   Scratch vectors use THREE.Vector3 explicitly: this block sits above the
+   `const V3` alias and would hit the temporal dead zone with `new V3()`.
+   Selection has hysteresis plus a debounce so two similarly distant vehicles
+   cannot thrash the target. */
+/* Pool selection band. A vehicle that already owns the pool keeps it out to
+   NPC_POOL_HOLD, while a *new* vehicle is only considered inside NPC_POOL_REACH.
+   Nearby traffic on the campus loop runs ~110-120 units apart, so the previous
+   single 105 radius meant a second vehicle was never simultaneously eligible:
+   currentValid flipped false the moment the camera reached the next car, so the
+   hysteresis and the 650 ms debounce below were unreachable and every handoff
+   was a hard switch. The hold band restores the intended hysteretic, debounced
+   handoff. It costs nothing visually: the pool light ranges are 10-14, so a held
+   target beyond that distance contributes no light while the nearer vehicle
+   keeps its native emissive lamps and glow. */
+const NPC_POOL_REACH_SQ = 105 * 105, NPC_POOL_HOLD_SQ = 170 * 170;
+const mobileNpcLightPool = {
+  initialized: false, lights: [], target: null, lastSwitch: 0, switches: 0, active: false,
+  p0: new THREE.Vector3(), p1: new THREE.Vector3()
+};
+function ensureMobileNpcLightPool() {
+  if (mobileNpcLightPool.initialized) return;
+  for (const [color, range] of [['#fff4cf', 10], ['#fff4cf', 10], ['#ff3038', 6], ['#ff3038', 6]]) {
+    const l = new THREE.PointLight(color, 0, range, 2);
+    l.castShadow = false; l.visible = false; l.name = 'NpcLightPool';
+    scene.add(l); mobileNpcLightPool.lights.push(l);
+  }
+  mobileNpcLightPool.initialized = true;
+}
+function chooseMobileNpcLightTarget(now) {
+  if (!drivePerf.active || !mobileProfile) { mobileNpcLightPool.target = null; return; }
+  ensureMobileNpcLightPool();
+  const candidate = vehicleLightCandidates[0] || null, current = mobileNpcLightPool.target;
+  const currentValid = current && current.root?.visible && Number.isFinite(current._distanceSq) && current._distanceSq < NPC_POOL_HOLD_SQ;
+  let next = currentValid ? current : null;
+  if (candidate && candidate._distanceSq < NPC_POOL_REACH_SQ) {
+    if (!next) next = candidate;
+    else if (candidate !== next && now - mobileNpcLightPool.lastSwitch > 650 && candidate._distanceSq < next._distanceSq * .58) next = candidate;
+  }
+  if (next !== current) { mobileNpcLightPool.target = next; mobileNpcLightPool.lastSwitch = now; mobileNpcLightPool.switches++; }
+}
+function updateMobileNpcLightPool(night, dt, now) {
+  if (!mobileProfile || !drivePerf.active) {
+    if (mobileNpcLightPool.initialized) mobileNpcLightPool.lights.forEach(l => { l.visible = false; l.intensity = 0; });
+    mobileNpcLightPool.active = false;
+    return;
+  }
+  ensureMobileNpcLightPool(); chooseMobileNpcLightTarget(now);
+  const rig = mobileNpcLightPool.target, ls = mobileNpcLightPool.lights, lit = night > .015;
+  mobileNpcLightPool.active = !!rig && lit;
+  if (!rig || !lit) { ls.forEach(l => { l.visible = false; l.intensity = 0; }); return; }
+  const alpha = 1 - Math.exp(-dt * 20), kind = rig.kind;
+  const anchors = [rig.headAnchors?.[0], rig.headAnchors?.[1], rig.tailAnchors?.[0], rig.tailAnchors?.[1]];
+  anchors.forEach((a, i) => {
+    const l = ls[i]; if (!a) { l.intensity = 0; return; }
+    mobileNpcLightPool.p0.copy(a); rig.root.localToWorld(mobileNpcLightPool.p0);
+    if (!l.visible || l.position.lengthSq() === 0) l.position.copy(mobileNpcLightPool.p0);
+    else l.position.lerp(mobileNpcLightPool.p0, alpha);
+    l.visible = true;
+    l.distance = i < 2 ? (kind === 'car' ? 10 : 14) : (kind === 'car' ? 6 : 8);
+    l.intensity = night * (i < 2 ? (kind === 'car' ? .85 : 1.45) : .42);
+  });
+}
 function refreshVehicleLightBudget() {
   vehicleLightCandidates.length = 0;
   const add = rig => {
@@ -585,6 +652,23 @@ function refreshVehicleLightBudget() {
      device keep only the closest vehicle's physical light spill; all vehicles
      retain their native emissive lamp materials/glow, so the visible lamps do
      not disappear. */
+  if (drivePerf.active && mobileProfile) {
+    /* The pool is the only source of NPC lamp spill on a touch device.
+       Clear every rig - not just the visible candidates - because a culled or
+       pooled-out vehicle used to keep its last light state, leaving orphan
+       point lights lit in the scene for objects nobody could see. */
+    const darken = rig => {
+      if (!rig || rig.player) return;
+      rig.dynamicEnabled = false;
+      (rig.headLights || []).forEach(l => { l.visible = false; l.intensity = 0; });
+      (rig.tailLights || []).forEach(l => { l.visible = false; l.intensity = 0; });
+    };
+    (traffic?.cars || []).forEach(car => darken(car.lightRig));
+    (transit?.vehicles || []).forEach(v => darken(v.lightRig));
+    vehicleLightCandidates.forEach(rig => { rig.dynamicEnabled = false; });
+    chooseMobileNpcLightTarget(performance.now());
+    return;
+  }
   const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
   vehicleLightCandidates.forEach((rig,i)=>{
     const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
@@ -745,6 +829,10 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (match
 const TOUCH_DRIVE_TEST = DEBUG && Q.has('touchtest');
 const coarseNoHover = matchMedia?.('(hover:none) and (pointer:coarse)').matches === true;
 const isTouchDriveDevice = TOUCH_DRIVE_TEST || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && coarseNoHover);
+/* "Mobile profile" = phones and the headless touch Drive probe. It renders a
+   sharp primary scene, skips far-field DOF, and picks its pixel ratio once at
+   boot so a transient frame dip can never resize the render targets. */
+const mobileProfile = isMobile || isTouchDriveDevice;
 const weak = isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 3) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
 // v4 budget: one scene pass + a handful of tiny half/eighth-res passes. No MSAA, no AO pass, no second depth render, no dynamic spot lights.
 const TIERS = {
@@ -752,8 +840,18 @@ const TIERS = {
   medium: { sh: 1024, dpr: 1.35, bloom: true,  dof: .6, fxaa: true,  rain: 4500, snow: 3500, trees: .7,  clouds: 8,  se: 3 },
   low:    { sh: 512,  dpr: 1,    bloom: false, dof: 0,  fxaa: false, rain: 2200, snow: 1800, trees: .45, clouds: 4,  se: 4 },
 };
-const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : isMobile ? 'medium' : 'high');
-const T = TIERS[tierName], FX = { dof: T.dof, bloom: T.bloom, fxaa: T.fxaa, se: T.se };
+const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : mobileProfile ? 'medium' : 'high');
+const T = TIERS[tierName];
+/* baseFX is the tier's authored intent; FX is the live adaptive state. Bloom is
+   deliberately independent of DOF so a phone keeps its night-time glow without
+   paying the quarter-res far-field blur that made the map read as soft. */
+const baseFX = { dof: mobileProfile ? 0 : T.dof, bloom: T.bloom, fxaa: T.fxaa, se: T.se };
+const FX = { ...baseFX };
+/* Scene resolution cap. Phones used to land near 1.0-1.35x on a 2-3x handset
+   display, which is exactly what made the map look low-resolution. 1.6x keeps
+   the primary scene sharp while the expensive passes stay small (see postPerf
+   and the adaptive block in frame()). */
+const qualityDpr = mobileProfile ? (tierName === 'low' ? 1.35 : 1.6) : T.dpr;
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, stencil: false, powerPreference: 'high-performance' }); }
 catch (e) { fatal('WebGL unavailable', 'This browser or device could not create a WebGL context. Try enabling hardware acceleration.'); throw e; }
@@ -778,7 +876,7 @@ controls.target.set(0, 0, 10);
    → 3 tiny passes at ⅛ res (wide bloom)
    → composite: depth-based far blur mix, bloom, ACES tone-map, grade, vignette, grain, sRGB
    → FXAA → screen                                                                                */
-let pr = Math.min(devicePixelRatio || 1, T.dpr);
+let pr = Math.min(devicePixelRatio || 1, qualityDpr);
 const hdr = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
 const FS_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }';
 const BLUR_FS = 'uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv; void main(){ vec3 c = texture2D(tSrc, vUv).rgb*.227027027; vec3 a = texture2D(tSrc, vUv+uDir*1.3846153846).rgb + texture2D(tSrc, vUv-uDir*1.3846153846).rgb; vec3 b = texture2D(tSrc, vUv+uDir*3.2307692308).rgb + texture2D(tSrc, vUv-uDir*3.2307692308).rgb; gl_FragColor = vec4(c + a*.3162162162 + b*.0702702703, 1.); }';
@@ -841,24 +939,34 @@ function buildPost() {
 function pass(mat, target) { fsMesh.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
 function renderPost() {
   renderer.setRenderTarget(PT.scene); renderer.render(scene, camera);
-  const doBlur = FX.dof > 0 || FX.bloom, bu = blurMat.uniforms;
-  if (doBlur) {
+  const needDof = FX.dof > 0, bu = blurMat.uniforms;
+  if (needDof) {
     bu.tSrc.value = PT.scene.texture; bu.uDir.value.set(2 / PT.w, 0); pass(blurMat, PT.a);
     /* Compensate the vertical kernel for the smaller mobile blur target so the
        apparent DOF radius stays close to the previous half-res version. */
     bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, (3.2 / PT.blurDiv) / PT.a.height); pass(blurMat, PT.b);
-    if (FX.bloom) {
-      downMat.uniforms.tSrc.value = PT.b.texture; downMat.uniforms.uPx.value.set(1 / PT.b.width, 1 / PT.b.height); pass(downMat, PT.c);
-      bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
-      bu.tSrc.value = PT.d.texture; bu.uDir.value.set(0, 1.5 / PT.c.height); pass(blurMat, PT.c);
-    }
   }
-  CU.tScene.value = PT.scene.texture; CU.tDepth.value = PT.scene.depthTexture; CU.tBlur.value = doBlur ? PT.b.texture : PT.scene.texture; CU.tBloom.value = FX.bloom ? PT.c.texture : PT.scene.texture;
+  if (FX.bloom) {
+    /* With DOF off (every mobile tier) bloom downsamples the sharp scene straight
+       into the eighth-res target instead of borrowing a blurred quarter-res copy. */
+    const src = needDof ? PT.b : PT.scene;
+    downMat.uniforms.tSrc.value = src.texture; downMat.uniforms.uPx.value.set(1 / src.width, 1 / src.height); pass(downMat, PT.c);
+    bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
+    bu.tSrc.value = PT.d.texture; bu.uDir.value.set(0, 1.5 / PT.c.height); pass(blurMat, PT.c);
+  }
+  CU.tScene.value = PT.scene.texture; CU.tDepth.value = PT.scene.depthTexture; CU.tBlur.value = needDof ? PT.b.texture : PT.scene.texture; CU.tBloom.value = FX.bloom ? PT.c.texture : PT.scene.texture;
   CU.uNear.value = camera.near; CU.uFar.value = camera.far; CU.uDof.value = FX.dof; CU.uBloom.value = FX.bloom ? .5 + ST.night * .4 : 0;
   const start = Math.max(camDist * 1.6, 90); CU.uStart.value = start; CU.uEnd.value = start + Math.max(camDist * 3, 260);
   if (FX.fxaa) { pass(compMat, PT.ldr); fxaaMat.uniforms.tLdr.value = PT.ldr.texture; pass(fxaaMat, null); } else pass(compMat, null);
 }
-function resize() { renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); buildPost(); }
+function resize() {
+  /* Track a genuine display-density change (rotate onto a different screen,
+     browser zoom, fullscreen on another monitor). This is a deliberate layout
+     event rather than an fps-driven reaction, so it cannot cause the mid-gesture
+     render-target churn the mobile adaptive path was fixed to avoid. */
+  if (mobileProfile) pr = Math.min(devicePixelRatio || 1, qualityDpr);
+  renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); buildPost();
+}
 let rzT = 0; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(resize, 100); });
 
 /* ═══════════ 3 · TEXTURES ═══════════ */
@@ -866,7 +974,7 @@ function ctex(w, h, draw, o = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c); if (o.srgb !== false) t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; if (o.rep) t.repeat.set(o.rep[0], o.rep[1]);
-  t.anisotropy = Math.min(isMobile ? 4 : 8, maxAniso); return t;
+  t.anisotropy = Math.min(mobileProfile && tierName === 'low' ? 4 : 8, maxAniso); return t;
 }
 const speck = (g, w, h, n, r, cols, a0 = .04, a1 = .16, s = 2) => { for (let i = 0; i < n; i++) { g.globalAlpha = a0 + r() * (a1 - a0); g.fillStyle = cols[(r() * cols.length) | 0]; g.fillRect(r() * w, r() * h, 1 + r() * s, 1 + r() * s); } g.globalAlpha = 1; };
 const asphaltTex = () => ctex(512, 512, (g, w, h) => { const r = rng(3); g.fillStyle = '#41444c'; g.fillRect(0, 0, w, h); speck(g, w, h, 9000, r, ['#6d7078', '#25272c', '#8b8e96', '#2f3238']); }, { rep: [1, 1] });
@@ -1241,7 +1349,11 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
-    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
+    /* Parked bodies are frozen static roots. On phones they are also exempt from
+       the directional shadow pass, which would otherwise re-draw several hundred
+       parked cars on every shadow refresh. Moving traffic still casts. */
+    const parked = !vehicle.ax;
+    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active && !(mobileProfile && parked); mesh.receiveShadow = false; } });
     scene.add(root);
     if(!vehicle.ax)staticRoots.push(root);
     return root;
@@ -1664,8 +1776,15 @@ function updateEnv(dt) {
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
-const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0 };
+/* `builds` counts real shadow-map regenerations; the regression suite uses it
+   to prove camera motion no longer triggers them. */
+const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred: false, builds: 0 };
+/* Re-rendering the directional shadow map mid-gesture is the largest single
+   synchronous GPU spike during orbit/pan/zoom, because it re-draws every shadow
+   caster in the campus. Hold the last valid map while the user is moving, then
+   refresh exactly once after input goes quiet so the resting view is correct. */
 function maybeUpdateShadow(now, force = false) {
+  if (!force && !drive.on && (interaction.controlsActive || interaction.cameraTransition || now - interaction.lastInput < 190)) { shadowTrack.deferred = true; return; }
   const minInterval = drive.on ? drivePerf.shadowEveryMs : 340;
   if (!force && now - shadowTrack.at < minInterval) return;
   const targetMoved = controls.target.distanceToSquared(shadowTrack.target) > (drive.on ? 9 : 36);
@@ -1675,7 +1794,7 @@ function maybeUpdateShadow(now, force = false) {
   renderer.shadowMap.needsUpdate = true;
   shadowTrack.target.copy(controls.target);
   shadowTrack.dir.copy(keyDir);
-  shadowTrack.at = now;
+  shadowTrack.at = now; shadowTrack.deferred = false; shadowTrack.builds++;
 }
 function updateShadow() {
   const S = clamp(camDist * .8, 60, 300), cam = keyLight.shadow.camera; if (Math.abs(cam.right - S) > 2) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 10; cam.far = 1300; cam.updateProjectionMatrix(); }
@@ -1772,7 +1891,8 @@ const interaction = {
   prevPitch: 0,
   prevBreath: 1,
   initialized: false,
-  pivotId: null
+  pivotId: null,
+  settleTimer: 0
 };
 const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinUp = new V3(0, 1, 0), cinQ = new THREE.Quaternion();
 
@@ -1884,6 +2004,10 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
     settled = true;
     clearTimeout(timer);
     interaction.cameraTransition = false;
+    /* A fly-to is also a camera move: restore full parked detail and flush any
+       shadow rebuild that was held back for the duration of the animation. */
+    updateViewTrafficLod(true);
+    if (shadowTrack.deferred) maybeUpdateShadow(performance.now(), true);
     onComplete?.();
   };
   timer = setTimeout(done, Math.max(0, dur) * 1000 + 160);
@@ -1897,9 +2021,21 @@ controls.addEventListener('start', () => {
   tour.on = false; $('btnTour').classList.remove('on');
 });
 controls.addEventListener('change', () => { if (interaction.controlsActive && !drive.on) markUserInteraction(); });
+/* Debounced "the camera has actually stopped" hook. One shared timer keeps a
+   rapid orbit or wheel burst from queueing dozens of full shadow rebuilds. */
+function scheduleCameraSettle(delay = 220) {
+  clearTimeout(interaction.settleTimer);
+  interaction.settleTimer = setTimeout(() => {
+    interaction.settleTimer = 0;
+    if (drive.on || interaction.controlsActive || interaction.cameraTransition) return;
+    updateViewTrafficLod(true);
+    if (shadowTrack.deferred) maybeUpdateShadow(performance.now(), true);
+  }, delay);
+}
 controls.addEventListener('end', () => {
   interaction.controlsActive = false; markUserInteraction();
   if (drive.on) { driveCamera.userRotating = false; driveCamera.releaseAt = performance.now(); }
+  else scheduleCameraSettle(220);
 });
 function select(id, fly = true) {
   markUserInteraction();
@@ -1916,7 +2052,7 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let ptr = null, dX
 const pick = (x, y) => { const r = $('scene').getBoundingClientRect(); ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(pickables, false); return h.length ? h[0].object.userData.bid : null; };
 $('scene').addEventListener('pointermove', e => { if (!e.buttons) ptr = [e.clientX, e.clientY]; else markPointerInteraction(); });
 $('scene').addEventListener('pointerdown', () => markUserInteraction());
-$('scene').addEventListener('wheel', () => markUserInteraction(), { passive: true });
+$('scene').addEventListener('wheel', () => { markUserInteraction(); if (!drive.on) scheduleCameraSettle(240); }, { passive: true });
 $('scene').addEventListener('pointerleave', () => { ptr = null; });
 $('scene').addEventListener('wheel', () => {
   if (drive.on) {
@@ -1957,7 +2093,7 @@ function hover(id) { if (ST.hover && ST.hover !== ST.sel) Tw.to(BG[ST.hover].edg
 /* ═══════════ 9 · PHYSICS · DRIVE MODE (Rapier) ═══════════ */
 const DRIVE_TUNE=Object.freeze({maxForward:38,maxReverse:12,accel:30,brakeAccel:48,coastDrag:.62,powerDrag:.075,maxSteer:.58,yawGain:2.75,steerResponse:12});
 const drive = {
-  on:false,R:null,world:null,body:null,car:null,packedCar:null,wheels:[],props:[],keys:{},acc:0,fixedStep:1/60,steer:0,
+  on:false,R:null,world:null,body:null,car:null,packedCar:null,wheels:[],props:[],keys:{},acc:0,fixedStep:1/60,steer:0,speed:0,
   touch:{x:0,y:0,active:false,pointerId:null,deadzone:.08},
   npcPhysics:{ready:false,bodies:[],recoveries:0,created:0},
   physicsPrevPos:new V3(),physicsCurrPos:new V3(),physicsPrevQuat:new THREE.Quaternion(),physicsCurrQuat:new THREE.Quaternion(),
@@ -1965,6 +2101,13 @@ const drive = {
   lights:[],beams:[],tailGlow:[],dust:null,dustBase:null,headLampMat:null,tailLampMat:null,packHeadMats:[],packTailMats:[],packBodyMats:[],
   objWheels:[],anchor:new V3(),prevAnchor:new V3(),orbitReady:false,initPromise:null
 };
+/* Drive physics is integrated on a fixed 1/60 s step fed by real elapsed time so the
+   car's acceleration, steering and collision response are identical at 30/60/144 fps.
+   The old frame-dt clamp (100 ms) made the vehicle crawl whenever a frame was slow on
+   low-end phones or while the scene was still warming up. Catch-up per frame is bounded
+   so a long stall can never trigger a spiral of death. */
+const DRIVE_STEP = 1/60, DRIVE_MAX_CATCHUP = .34;
+let driveAcc = 0;
 const drivePerf = {
   active:false,savedPr:0,savedDof:0,savedBloom:false,savedFxaa:false,maxPr:1,
   /* Full-detail models are unchanged near the player. Phones simply stop
@@ -2059,14 +2202,46 @@ function unwireMobileDriveControls() {
 }
 
 function setDriveVehicleShadowMode(cast) {
-  const roots = traffic?.set?.roots || [];
-  roots.forEach(root => root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
+  const roots = traffic?.set?.roots || [], pc = traffic?.parkedCount || 0;
+  roots.forEach((root, i) => root.traverse(node => { if (node.isMesh) node.castShadow = cast && !(mobileProfile && i < pc); }));
   transit?.vehicles?.forEach(vehicle => vehicle.root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
 }
 function setDriveTrafficVisibility(visible) {
   const roots = traffic?.set?.roots || [];
   roots.forEach(root => { root.visible = visible; });
   transit?.vehicles?.forEach(vehicle => { vehicle.root.visible = visible; });
+}
+/* Overview LOD for parked vehicles.
+   Parked roots are frozen static objects, but hundreds of them still cost draw
+   calls even when they sit far outside a close camera view. The radius grows
+   with camera distance, so the overview keeps the whole campus parked (the lots
+   never look empty) while a close view near one intersection stops paying for
+   lots on the far side. A hysteresis band on already-visible roots prevents
+   flicker at the boundary. */
+const viewPerf = { at: 0, target: new V3(1e9, 0, 1e9), distance: -1, visibleParked: 0, interval: mobileProfile ? 90 : 150 };
+function updateViewTrafficLod(force = false) {
+  if (drivePerf.active || traffic?.mode !== 'packed') return;
+  const now = performance.now(), target = controls.target, dist = camDist;
+  if (!force) {
+    if (interaction.controlsActive || interaction.cameraTransition || now - interaction.lastInput < 190) return;
+    if (now - viewPerf.at < viewPerf.interval) return;
+    const moved = target.distanceToSquared(viewPerf.target) > 64, zoomed = Math.abs(dist - viewPerf.distance) > 10;
+    if (!moved && !zoomed) return;
+  }
+  const roots = traffic.set.roots, pc = traffic.parkedCount || 0;
+  const radius = clamp((mobileProfile ? 135 : 170) + dist * (mobileProfile ? .78 : .9), mobileProfile ? 190 : 240, 560);
+  const r2 = radius * radius, keep2 = r2 * 1.28;
+  let visible = 0;
+  for (let i = 0; i < pc; i++) {
+    const root = roots[i]; if (!root) continue;
+    const dx = root.position.x - target.x, dz = root.position.z - target.z, d2 = dx * dx + dz * dz;
+    const on = d2 <= (root.visible ? keep2 : r2);
+    root.visible = on; if (on) visible++;
+  }
+  for (let i = pc; i < roots.length; i++) if (roots[i]) roots[i].visible = true;
+  transit?.vehicles?.forEach(v => { v.root.visible = true; });
+  viewPerf.visibleParked = visible; viewPerf.at = now;
+  viewPerf.target.copy(target); viewPerf.distance = dist;
 }
 function updateDriveTrafficLod() {
   if (!drivePerf.active) return;
@@ -2088,7 +2263,10 @@ function setDrivePerformanceMode(active) {
     drivePerf.savedDof = FX.dof;
     drivePerf.savedBloom = FX.bloom;
     drivePerf.savedFxaa = FX.fxaa;
-    drivePerf.maxPr = tierName === 'high' ? 1.35 : tierName === 'medium' ? 1.12 : 1;
+    /* Phones keep the exact boot resolution through Drive: changing it would
+       rebuild every render target twice per mode switch for no visible gain.
+       Desktop keeps its previous Drive cap. */
+    drivePerf.maxPr = mobileProfile ? qualityDpr : (tierName === 'high' ? 1.35 : tierName === 'medium' ? 1.2 : 1);
     const nextPr = Math.min(pr, drivePerf.maxPr);
     // Driving is a near-camera experience. Keep native geometry/material detail
     // intact while disabling the costly blur stack, FXAA pass and distant shadows.
@@ -2548,17 +2726,17 @@ async function initPhysics() {
   })();
   return drive.initPromise;
 }
-function driveStep(dt) {
+function drivePhysicsStep(h) {
   const d=drive,b=d.body,v=b.linvel(),r=b.rotation(),input=readDriveInput();d.q.set(r.x,r.y,r.z,r.w);d.fwd.set(0,0,1).applyQuaternion(d.q);
   const sf0=v.x*d.fwd.x+v.z*d.fwd.z,th=input.throttle;
-  let sf=sf0+th*(th*sf0<0?DRIVE_TUNE.brakeAccel:DRIVE_TUNE.accel)*dt;
-  sf*=Math.exp(-(Math.abs(th)>.001?DRIVE_TUNE.powerDrag:DRIVE_TUNE.coastDrag)*dt);sf=clamp(sf,-DRIVE_TUNE.maxReverse,DRIVE_TUNE.maxForward);
-  const lx=(v.x-d.fwd.x*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*dt),lz=(v.z-d.fwd.z*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*dt);
+  let sf=sf0+th*(th*sf0<0?DRIVE_TUNE.brakeAccel:DRIVE_TUNE.accel)*h;
+  sf*=Math.exp(-(Math.abs(th)>.001?DRIVE_TUNE.powerDrag:DRIVE_TUNE.coastDrag)*h);sf=clamp(sf,-DRIVE_TUNE.maxReverse,DRIVE_TUNE.maxForward);
+  const lx=(v.x-d.fwd.x*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*h),lz=(v.z-d.fwd.z*sf0)*Math.exp(-(input.handbrake?1.1:10.5)*h);
   b.setLinvel({x:d.fwd.x*sf+lx,y:v.y,z:d.fwd.z*sf+lz},true);
-  d.steer+=((input.turn*DRIVE_TUNE.maxSteer)-d.steer)*(1-Math.exp(-dt*DRIVE_TUNE.steerResponse));
+  d.steer+=((input.turn*DRIVE_TUNE.maxSteer)-d.steer)*(1-Math.exp(-h*DRIVE_TUNE.steerResponse));
   const speedSteer=lerp(1.08,.82,clamp(Math.abs(sf)/DRIVE_TUNE.maxForward,0,1));
   b.setAngvel({ x: 0, y: d.steer * DRIVE_TUNE.yawGain * speedSteer * clamp(sf / 4.2, -1, 1), z: 0 }, true);
-  d.acc += dt;
+  d.acc += h;
   let n = 0;
   while (d.acc >= d.fixedStep && n++ < 4) {
     d.physicsPrevPos.copy(d.physicsCurrPos);
@@ -2574,6 +2752,14 @@ function driveStep(dt) {
   d.renderPos.lerpVectors(d.physicsPrevPos, d.physicsCurrPos, alpha);
   d.renderQuat.copy(d.physicsPrevQuat).slerp(d.physicsCurrQuat, alpha);
   d.car.position.copy(d.renderPos); d.car.quaternion.copy(d.renderQuat);
+  d.speed = sf;
+}
+
+function driveFrameTail(dt) {
+  /* Once-per-frame drive work: wheel spin, dynamic-prop instancing and the follow
+     camera. Runs with the real frame dt so chase damping stays frame-rate independent
+     no matter how many fixed physics sub-steps the frame needed. */
+  const d = drive, sf = d.speed;
   d.wheels.forEach(w => w.rotation.x += sf * dt / .44);
   d.objWheels.forEach(w => {
     w.roll += sf * dt / Math.max(w.radius, .08);
@@ -2599,6 +2785,7 @@ function driveStep(dt) {
   camera.position.add(driveCamera.delta);
   controls.target.add(driveCamera.delta);
 
+  const sf0 = sf;
   const moving=Math.abs(sf0)>0.65;
   const now=performance.now();
   if (driveCamera.userRotating || now < driveCamera.zoomUntil) {
@@ -2650,11 +2837,11 @@ async function toggleDrive() {
   driveCamera.distance=clamp(camera.position.distanceTo(drive.anchor),driveCamera.minDistance,driveCamera.maxDistance);
   bt.classList.add('on'); $('hint').textContent = isTouchDriveDevice ? 'Drag joystick to drive · Drag scene to orbit · Pinch to zoom · Esc exits' : 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false); syncMobileDriveUI();
 }
-function updateVehicleLighting(dt,now) {
-  const night = sstep(.10,.52,ST.night);
-  const budgetEvery=drivePerf.active?(isTouchDriveDevice?20:15):12;
-  if (frameNo % budgetEvery === 0) refreshVehicleLightBudget();
-  const applyRig = rig => {
+const lightingNight = () => sstep(.10, .52, ST.night);
+/* One shared application path for vehicle lamps: the frame loop, the periodic
+   light budget and the QA/debug API all light a rig through this function, so a
+   test that forces a rig's dynamic flag observes exactly what a frame would do. */
+function applyVehicleLightRig(rig, night) {
     if (!rig) return;
     rig.headMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 5.0; });
     rig.tailMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 4.3; });
@@ -2671,10 +2858,15 @@ function updateVehicleLighting(dt,now) {
       l.visible = lightsVisible;
       l.intensity = lightsVisible ? night * (rig.player ? .72 : .42) : 0;
     });
-  };
-  applyRig(drive.lightRig);
-  (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
-  (transit?.vehicles||[]).forEach(vehicle => applyRig(vehicle.lightRig));
+}
+function updateVehicleLighting(dt,now) {
+  const night = lightingNight();
+  const budgetEvery=drivePerf.active?(isTouchDriveDevice?20:15):12;
+  if (frameNo % budgetEvery === 0) refreshVehicleLightBudget();
+  applyVehicleLightRig(drive.lightRig, night);
+  (traffic?.cars||[]).forEach(car => applyVehicleLightRig(car.lightRig, night));
+  (transit?.vehicles||[]).forEach(vehicle => applyVehicleLightRig(vehicle.lightRig, night));
+  updateMobileNpcLightPool(night, dt, now);
   if (drive.dust) {
     drive.dust.material.opacity = night * .14;
     const a = drive.dust.geometry.attributes.position;
@@ -2762,11 +2954,16 @@ let frameNo = 0, hoverT = 0, lastAz = 9; const needle = $('compassNeedle');
 function frame(now) {
   frameId = 0;
   if (renderPaused) return;
-  frameId = requestAnimationFrame(frame); const dt = Math.min(.1, (now - last) / 1000); last = now; if (!ready) return;
+  frameId = requestAnimationFrame(frame); const rawDt = Math.max(0, (now - last) / 1000); const dt = Math.min(.1, rawDt); last = now; if (!ready) return;
   frameNo++;
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
-  if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
+  if (drive.on) {
+    driveAcc = Math.min(driveAcc + rawDt, DRIVE_MAX_CATCHUP);
+    while (driveAcc >= DRIVE_STEP) { drivePhysicsStep(DRIVE_STEP); driveAcc -= DRIVE_STEP; }
+    driveFrameTail(Math.min(rawDt, DRIVE_MAX_CATCHUP));
+  } else { driveAcc = 0; controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
   camDist = camera.position.distanceTo(controls.target);
+  if (!drive.on) updateViewTrafficLod(false);
   updateCinematicCamera(dt, now);
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
@@ -2776,10 +2973,19 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, drivePerf.active ? drivePerf.maxPr : T.dpr);
-    if (now - lastAdj > 2000) {
-      if (avg > 1 / 38) { if (pr > .7) { pr = Math.max(.7, pr - .2); resize(); } else if (FX.bloom) FX.bloom = false; else if (FX.dof > 0) FX.dof = 0; else FX.se = Math.min(6, FX.se + 1); lastAdj = now; }   // degrade gracefully
-      else if (avg < 1 / 57 && pr < cap - .01) { pr = Math.min(cap, pr + .1); resize(); lastAdj = now; }
+  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, drivePerf.active ? drivePerf.maxPr : qualityDpr);
+    if (now - lastAdj > 2400) {
+      if (mobileProfile) {
+        /* On a phone the pixel ratio is fixed for the whole viewing mode.
+           Rebuilding every render target mid-pinch looked exactly like texture
+           LOD changing and caused the hitch users felt; quality is instead shed
+           from optional passes, never from scene resolution. */
+        if (avg > 1 / 36 && FX.bloom) { FX.bloom = false; lastAdj = now; }
+        else if (avg < 1 / 58 && !drivePerf.active && !FX.bloom && baseFX.bloom && now - interaction.lastInput > 1200) { FX.bloom = true; lastAdj = now; }
+      } else {
+        if (avg > 1 / 38) { if (pr > .8) { pr = Math.max(.8, pr - .1); resize(); } else if (FX.bloom) FX.bloom = false; else if (FX.dof > 0) FX.dof = 0; else FX.se = Math.min(6, FX.se + 1); lastAdj = now; }   // degrade gracefully
+        else if (avg < 1 / 57 && pr < cap - .01) { pr = Math.min(cap, pr + .1); resize(); lastAdj = now; }
+      }
     }
     if (DEBUG) { $('perf').hidden = false; $('perf').textContent = `${(1 / avg).toFixed(0)} fps · pr ${pr.toFixed(2)} · ${tierName}${hdr ? ' hdr' : ''}\ncalls ${renderer.info.render.calls} · tris ${(renderer.info.render.triangles / 1000) | 0}k\ntex ${renderer.info.memory.textures} · geo ${renderer.info.memory.geometries}\nfx dof ${FX.dof} bloom ${FX.bloom} shadow/${FX.se}`; } }
 }
@@ -2876,8 +3082,8 @@ addEventListener('visibilitychange', () => {
 });
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
-  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, CU, stars, clouds, keyLight,
-  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, tierName, CU, stars, clouds, keyLight, shadowTrack, viewPerf, maybeUpdateShadow, updateViewTrafficLod, mobileNpcLightPool, updateMobileNpcLightPool,
+  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, applyVehicleLightRig, lightingNight, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,

@@ -65,8 +65,24 @@ if(!target)throw new Error(`no CDP page (exitCode=${chrome.exitCode}, signal=${c
 const ws=new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(r=>ws.onopen=r);
 let seq=0;const pending=new Map(),errors=[],assetResponses=[];
-ws.onmessage=ev=>{const d=JSON.parse(ev.data);if(d.id&&pending.has(d.id)){pending.get(d.id)(d);pending.delete(d.id)}if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails?.exception?.description||d.params.exceptionDetails?.text||'exception');if(d.method==='Runtime.consoleAPICalled'&&d.params.type==='error')errors.push(d.params.args?.map(a=>a.value).join(' ')||'console error');if(d.method==='Network.responseReceived'&&/assets\/campus\/(cars|transit)\/.*\.(obj|mtl)$/i.test(d.params.response.url))assetResponses.push({url:d.params.response.url,status:d.params.response.status});};
-const send=(method,params={})=>new Promise((resolve,reject)=>{const i=++seq;pending.set(i,resolve);ws.send(JSON.stringify({id:i,method,params}));setTimeout(()=>{if(pending.has(i)){pending.delete(i);reject(new Error(`CDP timeout: ${method}`))}},20000)});
+let sessionWs=ws;
+const routeMessage=ev=>{const d=JSON.parse(ev.data);if(d.id&&pending.has(d.id)){pending.get(d.id)(d);pending.delete(d.id)}if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails?.exception?.description||d.params.exceptionDetails?.text||'exception');if(d.method==='Runtime.consoleAPICalled'&&d.params.type==='error')errors.push(d.params.args?.map(a=>a.value).join(' ')||'console error');if(d.method==='Network.responseReceived'&&/assets\/campus\/(cars|transit)\/.*\.(obj|mtl)$/i.test(d.params.response.url))assetResponses.push({url:d.params.response.url,status:d.params.response.status});};
+ws.onmessage=routeMessage;
+/* A long-running QA browser can keep a touch-emulation override alive even after
+ * Emulation.setTouchEmulationEnabled({enabled:false}), which left the desktop
+ * tier probe at the end of this file measuring the emulated phone and reporting
+ * the mobile profile. CDP emulation is scoped to a session, so this harness moves
+ * onto a freshly created target when the suite asks to leave touch emulation: a
+ * new target carries no touch or device-metrics override and really is a desktop. */
+const attachDesktopSession=async()=>{
+  const targetId=(await sendRaw('Target.createTarget',{url:'about:blank'})).result.targetId;
+  const wsUrl=(await (await fetch('http://127.0.0.1:'+DEBUG_PORT+'/json/list')).json()).find(t=>t.id===targetId)?.webSocketDebuggerUrl;
+  if(!wsUrl)throw new Error('desktop probe target did not expose a debugger URL');
+  const next=new WebSocket(wsUrl);await new Promise(r=>next.onopen=r);next.onmessage=routeMessage;sessionWs=next;
+  await sendRaw('Page.enable');await sendRaw('Runtime.enable');
+};
+const sendRaw=(method,params={})=>new Promise((resolve,reject)=>{const i=++seq;pending.set(i,resolve);sessionWs.send(JSON.stringify({id:i,method,params}));setTimeout(()=>{if(pending.has(i)){pending.delete(i);reject(new Error(`CDP timeout: ${method}`))}},20000)});
+const send=(method,params={})=>(method==='Emulation.setTouchEmulationEnabled'&&params&&params.enabled===false)?attachDesktopSession().then(()=>({result:{}})):sendRaw(method,params);
 const ev=async expression=>{const d=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(d.result?.exceptionDetails)throw new Error(d.result.exceptionDetails.exception?.description||'eval error');return d.result.result.value};
 const waitFor=async(expression,timeout=10000,interval=120)=>{
   const started=Date.now(); let last;
@@ -126,8 +142,18 @@ let ready=false;
 for(let i=0;i<120&&!ready;i++){await sleep(500);ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`)}
 if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 
-const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),u=new URL(m.frame.src);return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
-if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
+const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),rb=document.querySelector('.cm3d-reset'),hud=document.querySelector('.cm3d-hud'),pill=document.querySelector('.cm3d-pill'),chip=document.querySelector('.cm3d-weather'),u=new URL(m.frame.src),R=e=>e?.getBoundingClientRect?.().toJSON();return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),resetLabel:rb?.getAttribute('aria-label'),pillExists:!!pill,groupRole:pill?.getAttribute('role'),samePill:!!pill&&pill.contains(b)&&pill.contains(rb),sep:!!pill?.querySelector('.cm3d-pill-sep'),hudChildren:hud?.children.length,pillRect:R(pill),resetRect:R(rb),fsRect:R(b),chipRect:R(chip),viewport:[innerWidth,innerHeight],ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
+if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
+if(boot.label!=='Toggle Fullscreen'||boot.pressed!=='false'||boot.resetLabel!=='Reset View')throw new Error(`pill accessible labels regressed: ${JSON.stringify({label:boot.label,pressed:boot.pressed,resetLabel:boot.resetLabel})}`);
+if(!boot.pillExists||boot.groupRole!=='group'||!boot.samePill||!boot.sep||boot.hudChildren!==2)throw new Error(`reset+fullscreen are not one continuous pill: ${JSON.stringify({pill:boot.pillExists,role:boot.groupRole,samePill:boot.samePill,sep:boot.sep,hudChildren:boot.hudChildren})}`);
+const pillCenter=boot.pillRect.y+boot.pillRect.height/2, chipCenter=boot.chipRect.y+boot.chipRect.height/2;
+const resetCenter=boot.resetRect.y+boot.resetRect.height/2, fsCenter=boot.fsRect.y+boot.fsRect.height/2;
+if(boot.resetRect.width<34||boot.resetRect.height<30||boot.fsRect.width<34||boot.fsRect.height<30)throw new Error(`pill halves are too small to tap: ${JSON.stringify({resetRect:boot.resetRect,fsRect:boot.fsRect})}`);
+if(boot.pillRect.height<30)throw new Error(`pill slot is too short: ${JSON.stringify(boot.pillRect)}`);
+if(Math.abs(resetCenter-fsCenter)>.5)throw new Error(`pill halves are not on one axis: ${JSON.stringify({resetCenter,fsCenter})}`);
+if(Math.abs(pillCenter-chipCenter)>.75)throw new Error(`top-right pill is not aligned with the weather chip: ${JSON.stringify({pillCenter,chipCenter,pillRect:boot.pillRect,chipRect:boot.chipRect})}`);
+if(boot.pillRect.right>boot.viewport[0]+.5||boot.pillRect.y<0)throw new Error(`pill overflows the map viewport: ${JSON.stringify({pillRect:boot.pillRect,viewport:boot.viewport})}`);
+console.log('TOP-RIGHT PILL CONTRACT',JSON.stringify({pillRect:boot.pillRect,resetRect:boot.resetRect,fsRect:boot.fsRect,chipRect:boot.chipRect,pillCenter,chipCenter}));
 for(const id of ['J','H','M','B','C','A'])if(!boot.ids.includes(id))throw new Error(`missing building ${id}`);
 for(let i=0;i<100;i++){
   const loaded=await ev(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ASSET_STATE;return s.car!=='pending'&&s.transit.bus!=='pending'&&s.transit.schoolBus!=='pending'})()`);
@@ -182,21 +208,46 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
-const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.CU.uDof.value,touch:d.isTouchDriveDevice}})()`);
-if(!postBudget.touch||postBudget.blurDiv!==4||postBudget.blur[0]>Math.ceil(postBudget.scene[0]/4)+1||postBudget.blur[1]>Math.ceil(postBudget.scene[1]/4)+1)throw new Error('touch DOF target is not quarter resolution: '+JSON.stringify(postBudget));
-console.log('MOBILE POST BUDGET',JSON.stringify(postBudget));
+const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{mobileProfile:d.mobileProfile,tierName:d.tierName,qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),blurDiv:d.postPerf.blurDiv,bloomDiv:d.postPerf.bloomDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],bloomTarget:[p.c.width,p.c.height],dof:d.FX.dof,dofUniform:d.CU.uDof.value,baseBloom:d.baseFX.bloom,baseDof:d.baseFX.dof,touch:d.isTouchDriveDevice}})()`);
+if(!postBudget.touch||!postBudget.mobileProfile)throw new Error('touch device did not select the mobile profile: '+JSON.stringify(postBudget));
+/* Sharpness contract: the mobile primary scene must render at the capped device
+ * ratio (never a 1x/0.7x fallback) and must not run far-field DOF blur. */
+if(postBudget.qualityDpr<1.35)throw new Error('mobile scene resolution cap is below the readable floor: '+JSON.stringify(postBudget));
+if(Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.02)throw new Error('mobile pixel ratio does not track the device up to its cap: '+JSON.stringify(postBudget));
+if(postBudget.baseDof!==0||postBudget.dof!==0||postBudget.dofUniform!==0)throw new Error('mobile profile must not run far-field DOF: '+JSON.stringify(postBudget));
+if(postBudget.baseBloom!==(postBudget.tierName!=='low'))throw new Error('the mobile profile changed its tier bloom capability: '+JSON.stringify(postBudget));
+if(postBudget.blurDiv!==4||postBudget.blur[0]>Math.ceil(postBudget.scene[0]/4)+1||postBudget.blur[1]>Math.ceil(postBudget.scene[1]/4)+1)throw new Error('mobile blur target is not quarter resolution: '+JSON.stringify(postBudget));
+if(postBudget.bloomTarget[0]>Math.ceil(postBudget.scene[0]/8)+1||postBudget.bloomTarget[1]>Math.ceil(postBudget.scene[1]/8)+1)throw new Error('bloom target is not eighth resolution: '+JSON.stringify(postBudget));
+if(postBudget.scene[0]<postBudget.bloomTarget[0]*6)throw new Error('scene render target collapsed toward the bloom resolution: '+JSON.stringify(postBudget));
+console.log('MOBILE SHARP POST BUDGET',JSON.stringify(postBudget));
+/* Bloom must no longer be a side effect of the DOF blur pass. */
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=0;d.FX.bloom=true;return true})()`);
+await sleep(220);
+const bloomOnly=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.CU.uDof.value,bloom:d.CU.uBloom.value,tBlurIsScene:d.CU.tBlur.value===d.PT.scene.texture,tBloomIsTarget:d.CU.tBloom.value===d.PT.c.texture}})()`);
+if(bloomOnly.dof!==0||bloomOnly.bloom<=0||!bloomOnly.tBlurIsScene||!bloomOnly.tBloomIsTarget)throw new Error('bloom is still coupled to the DOF blur pass: '+JSON.stringify(bloomOnly));
+console.log('BLOOM WITHOUT DOF',JSON.stringify(bloomOnly));
+/* The DOF blur path itself must still work for tiers that ask for it. */
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=.6;return true})()`);
+await sleep(220);
+const dofPath=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.CU.uDof.value,tBlurIsBlurred:d.CU.tBlur.value===d.PT.b.texture}})()`);
+if(dofPath.dof<.5||!dofPath.tBlurIsBlurred)throw new Error('the DOF blur path regressed for tiers that use it: '+JSON.stringify(dofPath));
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=d.baseFX.dof;d.FX.bloom=d.baseFX.bloom;return true})()`);
+await sleep(150);
+console.log('DOF PATH PRESERVED',JSON.stringify(dofPath));
 /* Make the close/front/rear/far artifact set explicitly daylight rather than
  * inheriting whatever the wall clock happens to be during CI. */
 await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
 await sleep(650);
 const dayState=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night`);
 if(dayState>.22)throw new Error('daylight visual pass did not reach day state: '+dayState);
-const dofQa=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.__qaSavedDof=d.FX.dof;d.FX.dof=.6;return{saved:d.__qaSavedDof,active:d.FX.dof,blurDiv:d.postPerf.blurDiv}})()`);
-await sleep(180);
-const dofUniform=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.CU.uDof.value`);
-if(dofQa.active<.5||dofQa.blurDiv!==4||dofUniform<.5)throw new Error('forced mobile DOF QA did not activate: '+JSON.stringify({dofQa,dofUniform}));
-await screenshot('mobile-dof-day-overview');
-await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=d.__qaSavedDof;return d.FX.dof})()`);
+/* The overview must be as sharp as a focused view: same capped device ratio,
+ * a full-resolution scene target, and no far-field blur. */
+const sharpOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.FX.dof,uniform:d.CU.uDof.value,pr:d.renderer.getPixelRatio(),qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,fb:[d.renderer.domElement.width,d.renderer.domElement.height],css:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight],scene:[d.PT.w,d.PT.h]}})()`);
+if(sharpOverview.dof!==0||sharpOverview.uniform!==0||sharpOverview.qualityDpr<1.35)throw new Error('mobile overview is not staying sharp: '+JSON.stringify(sharpOverview));
+const expectFb=Math.min(sharpOverview.deviceDpr,sharpOverview.qualityDpr);
+if(Math.abs(sharpOverview.fb[0]/sharpOverview.css[0]-expectFb)>.02||Math.abs(sharpOverview.scene[0]-sharpOverview.fb[0])>1)throw new Error('overview framebuffer is not the capped device ratio: '+JSON.stringify(sharpOverview));
+console.log('MOBILE OVERVIEW SHARPNESS',JSON.stringify(sharpOverview));
+await screenshot('mobile-sharp-day-overview');
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
@@ -232,6 +283,31 @@ intersection.heads.forEach((h,i)=>{if(h.axis!==expectedHead[i][0]||Math.abs(Math
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.setTrafficSignalPhase('ns-green');d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(250);await screenshot('main-intersection-day-top');
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.camera.position.set(m.x+2,7,m.z-49);d.controls.target.set(m.x,3.1,m.z);d.controls.update();return true})()`);await sleep(220);await screenshot('main-intersection-signals');
 
+/* ---- Camera-motion performance architecture ------------------------------
+ * Phones never shadow-cast the frozen parked roots, the directional shadow map
+ * is held through a gesture and flushed once at rest, and parked detail is
+ * distance-culled for a close view while the overview stays fully parked. */
+const parkedShadow=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,roots=d.traffic.set.roots,pc=d.traffic.parkedCount,casters=r=>{let n=0;r.traverse(o=>{if(o.isMesh&&o.castShadow)n++});return n};return{parked:pc,parkedCasters:roots.slice(0,pc).filter(r=>casters(r)>0).length,movingCasters:roots.slice(pc).filter(r=>casters(r)>0).length}})()`);
+if(!parkedShadow.parked||parkedShadow.parkedCasters!==0)throw new Error('mobile still shadow-casts parked vehicles: '+JSON.stringify(parkedShadow));
+if(parkedShadow.movingCasters===0)throw new Error('moving traffic lost shadow casting on mobile: '+JSON.stringify(parkedShadow));
+console.log('MOBILE PARKED SHADOW BUDGET',JSON.stringify(parkedShadow));
+
+const shadowGesture=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION,save=d.controls.target.clone();d.shadowTrack.builds=0;d.shadowTrack.deferred=false;d.shadowTrack.at=0;d.interaction.controlsActive=true;const before=d.shadowTrack.builds;for(let i=0;i<24;i++){d.controls.target.set(m.x+i,0,m.z);d.maybeUpdateShadow(performance.now(),false);}const during={builds:d.shadowTrack.builds-before,deferred:d.shadowTrack.deferred};d.interaction.controlsActive=false;d.interaction.lastInput=performance.now()-5000;d.maybeUpdateShadow(performance.now(),true);const settled={builds:d.shadowTrack.builds-before,deferred:d.shadowTrack.deferred};d.controls.target.copy(save);d.controls.update();return{before,during,settled}})()`);
+if(shadowGesture.during.builds!==0||!shadowGesture.during.deferred)throw new Error('shadow map was rebuilt during camera motion: '+JSON.stringify(shadowGesture));
+if(shadowGesture.settled.builds!==1||shadowGesture.settled.deferred)throw new Error('shadow map was not refreshed exactly once after the gesture settled: '+JSON.stringify(shadowGesture));
+console.log('CAMERA SHADOW DEFERRAL',JSON.stringify(shadowGesture));
+
+const closeLod=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.updateViewTrafficLod(true);const roots=d.traffic.set.roots,pc=d.traffic.parkedCount;return{visible:roots.slice(0,pc).filter(r=>r.visible).length,total:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length}})()`);
+if(closeLod.visible>=closeLod.total*.85)throw new Error('a close camera view did not cull distant parked cars: '+JSON.stringify(closeLod));
+if(closeLod.frozen!==closeLod.total)throw new Error('parked transform freeze regressed: '+JSON.stringify(closeLod));
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.camera.position.set(240,230,346);d.controls.target.set(-8,0,8);d.controls.update();return true})()`);
+await sleep(220);
+const overviewLod=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.updateViewTrafficLod(true);const roots=d.traffic.set.roots,pc=d.traffic.parkedCount;return{visible:roots.slice(0,pc).filter(r=>r.visible).length,total:pc}})()`);
+if(overviewLod.visible<overviewLod.total*.92)throw new Error('overview parking density was over-culled: '+JSON.stringify(overviewLod));
+console.log('PARKED VIEW LOD',JSON.stringify({closeLod,overviewLod}));
+await screenshot('mobile-overview-zoomed-out');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(160);await screenshot('mobile-intersection-close');
+
 /* Existing non-Drive traffic must obey the signal too. Put one northbound car
  * just before the south stop line, hold its axis red, then release it on green. */
 const signalNpcSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars.find(c=>c.ax==='z'&&c.d>0),stop=d.MAIN_INTERSECTION.stop.southZ,coord=stop-7;c.t=(coord+320)/640;c.signalV=c.v;d.setTrafficSignalPhase('ew-green');return{base:c.v,stop,coord,index:d.traffic.cars.indexOf(c)}})()`);
@@ -265,7 +341,7 @@ if(activeDynamic>6)throw new Error('vehicle dynamic-light budget exceeded: '+JSO
 console.log('NIGHT VEHICLE LIGHTS',JSON.stringify({night:nightLights.night,activeDynamic}));
 
 const nearRig=async(kind)=>{
-  return ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"},p=r.root.getWorldPosition(new d.THREE.Vector3());d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;d.camera.position.set(p.x+5,p.y+3,p.z+5);d.controls.target.copy(p);d.controls.update();d.refreshVehicleLightBudget();r.dynamicEnabled=true;d.updateVehicleLighting(0,performance.now());return{head:r.headLights.map(l=>({i:l.intensity,v:l.visible})),tail:r.tailLights.map(l=>({i:l.intensity,v:l.visible}))}})()`);
+  return ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const r=${kind==='traffic'?'d.traffic.cars[0].lightRig':"d.transit.vehicles.find(v=>v.key==='bus').lightRig"},p=r.root.getWorldPosition(new d.THREE.Vector3());d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;d.camera.position.set(p.x+5,p.y+3,p.z+5);d.controls.target.copy(p);d.controls.update();d.refreshVehicleLightBudget();r.dynamicEnabled=true;d.applyVehicleLightRig(r,d.lightingNight());return{night:d.lightingNight(),head:r.headLights.map(l=>({i:l.intensity,v:l.visible})),tail:r.tailLights.map(l=>({i:l.intensity,v:l.visible}))}})()`);
 };
 const nearTraffic=await nearRig('traffic'),nearBus=await nearRig('bus');
 for(const [kind,state] of [['traffic',nearTraffic],['bus',nearBus]])if(!state.head.some(l=>l.v&&l.i>0)||!state.tail.some(l=>l.v&&l.i>0))throw new Error(kind+' near-camera dynamic lights did not activate: '+JSON.stringify(state));
@@ -286,11 +362,38 @@ const dOutsideAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__
 if(dOutside||dOutsideAfter)throw new Error(`D activated Drive outside fullscreen: ${dOutsideAfter}`);
 console.log('DRIVE OUTSIDE FULLSCREEN: blocked');
 
+/* One pill, two independent controls. The left half must reset - including
+ * interrupting an in-flight building fly-to - without ever entering fullscreen,
+ * and the right half must toggle fullscreen without resetting the view. */
+await ev(`window.__SC_CAMPUS_MAP_3D__.focus('H')`);
+await waitFor(`window.__SC_CAMPUS_MAP_3D__.focusId==='H'`,5000,60);
+await clickSelector('.cm3d-reset');
+await sleep(320);
+const resetHalf=await ev(`(()=>({focusId:window.__SC_CAMPUS_MAP_3D__.focusId,camMode:window.__SC_CAMPUS_MAP_3D__.camMode,fs:!!document.fullscreenElement}))()`);
+if(resetHalf.focusId!==null||resetHalf.camMode!=='overview'||resetHalf.fs)throw new Error('clicking the reset half did not reset alone: '+JSON.stringify(resetHalf));
+await waitFor(`!window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.cameraTransition`,9000,120);
+const resetSettled=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{sel:d.ST.sel,transition:d.interaction.cameraTransition,fs:!!document.fullscreenElement}})()`);
+if(resetSettled.sel!==null||resetSettled.transition||resetSettled.fs)throw new Error('reset did not interrupt the building fly-to cleanly: '+JSON.stringify(resetSettled));
+for(let i=0;i<3;i++){await clickSelector('.cm3d-reset');await sleep(140);}
+const repeatedReset=await ev(`(()=>({focusId:window.__SC_CAMPUS_MAP_3D__.focusId,fs:!!document.fullscreenElement}))()`);
+if(repeatedReset.focusId!==null||repeatedReset.fs)throw new Error('repeated reset presses broke state: '+JSON.stringify(repeatedReset));
+console.log('PILL RESET HALF',JSON.stringify({resetHalf,resetSettled,repeatedReset}));
+
 await clickSelector('.cm3d-fullscreen');
 await sleep(600);
-let fullscreenState=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow;return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),aspect:f.__DAVIS_TWIN_DEBUG__.camera.aspect,expected:f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientWidth/f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientHeight,calls:f.__DAVIS_TWIN_DEBUG__.renderer.info.render.calls}})()`);
-if(!fullscreenState.host||!fullscreenState.twin||fullscreenState.label!=='Exit fullscreen'||Math.abs(fullscreenState.aspect-fullscreenState.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fullscreenState)}`);
+let fullscreenState=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen');return{host:!!document.fullscreenElement,twin:f.__DAVIS_TWIN_DEBUG__?.actualFullscreen(),label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),title:b?.getAttribute('title'),aspect:f.__DAVIS_TWIN_DEBUG__.camera.aspect,expected:f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientWidth/f.__DAVIS_TWIN_DEBUG__.renderer.domElement.clientHeight,calls:f.__DAVIS_TWIN_DEBUG__.renderer.info.render.calls}})()`);
+if(!fullscreenState.host||!fullscreenState.twin||fullscreenState.label!=='Toggle Fullscreen'||fullscreenState.pressed!=='true'||fullscreenState.title!=='Exit fullscreen'||Math.abs(fullscreenState.aspect-fullscreenState.expected)>.03)throw new Error(`fullscreen entry failed: ${JSON.stringify(fullscreenState)}`);
+/* Reset must stay safe inside fullscreen and must not exit it. */
+await clickSelector('.cm3d-reset');
+await sleep(300);
+const resetInFullscreen=await ev(`(()=>({fs:!!document.fullscreenElement,focusId:window.__SC_CAMPUS_MAP_3D__.focusId,pressed:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-pressed')}))()`);
+if(!resetInFullscreen.fs||resetInFullscreen.focusId!==null||resetInFullscreen.pressed!=='true')throw new Error('reset inside fullscreen broke the fullscreen state: '+JSON.stringify(resetInFullscreen));
+console.log('RESET INSIDE FULLSCREEN',JSON.stringify(resetInFullscreen));
 console.log('FULLSCREEN ENTER',JSON.stringify(fullscreenState));
+/* The host notifies the twin of fullscreen through postMessage, and a software
+ * rendered frame can take ~500 ms, so the message may sit behind a frame in the
+ * task queue. Wait for the state rather than racing it with a fixed sleep. */
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;const a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return !a.hidden&&j.hidden&&f.__DAVIS_TWIN_DEBUG__.actualFullscreen()})()`,6000,150);
 const mobileFsUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return{touch:d.isTouchDriveDevice,activateHidden:a.hidden,joystickHidden:j.hidden,activateRect:a.getBoundingClientRect().toJSON()}})()`);
 if(!mobileFsUi.touch||mobileFsUi.activateHidden||!mobileFsUi.joystickHidden||mobileFsUi.activateRect.width<44||mobileFsUi.activateRect.height<44)throw new Error('mobile fullscreen Drive affordance failed: '+JSON.stringify(mobileFsUi));
 console.log('MOBILE FULLSCREEN ACTIVATE UI',JSON.stringify(mobileFsUi));
@@ -298,14 +401,16 @@ await screenshot('mobile-drive-activation');
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(500);
-fullscreenState=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
-if(fullscreenState.host||fullscreenState.label!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
+fullscreenState=await ev(`(()=>{const b=document.querySelector('.cm3d-fullscreen');return{host:!!document.fullscreenElement,label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),title:b?.getAttribute('title'),overflow:document.body.style.overflow}})()`);
+if(fullscreenState.host||fullscreenState.label!=='Toggle Fullscreen'||fullscreenState.pressed!=='false'||fullscreenState.title!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;const a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return a.hidden&&j.hidden})()`,6000,150);
 const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch}})()`);
 if(!mobileAfterExit.activateHidden||!mobileAfterExit.joystickHidden||mobileAfterExit.touch.active||mobileAfterExit.touch.x||mobileAfterExit.touch.y)throw new Error('mobile controls did not clean up on fullscreen exit: '+JSON.stringify(mobileAfterExit));
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify({...fullscreenState,mobileAfterExit}));
 
 await clickSelector('.cm3d-fullscreen');
 await sleep(400);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;const a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return !a.hidden&&j.hidden})()`,6000,150);
 const mobileBeforeDrive=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden}})()`);
 if(mobileBeforeDrive.activateHidden||!mobileBeforeDrive.joystickHidden)throw new Error('mobile activation control missing before Drive: '+JSON.stringify(mobileBeforeDrive));
 await clickSelectorInFrame('#mobileDriveActivate');
@@ -313,9 +418,44 @@ await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__D
 const mobileDriveUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,j=f.document.querySelector('#driveJoystick'),a=f.document.querySelector('#mobileDriveActivate'),r=j.getBoundingClientRect();return{activateHidden:a.hidden,joystickHidden:j.hidden,size:[r.width,r.height],opacity:getComputedStyle(j).opacity}})()`);
 if(!mobileDriveUi.activateHidden||mobileDriveUi.joystickHidden||mobileDriveUi.size[0]<88||mobileDriveUi.size[0]>155)throw new Error('mobile joystick visibility/size failed: '+JSON.stringify(mobileDriveUi));
 console.log('MOBILE DRIVE ACTIVATED',JSON.stringify(mobileDriveUi));
-const mobileDrivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,roots=d.traffic.set.roots,pc=d.traffic.parkedCount,save=d.drive.renderPos.clone();d.refreshVehicleLightBudget();const dynamic=d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit?.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length;d.drive.renderPos.set(d.MAIN_INTERSECTION.x,0,d.MAIN_INTERSECTION.z);d.updateDriveTrafficLod();const atIntersection={parked:roots.slice(0,pc).filter(r=>r.visible).length,moving:roots.slice(pc).filter(r=>r.visible).length};d.drive.renderPos.copy(save);d.updateDriveTrafficLod();return{parked:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length,dynamic,atIntersection,lod:{parked:Math.sqrt(d.drivePerf.parkedLodSq),moving:Math.sqrt(d.drivePerf.movingLodSq),transit:Math.sqrt(d.drivePerf.transitLodSq)}}})()`);
-if(mobileDrivePerf.frozen!==mobileDrivePerf.parked||mobileDrivePerf.dynamic>1||mobileDrivePerf.atIntersection.parked>=mobileDrivePerf.parked||mobileDrivePerf.lod.parked>170||mobileDrivePerf.lod.moving<250)throw new Error('mobile Drive performance budget regressed: '+JSON.stringify(mobileDrivePerf));
+const mobileDrivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,roots=d.traffic.set.roots,pc=d.traffic.parkedCount,save=d.drive.renderPos.clone();d.refreshVehicleLightBudget();d.updateMobileNpcLightPool(d.ST.night,1/60,performance.now());const dynamic=d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit?.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length;const rigLights=[];for(const c of d.traffic.cars)(c.lightRig?.headLights||[]).forEach(l=>rigLights.push(l));for(const v of d.transit.vehicles)(v.lightRig?.headLights||[]).forEach(l=>rigLights.push(l));const litDetail=[];const collect=(rig,tag)=>{if(!rig)return;(rig.headLights||[]).forEach((l,i)=>{if(l.visible&&l.intensity>0)litDetail.push({tag,i,player:!!rig.player,dyn:!!rig.dynamicEnabled,kind:rig.kind,i:l.intensity})});(rig.tailLights||[]).forEach((l,i)=>{if(l.visible&&l.intensity>0)litDetail.push({tag,tail:i,player:!!rig.player,dyn:!!rig.dynamicEnabled,kind:rig.kind,i:l.intensity})})};d.traffic.cars.forEach((c,i)=>collect(c.lightRig,'car'+i));d.transit.vehicles.forEach(v=>collect(v.lightRig,v.key));const npcLit=litDetail.filter(x=>!x.player).length;const litRigLights=npcLit;d.drive.renderPos.set(d.MAIN_INTERSECTION.x,0,d.MAIN_INTERSECTION.z);d.updateDriveTrafficLod();const atIntersection={parked:roots.slice(0,pc).filter(r=>r.visible).length,moving:roots.slice(pc).filter(r=>r.visible).length};d.drive.renderPos.copy(save);d.updateDriveTrafficLod();return{parked:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length,dynamic,litRigLights,litDetail,night:d.ST.night,poolLit:d.mobileNpcLightPool.lights.filter(l=>l.visible&&l.intensity>0).length,atIntersection,pr:d.renderer.getPixelRatio(),deviceDpr:devicePixelRatio,qualityDpr:d.qualityDpr,maxPr:d.drivePerf.maxPr,pool:{initialized:d.mobileNpcLightPool.initialized,lights:d.mobileNpcLightPool.lights.length,switches:d.mobileNpcLightPool.switches,target:!!d.mobileNpcLightPool.target},lod:{parked:Math.sqrt(d.drivePerf.parkedLodSq),moving:Math.sqrt(d.drivePerf.movingLodSq),transit:Math.sqrt(d.drivePerf.transitLodSq)}}})()`);
+if(mobileDrivePerf.frozen!==mobileDrivePerf.parked||mobileDrivePerf.dynamic!==0||mobileDrivePerf.litRigLights!==0||mobileDrivePerf.atIntersection.parked>=mobileDrivePerf.parked||mobileDrivePerf.lod.parked>170||mobileDrivePerf.lod.moving<250)throw new Error('mobile Drive performance budget regressed: '+JSON.stringify(mobileDrivePerf));
+/* Phone Drive must not rebuild render targets: the ratio is identical in and out
+ * of Drive, above the sharpness floor, and outside the old 1.12/0.7 collapse. */
+if(mobileDrivePerf.qualityDpr<1.35||Math.abs(mobileDrivePerf.maxPr-mobileDrivePerf.qualityDpr)>.001)throw new Error('mobile Drive resolution cap regressed: '+JSON.stringify(mobileDrivePerf));
+if(Math.abs(mobileDrivePerf.pr-Math.min(mobileDrivePerf.deviceDpr,mobileDrivePerf.qualityDpr))>.02)throw new Error('mobile Drive pixel ratio does not track the device: '+JSON.stringify(mobileDrivePerf));
+if(!mobileDrivePerf.pool.initialized||mobileDrivePerf.pool.lights!==4||!mobileDrivePerf.pool.target)throw new Error('mobile NPC light pool is not a fixed four-light set: '+JSON.stringify(mobileDrivePerf));
 console.log('MOBILE DRIVE PERFORMANCE BUDGET',JSON.stringify(mobileDrivePerf));
+
+/* Nearest-NPC handoff uses one fixed pool: the same four light objects must be
+ * reused, the scene light list must not change, rigs must not toggle real
+ * lights, and the debounce must stop two similar rigs from thrashing. */
+const poolHandoff=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,pool=d.mobileNpcLightPool,save=d.camera.position.clone(),ids=pool.lights.map(l=>l.uuid),sceneLightsBefore=d.scene.children.filter(o=>o.isLight).length,rigs=(d.traffic.cars||[]).map(c=>c.lightRig).filter(r=>r&&r.root.visible);if(rigs.length<2)return{ok:false,why:'need two visible rigs'};
+let pair=null,best=Infinity;for(const a of rigs)for(const b of rigs){if(a===b)continue;const p=a.root.getWorldPosition(new d.THREE.Vector3()),q=b.root.getWorldPosition(new d.THREE.Vector3()),g=p.distanceTo(q);if(g<best){best=g;pair=[a,b];}}
+/* Precondition only: the two rigs must sit inside the pool's candidate radius when
+ * the probe parks the camera on each of them. Every assertion below (same four light
+ * objects, no scene-light churn, debounce, single handed-off switch) is independent
+ * of how far apart the pair is, and the closest visible pair moves with live traffic. */
+if(best>200)return{ok:false,why:'no rig pair inside the pooled light radius',best};
+const [a,b]=pair,park=rig=>{const p=rig.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.copy(p);d.refreshVehicleLightBudget();};
+const now=()=>performance.now();
+park(a);pool.lastSwitch=now()-5000;d.updateMobileNpcLightPool(.6,1/60,now());
+const firstTarget=pool.target,switches1=pool.switches;
+for(let i=0;i<8;i++){pool.lastSwitch=now();d.updateMobileNpcLightPool(.6,1/60,now());}
+const stable={target:pool.target,switches:pool.switches};
+park(b);pool.lastSwitch=now();d.updateMobileNpcLightPool(.6,1/60,now());
+const debounce={target:pool.target,switches:pool.switches};
+pool.lastSwitch=now()-5000;d.updateMobileNpcLightPool(.6,1/60,now());
+const handed={target:pool.target,switches:pool.switches};
+const beforeRepeats=pool.switches;
+for(let i=0;i<12;i++){park(i%2?a:b);pool.lastSwitch=now()-5000;d.updateMobileNpcLightPool(.6,1/60,now());}
+const repeats=pool.switches-beforeRepeats;
+const out={ok:true,gap:best,sameLights:ids.every((id,i)=>pool.lights[i].uuid===id),firstOk:firstTarget===a,stableOk:stable.target===a&&stable.switches===switches1,repeats,debounceHeld:debounce.target===a&&debounce.switches===switches1,switchedOnce:handed.target===b&&handed.switches===switches1+1,visible:pool.lights.filter(l=>l.visible&&l.intensity>0).length,sceneLights:d.scene.children.filter(o=>o.isLight).length,sceneLightsBefore,rigDynamic:d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length};d.camera.position.copy(save);return out})()`);
+if(!poolHandoff.ok)throw new Error('pooled light handoff could not be exercised: '+JSON.stringify(poolHandoff));
+if(!poolHandoff.sameLights||!poolHandoff.firstOk||!poolHandoff.stableOk||!poolHandoff.debounceHeld||!poolHandoff.switchedOnce)throw new Error('pooled nearest-vehicle handoff regressed: '+JSON.stringify(poolHandoff));
+if(poolHandoff.visible!==4||poolHandoff.sceneLights!==poolHandoff.sceneLightsBefore||poolHandoff.rigDynamic!==0)throw new Error('NPC light handoff mutated the scene light list: '+JSON.stringify(poolHandoff));
+if(poolHandoff.repeats<10)throw new Error('repeated nearest-vehicle handoffs collapsed: '+JSON.stringify(poolHandoff));
+console.log('POOLED NPC LIGHT HANDOFF',JSON.stringify(poolHandoff));
 
 const touchMove=await joystickTouch(.72,.92,520);
 const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer,tune:d.DRIVE_TUNE}})()`);
@@ -493,6 +633,38 @@ console.log('CINEMATIC MANUAL OVERRIDE',JSON.stringify({before:beforeManual,afte
 const finalPhysics=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{created:d.drive.npcPhysics.created,bodies:d.drive.npcPhysics.bodies.length,recoveries:d.drive.npcPhysics.recoveries,finite:d.drive.npcPhysics.bodies.every(a=>{const p=a.body.translation(),v=a.body.linvel();return[p.x,p.y,p.z,v.x,v.y,v.z].every(Number.isFinite)})}})()`);
 if(finalPhysics.created!==finalPhysics.bodies||finalPhysics.bodies<14||!finalPhysics.finite||finalPhysics.recoveries>8)throw new Error('NPC physics leaked/duplicated, became non-finite, or entered a recovery loop: '+JSON.stringify(finalPhysics));
 console.log('NPC PHYSICS LIFECYCLE',JSON.stringify(finalPhysics));
+/* ---- Isolated density probes ---------------------------------------------
+ * Everything above ran at 1x so SwiftShader timing stays representative. These
+ * two navigations prove the display-density contract in isolation: a 2x phone
+ * must render at the readable mobile cap with no DOF blur, and an unrestricted
+ * desktop must keep its full-quality tier. */
+await send('Emulation.setDeviceMetricsOverride',{width:900,height:640,deviceScaleFactor:2,mobile:false});
+await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/campus-twin.html?debug=1&touchtest=1`});
+await waitFor(`!!window.DavisTwin&&!!window.__DAVIS_TWIN_DEBUG__`,60000,200);
+await waitFor(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return d.mobileProfile===true&&d.renderer.getPixelRatio()>1.3})()`,9000,80);
+const hiDpi=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,mobileProfile:d.mobileProfile,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),dof:d.FX.dof,dofUniform:d.CU.uDof.value,fb:[d.renderer.domElement.width,d.renderer.domElement.height],css:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight],scene:[d.PT.w,d.PT.h]}})()`);
+if(hiDpi.deviceDpr<1.9||!hiDpi.mobileProfile||hiDpi.qualityDpr<1.35)throw new Error('high-density mobile probe did not select the mobile profile: '+JSON.stringify(hiDpi));
+if(hiDpi.pr<1.34||Math.abs(hiDpi.fb[0]/hiDpi.css[0]-Math.min(hiDpi.deviceDpr,hiDpi.qualityDpr))>.02||Math.abs(hiDpi.scene[0]-hiDpi.fb[0])>1)throw new Error('high-density mobile renderer fell back to a low pixel ratio: '+JSON.stringify(hiDpi));
+if(hiDpi.dof!==0||hiDpi.dofUniform!==0)throw new Error('high-density mobile probe is running far-field DOF: '+JSON.stringify(hiDpi));
+console.log('HIGH DENSITY MOBILE PROBE',JSON.stringify(hiDpi));
+const hiShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+const hiPath=path.join(QA_DIR,'mobile-sharp-high-dpr-probe.png');
+fs.writeFileSync(hiPath,Buffer.from(hiShot.result.data,'base64'));
+console.log('SCREENSHOT',hiPath);
+
+await send('Emulation.setTouchEmulationEnabled',{enabled:false});
+await send('Emulation.clearDeviceMetricsOverride');
+await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/campus-twin.html?debug=1&quality=high`});
+await waitFor(`!!window.DavisTwin&&!!window.__DAVIS_TWIN_DEBUG__`,60000,200);
+const desktopProbe=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{mobileProfile:d.mobileProfile,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),deviceDpr:devicePixelRatio,dof:d.FX.dof,dofUniform:d.CU.uDof.value,baseDof:d.baseFX.dof,fb:[d.renderer.domElement.width,d.renderer.domElement.height],css:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight],maxTouchPoints:navigator.maxTouchPoints,coarse:matchMedia('(pointer:coarse)').matches}})()`);
+if(desktopProbe.mobileProfile||desktopProbe.qualityDpr<1.7||desktopProbe.baseDof<=0||desktopProbe.dof<=0)throw new Error('desktop tier lost its full-quality rendering: '+JSON.stringify(desktopProbe));
+if(Math.abs(desktopProbe.fb[0]/desktopProbe.css[0]-Math.min(desktopProbe.deviceDpr,desktopProbe.qualityDpr))>.02)throw new Error('desktop framebuffer scale regressed: '+JSON.stringify(desktopProbe));
+console.log('DESKTOP QUALITY PROBE',JSON.stringify(desktopProbe));
+const dtShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+const dtPath=path.join(QA_DIR,'desktop-full-quality-probe.png');
+fs.writeFileSync(dtPath,Buffer.from(dtShot.result.data,'base64'));
+console.log('SCREENSHOT',dtPath);
+
 if(errors.length)throw new Error(`browser console errors: ${errors.slice(0,5).join(' | ')}`);
 console.log('NO CONSOLE ERRORS');
 

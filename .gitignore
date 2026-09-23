@@ -11,3 +11,8 @@ Sheridan/
 
 # Dev-only scripts
 scripts/apply-schema.js
+
+# Local 3D-map QA runs (screenshots + probe scratch output)
+qa-artifacts/
+.scratch-*
+.tmp-*
