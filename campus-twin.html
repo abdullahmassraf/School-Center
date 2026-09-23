@@ -574,7 +574,11 @@ function ensureMobileNpcLightPool() {
   if (mobileNpcLightPool.initialized) return;
   for (const [color, range] of [['#fff4cf', 10], ['#fff4cf', 10], ['#ff3038', 6], ['#ff3038', 6]]) {
     const l = new THREE.PointLight(color, 0, range, 2);
-    l.castShadow = false; l.visible = false; l.name = 'NpcLightPool';
+    /* Keep the four pooled lights present in the mobile render program from
+       boot onward. Daytime uses zero intensity rather than visibility=false,
+       so crossing day/night or NPC reach boundaries never changes NUM_POINT_LIGHTS
+       and cannot trigger a shader recompile hitch. */
+    l.castShadow = false; l.visible = true; l.name = 'NpcLightPool';
     scene.add(l); mobileNpcLightPool.lights.push(l);
   }
   mobileNpcLightPool.initialized = true;
@@ -604,7 +608,7 @@ function updateMobileNpcLightPool(night, dt, now) {
   ensureMobileNpcLightPool(); chooseMobileNpcLightTarget(now);
   const rig = mobileNpcLightPool.target, ls = mobileNpcLightPool.lights, lit = night > .015;
   mobileNpcLightPool.active = !!rig && lit;
-  if (!lit) { ls.forEach(l => { l.visible = false; l.intensity = 0; }); return; }
+  if (!lit) { ls.forEach(l => { l.visible = true; l.intensity = 0; }); return; }
   /* Once night lighting is active keep all four pooled lights visible even when
      the camera temporarily has no eligible NPC. Zero intensity is enough to
      remove their contribution while preserving the renderer's light count, so
