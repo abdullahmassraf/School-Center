@@ -120,9 +120,20 @@ const joystickRelease=async()=>send('Input.dispatchTouchEvent',{type:'touchEnd',
 
 await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
 await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
-/* Boot the first pass at a phone-like 2x density so renderer DPR selection is
- * exercised exactly as it is on a real device. */
-await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:2,mobile:false});
+
+/* Isolated high-density probe: validate the renderer as it boots on a 2x
+ * phone display, capture it, then completely clear CDP metrics emulation.
+ * Keeping a metrics override active changes headless fullscreen/touch frame
+ * scheduling, so the gameplay regression deliberately runs without it. */
+await send('Emulation.setDeviceMetricsOverride',{width:900,height:640,deviceScaleFactor:2,mobile:false});
+await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/campus-twin.html?debug=1&touchtest=1`});
+await waitFor(`!!window.DavisTwin&&!!window.__DAVIS_TWIN_DEBUG__`,60000,200);
+const hiDpiProbe=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),dof:d.FX.dof,profile:d.mobileProfile,size:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight]}})()`);
+if(hiDpiProbe.deviceDpr<1.9||hiDpiProbe.qualityDpr<1.3||hiDpiProbe.pr<1.29||hiDpiProbe.dof!==0||!hiDpiProbe.profile)throw new Error('isolated high-DPR mobile probe failed: '+JSON.stringify(hiDpiProbe));
+const hiShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+fs.writeFileSync(path.join(QA_DIR,'mobile-sharp-high-dpr-probe.png'),Buffer.from(hiShot.result.data,'base64'));
+console.log('HIGH DPR MOBILE PROBE',JSON.stringify(hiDpiProbe));
+await send('Emulation.clearDeviceMetricsOverride');
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html?touchtest=1`});
 
 let ready=false;
@@ -185,10 +196,8 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
-/* Renderer boot happened at 2x density; verify it selected the readable mobile
- * cap instead of a 1x/0.7x fallback. */
 const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{profile:d.mobileProfile,qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.FX.dof,bloom:d.FX.bloom,touch:d.isTouchDriveDevice}})()`);
-if(!postBudget.touch||!postBudget.profile||postBudget.deviceDpr<1.9||postBudget.qualityDpr<1.3||postBudget.pr<1.29||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
+if(!postBudget.touch||!postBudget.profile||postBudget.qualityDpr<1.3||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
 console.log('MOBILE SHARP POST BUDGET',JSON.stringify(postBudget));
 /* Make the close/front/rear/far artifact set explicitly daylight rather than
  * inheriting whatever the wall clock happens to be during CI. */
@@ -200,18 +209,6 @@ await sleep(180);
 const sharpOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.FX.dof,uniform:d.CU.uDof.value,pr:d.renderer.getPixelRatio(),qualityDpr:d.qualityDpr}})()`);
 if(sharpOverview.dof!==0||sharpOverview.uniform!==0||sharpOverview.qualityDpr<1.3)throw new Error('mobile overview is not staying sharp: '+JSON.stringify(sharpOverview));
 await screenshot('mobile-sharp-day-overview');
-
-/* The rest of this suite is intentionally 1x: Chromium CI uses SwiftShader,
- * so collision/Drive timing at a 2x framebuffer is not representative of a
- * phone GPU. Reload after lowering device density so the renderer chooses 1x
- * at boot, while the high-DPR contract above remains independently proven. */
-await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
-await send('Page.reload',{ignoreCache:false});
-await waitFor(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`,60000,200);
-await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,s=d.ASSET_STATE;return s.car!=='pending'&&s.transit.bus!=='pending'&&s.transit.schoolBus!=='pending'})()`,20000,150);
-const oneX=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),touch:d.isTouchDriveDevice,car:d.ASSET_STATE.car,bus:d.ASSET_STATE.transit.bus,schoolBus:d.ASSET_STATE.transit.schoolBus}})()`);
-if(oneX.deviceDpr>1.1||oneX.pr>1.05||!oneX.touch||oneX.car!=='loaded'||oneX.bus!=='loaded'||oneX.schoolBus!=='loaded')throw new Error('1x heavy-QA reload failed: '+JSON.stringify(oneX));
-console.log('HEAVY QA RELOADED AT 1X',JSON.stringify(oneX));
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
