@@ -2265,8 +2265,9 @@ function createWheelPivot(node, name) {
 
 const TRAFFIC_AI = Object.freeze({
   predictionTime:3.0,lookBase:9,playerHalfWidth:1.0,playerHalfLength:2.15,
-  avoidHold:.9,carOffset:2.25,busOffset:1.25,lateralGain:1.65,maxLateralSpeed:3.1,
+  avoidHold:.9,carOffset:2.25,busOffset:2.1,lateralGain:1.65,maxLateralSpeed:3.1,
   accelResponse:2.0,brakeResponse:5.4,turnResponse:4.8,maxYawRate:1.35,
+  blockPause:1.15,playerStationarySpeed:.45,blockLook:12,passCarSpeed:4.8,passBusSpeed:3.2,passMax:6.0,
   laneRecover:9,hardRecover:18,recoverDelay:2.6,stuckDelay:5.0
 });
 const AI_BOX=new THREE.Box3(),AI_SIZE=new V3();
@@ -2317,6 +2318,7 @@ function registerNpcPhysics(entity,root,kind) {
     entity,root,kind,body,collider,size,halfWidth:size.width*.46,halfLength:size.length*.46,
     baseSpeed:kind==='car'?entity.v:entity.speed,targetSpeed:kind==='car'?entity.v:entity.speed,
     avoidSide:0,avoidHold:0,urgency:0,targetOffset:0,recoverFor:0,stuckFor:0,lastForwardSpeed:0,
+    playerBlockState:'none',playerBlockWait:0,playerPassSide:0,playerPassFor:0,blockHoldOffset:0,
     frame:{fx:0,fz:0,rx:0,rz:0,lane:0,axis:'z'},threat:{risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity},
     nextVel:{x:0,y:0,z:0},nextAng:{x:0,y:0,z:0}
   };
@@ -2340,6 +2342,7 @@ function resetNpcPhysicsFromRoutes() {
     const speed=ai.baseSpeed;
     b.setLinvel({x:rf.fx*speed,y:0,z:rf.fz*speed},true);
     ai.targetSpeed=speed;ai.avoidSide=0;ai.avoidHold=0;ai.urgency=0;ai.targetOffset=0;ai.recoverFor=0;ai.stuckFor=0;
+    ai.playerBlockState='none';ai.playerBlockWait=0;ai.playerPassSide=0;ai.playerPassFor=0;ai.blockHoldOffset=0;
   }
 }
 function syncNpcRoutesFromPhysics() {
@@ -2359,6 +2362,23 @@ function sideClear(ai,side,p,rf) {
     if(other===ai)continue;const op=other.body.translation();if(!finiteXZ(op))continue;
     const rr=ai.halfWidth+other.halfWidth+1.25,dx=op.x-tx,dz=op.z-tz;
     if(dx*dx+dz*dz<rr*rr)return false;
+  }
+  return true;
+}
+function maneuverSideClear(ai,side,p,rf){
+  if(!side||!sideClear(ai,side,p,rf))return false;
+  const offset=(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset)*side;
+  const forwardWindow=ai.kind==='car'?15:20;
+  for(const other of drive.npcPhysics.bodies){
+    if(other===ai)continue;
+    const op=other.body.translation();if(!finiteXZ(op))continue;
+    const dx=op.x-p.x,dz=op.z-p.z,ahead=dx*rf.fx+dz*rf.fz,lat=dx*rf.rx+dz*rf.rz;
+    if(ahead<-3-other.halfLength||ahead>forwardWindow+other.halfLength)continue;
+    const clearance=ai.halfWidth+other.halfWidth+.75;
+    if(Math.abs(lat-offset)<clearance)return false;
+    const ov=other.body.linvel(),futureAhead=ahead+(ov.x*rf.fx+ov.z*rf.fz)*.8;
+    const futureLat=lat+(ov.x*rf.rx+ov.z*rf.rz)*.8;
+    if(futureAhead>-3-other.halfLength&&futureAhead<forwardWindow+other.halfLength&&Math.abs(futureLat-offset)<clearance)return false;
   }
   return true;
 }
@@ -2450,36 +2470,94 @@ function updateNpcPhysicsStep(dt) {
     }
 
     const threat=playerThreat(ai,p,lv,frameNow);ai.urgency=threat.risk;
-    ai.avoidHold=Math.max(0,ai.avoidHold-dt);
-    if(threat.risk>.08){
-      const preferred=threat.lateral>=0?-1:1;
-      if(ai.avoidHold<=0||!ai.avoidSide){
-        ai.avoidSide=sideClear(ai,preferred,p,frameNow)?preferred:(sideClear(ai,-preferred,p,frameNow)?-preferred:0);
-        ai.avoidHold=TRAFFIC_AI.avoidHold;
-      }
-      if(ai.kind==='car'&&ai.avoidSide){
-        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.carOffset*clamp(.45+threat.risk*.7,.45,1);
-        target=Math.min(target,ai.baseSpeed*(1-.64*threat.risk));
-      }else if(ai.kind!=='car'&&ai.avoidSide&&threat.risk<.72){
-        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.busOffset*clamp(.35+threat.risk,.35,1);
-        target=Math.min(target,ai.baseSpeed*(1-.72*threat.risk));
+    const pv=drive.body?.linvel(),playerSpeed=pv?Math.hypot(pv.x,pv.z):0;
+    const playerHalfLength=drive.colliderSize?.length*.5||TRAFFIC_AI.playerHalfLength;
+    const directBlock=threat.risk>.18&&threat.ahead>-.75&&threat.ahead<Math.max(TRAFFIC_AI.blockLook,ai.halfLength+playerHalfLength+5);
+    let holdLateral=false,holdYaw=false;
+
+    /* A stopped player directly ahead is handled as a deliberate manoeuvre,
+       not ordinary predictive swerving:
+       STOP -> verify the player stays still -> verify a side corridor is safe
+       -> pass on one locked side -> return to the authored lane.
+       The locked state removes the left/right sign flip that caused stationary
+       NPCs to sway in place. Any player movement cancels the pass and restarts
+       the safety pause. */
+    if(ai.playerBlockState==='pass'){
+      const unsafePlayer=playerSpeed>TRAFFIC_AI.playerStationarySpeed;
+      const sideSafe=maneuverSideClear(ai,ai.playerPassSide,p,frameNow);
+      if(unsafePlayer||!sideSafe){
+        ai.playerBlockState='wait';ai.playerBlockWait=0;ai.blockHoldOffset=laneError(ai,p,frameNow);
+        ai.targetOffset=ai.blockHoldOffset;target=0;holdLateral=holdYaw=true;
       }else{
-        ai.targetOffset=0;target=Math.min(target,ai.baseSpeed*(1-.96*threat.risk));
+        ai.playerPassFor+=dt;
+        ai.targetOffset=ai.playerPassSide*(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset);
+        target=Math.min(target,ai.kind==='car'?TRAFFIC_AI.passCarSpeed:TRAFFIC_AI.passBusSpeed);
+        const passed=threat.ahead<-(ai.halfLength+playerHalfLength+1.1);
+        if(passed||ai.playerPassFor>TRAFFIC_AI.passMax){
+          ai.playerBlockState='return';ai.playerPassFor=0;ai.targetOffset=0;
+        }
       }
-      if(threat.ttc<.75&&(!ai.avoidSide||ai.kind!=='car'))target=0;
-    }else if(ai.avoidHold<=0){
-      ai.avoidSide=0;ai.targetOffset=0;
+    }else if(directBlock){
+      if(ai.playerBlockState!=='wait'){
+        ai.playerBlockState='wait';ai.playerBlockWait=0;ai.playerPassSide=0;
+        ai.blockHoldOffset=laneError(ai,p,frameNow);
+      }
+      ai.targetOffset=ai.blockHoldOffset;target=0;holdLateral=holdYaw=true;
+      const lateralSpeed=Math.abs(lv.x*frameNow.rx+lv.z*frameNow.rz);
+      if(playerSpeed<=TRAFFIC_AI.playerStationarySpeed&&forwardSpeed<.7&&lateralSpeed<.3)ai.playerBlockWait+=dt;
+      else ai.playerBlockWait=0;
+      if(ai.playerBlockWait>=TRAFFIC_AI.blockPause){
+        const preferred=threat.lateral>=0?-1:1;
+        const side=maneuverSideClear(ai,preferred,p,frameNow)?preferred:(maneuverSideClear(ai,-preferred,p,frameNow)?-preferred:0);
+        if(side){
+          ai.playerBlockState='pass';ai.playerPassSide=side;ai.playerPassFor=0;ai.avoidSide=side;
+          ai.targetOffset=side*(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset);
+          target=Math.min(target,ai.kind==='car'?TRAFFIC_AI.passCarSpeed:TRAFFIC_AI.passBusSpeed);
+          holdLateral=holdYaw=false;
+        }
+      }
+    }else{
+      if(ai.playerBlockState==='wait'){
+        ai.playerBlockState='return';ai.playerBlockWait=0;ai.playerPassSide=0;ai.targetOffset=0;
+      }
+      if(ai.playerBlockState==='return'){
+        ai.targetOffset=0;
+        if(Math.abs(laneError(ai,p,frameNow))<.22){ai.playerBlockState='none';ai.playerPassSide=0;}
+      }
+      if(ai.playerBlockState==='none'||ai.playerBlockState==='return'){
+        ai.avoidHold=Math.max(0,ai.avoidHold-dt);
+        if(threat.risk>.08){
+          const preferred=threat.lateral>=0?-1:1;
+          if(ai.avoidHold<=0||!ai.avoidSide){
+            ai.avoidSide=sideClear(ai,preferred,p,frameNow)?preferred:(sideClear(ai,-preferred,p,frameNow)?-preferred:0);
+            ai.avoidHold=TRAFFIC_AI.avoidHold;
+          }
+          if(ai.kind==='car'&&ai.avoidSide){
+            ai.targetOffset=ai.avoidSide*TRAFFIC_AI.carOffset*clamp(.45+threat.risk*.7,.45,1);
+            target=Math.min(target,ai.baseSpeed*(1-.64*threat.risk));
+          }else if(ai.kind!=='car'&&ai.avoidSide&&threat.risk<.72){
+            ai.targetOffset=ai.avoidSide*TRAFFIC_AI.busOffset*clamp(.35+threat.risk,.35,1);
+            target=Math.min(target,ai.baseSpeed*(1-.72*threat.risk));
+          }else{
+            ai.targetOffset=0;target=Math.min(target,ai.baseSpeed*(1-.96*threat.risk));
+          }
+          if(threat.ttc<.75&&(!ai.avoidSide||ai.kind!=='car'))target=0;
+        }else if(ai.avoidHold<=0&&ai.playerBlockState==='none'){
+          ai.avoidSide=0;ai.targetOffset=0;
+        }
+      }
     }
+
     target=leadVehicleSpeed(ai,p,frameNow,target);ai.targetSpeed=clamp(target,0,ai.baseSpeed);
 
-    const err=laneError(ai,p,frameNow),latTarget=clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
+    const err=laneError(ai,p,frameNow),latTarget=holdLateral?0:clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
     const desiredX=frameNow.fx*ai.targetSpeed+frameNow.rx*latTarget,desiredZ=frameNow.fz*ai.targetSpeed+frameNow.rz*latTarget;
     const rate=ai.targetSpeed<forwardSpeed?TRAFFIC_AI.brakeResponse:TRAFFIC_AI.accelResponse,blend=1-Math.exp(-dt*rate),nv=ai.nextVel;
     nv.x=lv.x+(desiredX-lv.x)*blend;nv.y=lv.y;nv.z=lv.z+(desiredZ-lv.z)*blend;b.setLinvel(nv,true);
 
     const desiredMag=Math.hypot(desiredX,desiredZ),dfx=desiredMag>.1?desiredX/desiredMag:frameNow.fx,dfz=desiredMag>.1?desiredZ/desiredMag:frameNow.fz;
     const desiredYaw=rootYawForForward(ai.kind==='car'?'car':'bus',dfx,dfz),q=b.rotation(),yaw=2*Math.atan2(q.y,q.w);
-    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate),na=ai.nextAng;
+    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=holdYaw?0:clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate),na=ai.nextAng;
     na.x=0;na.y=yawRate;na.z=0;b.setAngvel(na,true);
 
     ai.stuckFor=forwardSpeed<.12&&ai.targetSpeed>3&&threat.risk<.08?ai.stuckFor+dt:0;
