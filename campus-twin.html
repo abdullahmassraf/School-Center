@@ -745,6 +745,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (match
 const TOUCH_DRIVE_TEST = DEBUG && Q.has('touchtest');
 const coarseNoHover = matchMedia?.('(hover:none) and (pointer:coarse)').matches === true;
 const isTouchDriveDevice = TOUCH_DRIVE_TEST || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && coarseNoHover);
+const mobileProfile=isMobile||TOUCH_DRIVE_TEST;
 const weak = isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 3) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
 // v4 budget: one scene pass + a handful of tiny half/eighth-res passes. No MSAA, no AO pass, no second depth render, no dynamic spot lights.
 const TIERS = {
@@ -752,8 +753,9 @@ const TIERS = {
   medium: { sh: 1024, dpr: 1.35, bloom: true,  dof: .6, fxaa: true,  rain: 4500, snow: 3500, trees: .7,  clouds: 8,  se: 3 },
   low:    { sh: 512,  dpr: 1,    bloom: false, dof: 0,  fxaa: false, rain: 2200, snow: 1800, trees: .45, clouds: 4,  se: 4 },
 };
-const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : isMobile ? 'medium' : 'high');
-const T = TIERS[tierName], FX = { dof: T.dof, bloom: T.bloom, fxaa: T.fxaa, se: T.se };
+const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : mobileProfile ? 'medium' : 'high');
+const T=TIERS[tierName],baseFX={dof:mobileProfile?0:T.dof,bloom:T.bloom,fxaa:T.fxaa,se:T.se},FX={...baseFX};
+const qualityDpr=mobileProfile?(tierName==='low'?1.15:1.6):T.dpr;
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, stencil: false, powerPreference: 'high-performance' }); }
 catch (e) { fatal('WebGL unavailable', 'This browser or device could not create a WebGL context. Try enabling hardware acceleration.'); throw e; }
@@ -778,7 +780,7 @@ controls.target.set(0, 0, 10);
    → 3 tiny passes at ⅛ res (wide bloom)
    → composite: depth-based far blur mix, bloom, ACES tone-map, grade, vignette, grain, sRGB
    → FXAA → screen                                                                                */
-let pr = Math.min(devicePixelRatio || 1, T.dpr);
+let pr = Math.min(devicePixelRatio || 1, qualityDpr);
 const hdr = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
 const FS_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }';
 const BLUR_FS = 'uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv; void main(){ vec3 c = texture2D(tSrc, vUv).rgb*.227027027; vec3 a = texture2D(tSrc, vUv+uDir*1.3846153846).rgb + texture2D(tSrc, vUv-uDir*1.3846153846).rgb; vec3 b = texture2D(tSrc, vUv+uDir*3.2307692308).rgb + texture2D(tSrc, vUv-uDir*3.2307692308).rgb; gl_FragColor = vec4(c + a*.3162162162 + b*.0702702703, 1.); }';
@@ -841,19 +843,21 @@ function buildPost() {
 function pass(mat, target) { fsMesh.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
 function renderPost() {
   renderer.setRenderTarget(PT.scene); renderer.render(scene, camera);
-  const doBlur = FX.dof > 0 || FX.bloom, bu = blurMat.uniforms;
-  if (doBlur) {
-    bu.tSrc.value = PT.scene.texture; bu.uDir.value.set(2 / PT.w, 0); pass(blurMat, PT.a);
-    /* Compensate the vertical kernel for the smaller mobile blur target so the
-       apparent DOF radius stays close to the previous half-res version. */
-    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, (3.2 / PT.blurDiv) / PT.a.height); pass(blurMat, PT.b);
-    if (FX.bloom) {
-      downMat.uniforms.tSrc.value = PT.b.texture; downMat.uniforms.uPx.value.set(1 / PT.b.width, 1 / PT.b.height); pass(downMat, PT.c);
-      bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
-      bu.tSrc.value = PT.d.texture; bu.uDir.value.set(0, 1.5 / PT.c.height); pass(blurMat, PT.c);
-    }
+  const needDof=FX.dof>0,bu=blurMat.uniforms;
+  if(needDof){
+    bu.tSrc.value=PT.scene.texture;bu.uDir.value.set(2/PT.w,0);pass(blurMat,PT.a);
+    bu.tSrc.value=PT.a.texture;bu.uDir.value.set(0,(3.2/PT.blurDiv)/PT.a.height);pass(blurMat,PT.b);
   }
-  CU.tScene.value = PT.scene.texture; CU.tDepth.value = PT.scene.depthTexture; CU.tBlur.value = doBlur ? PT.b.texture : PT.scene.texture; CU.tBloom.value = FX.bloom ? PT.c.texture : PT.scene.texture;
+  if(FX.bloom){
+    /* Mobile no longer pays the quarter-resolution DOF blur just to produce
+       bloom. Downsample the sharp scene directly to the tiny bloom target. */
+    const bloomSource=needDof?PT.b.texture:PT.scene.texture;
+    downMat.uniforms.tSrc.value=bloomSource;
+    downMat.uniforms.uPx.value.set(1/(needDof?PT.b.width:PT.w),1/(needDof?PT.b.height:PT.h));pass(downMat,PT.c);
+    bu.tSrc.value=PT.c.texture;bu.uDir.value.set(1.5/PT.c.width,0);pass(blurMat,PT.d);
+    bu.tSrc.value=PT.d.texture;bu.uDir.value.set(0,1.5/PT.c.height);pass(blurMat,PT.c);
+  }
+  CU.tScene.value=PT.scene.texture;CU.tDepth.value=PT.scene.depthTexture;CU.tBlur.value=needDof?PT.b.texture:PT.scene.texture;CU.tBloom.value=FX.bloom?PT.c.texture:PT.scene.texture;
   CU.uNear.value = camera.near; CU.uFar.value = camera.far; CU.uDof.value = FX.dof; CU.uBloom.value = FX.bloom ? .5 + ST.night * .4 : 0;
   const start = Math.max(camDist * 1.6, 90); CU.uStart.value = start; CU.uEnd.value = start + Math.max(camDist * 3, 260);
   if (FX.fxaa) { pass(compMat, PT.ldr); fxaaMat.uniforms.tLdr.value = PT.ldr.texture; pass(fxaaMat, null); } else pass(compMat, null);
@@ -866,7 +870,7 @@ function ctex(w, h, draw, o = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c); if (o.srgb !== false) t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; if (o.rep) t.repeat.set(o.rep[0], o.rep[1]);
-  t.anisotropy = Math.min(isMobile ? 4 : 8, maxAniso); return t;
+  t.anisotropy=Math.min(mobileProfile&&tierName==='low'?4:8,maxAniso);return t;
 }
 const speck = (g, w, h, n, r, cols, a0 = .04, a1 = .16, s = 2) => { for (let i = 0; i < n; i++) { g.globalAlpha = a0 + r() * (a1 - a0); g.fillStyle = cols[(r() * cols.length) | 0]; g.fillRect(r() * w, r() * h, 1 + r() * s, 1 + r() * s); } g.globalAlpha = 1; };
 const asphaltTex = () => ctex(512, 512, (g, w, h) => { const r = rng(3); g.fillStyle = '#41444c'; g.fillRect(0, 0, w, h); speck(g, w, h, 9000, r, ['#6d7078', '#25272c', '#8b8e96', '#2f3238']); }, { rep: [1, 1] });
@@ -1241,7 +1245,8 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
-    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
+    const parked=!vehicle.ax;
+    root.traverse(mesh=>{if(mesh.isMesh){mesh.castShadow=!drivePerf.active&&!(mobileProfile&&parked);mesh.receiveShadow=false;}});
     scene.add(root);
     if(!vehicle.ax)staticRoots.push(root);
     return root;
@@ -1664,8 +1669,13 @@ function updateEnv(dt) {
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
-const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0 };
+const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred:false };
 function maybeUpdateShadow(now, force = false) {
+  /* Re-rendering the directional shadow map while a finger is actively
+     orbiting/panning is a large synchronous GPU spike near the parking lots.
+     Keep the last valid shadow during the gesture/fly animation, then refresh
+     once at rest. Final visual quality is unchanged. */
+  if(!force&&!drive.on&&(interaction.controlsActive||interaction.cameraTransition)){shadowTrack.deferred=true;return;}
   const minInterval = drive.on ? drivePerf.shadowEveryMs : 340;
   if (!force && now - shadowTrack.at < minInterval) return;
   const targetMoved = controls.target.distanceToSquared(shadowTrack.target) > (drive.on ? 9 : 36);
@@ -1675,7 +1685,7 @@ function maybeUpdateShadow(now, force = false) {
   renderer.shadowMap.needsUpdate = true;
   shadowTrack.target.copy(controls.target);
   shadowTrack.dir.copy(keyDir);
-  shadowTrack.at = now;
+  shadowTrack.at = now;shadowTrack.deferred=false;
 }
 function updateShadow() {
   const S = clamp(camDist * .8, 60, 300), cam = keyLight.shadow.camera; if (Math.abs(cam.right - S) > 2) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 10; cam.far = 1300; cam.updateProjectionMatrix(); }
@@ -1884,6 +1894,8 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
     settled = true;
     clearTimeout(timer);
     interaction.cameraTransition = false;
+    updateViewTrafficLod(true);
+    if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);
     onComplete?.();
   };
   timer = setTimeout(done, Math.max(0, dur) * 1000 + 160);
@@ -1900,6 +1912,7 @@ controls.addEventListener('change', () => { if (interaction.controlsActive && !d
 controls.addEventListener('end', () => {
   interaction.controlsActive = false; markUserInteraction();
   if (drive.on) { driveCamera.userRotating = false; driveCamera.releaseAt = performance.now(); }
+  else{updateViewTrafficLod(true);if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);}
 });
 function select(id, fly = true) {
   markUserInteraction();
@@ -1976,6 +1989,32 @@ const drivePerf = {
   transitLodSq:(isTouchDriveDevice?315:380)*(isTouchDriveDevice?315:380),
   lodEvery:isTouchDriveDevice?10:8,shadowEveryMs:180
 };
+const viewPerf={
+  at:0,target:new V3(1e9,0,1e9),distance:-1,visibleParked:0,
+  interval:mobileProfile?90:150
+};
+function updateViewTrafficLod(force=false){
+  if(drivePerf.active||traffic?.mode!=='packed')return;
+  const now=performance.now(),target=controls.target,dist=camDist;
+  if(!force){
+    if(now-viewPerf.at<viewPerf.interval)return;
+    const moved=target.distanceToSquared(viewPerf.target)>64,zoomed=Math.abs(dist-viewPerf.distance)>10;
+    if(!moved&&!zoomed)return;
+  }
+  const roots=traffic.set.roots,pc=traffic.parkedCount||0;
+  /* At overview distance the radius expands enough to retain the full campus
+     parking pattern. Close to an intersection/building, far parking lots stop
+     consuming draw calls even though near vehicle geometry stays native. */
+  const radius=clamp((mobileProfile?135:170)+dist*(mobileProfile?.78:.9),mobileProfile?190:240,560),r2=radius*radius;
+  let visible=0;
+  for(let i=0;i<pc;i++){
+    const root=roots[i];if(!root)continue;const dx=root.position.x-target.x,dz=root.position.z-target.z,on=dx*dx+dz*dz<=r2;
+    root.visible=on;if(on)visible++;
+  }
+  for(let i=pc;i<roots.length;i++)if(roots[i])roots[i].visible=true;
+  transit?.vehicles?.forEach(v=>v.root.visible=true);
+  viewPerf.visibleParked=visible;viewPerf.at=now;viewPerf.target.copy(target);viewPerf.distance=dist;
+}
 const driveCamera = {
   userRotating: false,
   chaseStrength: 0,
@@ -2059,9 +2098,9 @@ function unwireMobileDriveControls() {
 }
 
 function setDriveVehicleShadowMode(cast) {
-  const roots = traffic?.set?.roots || [];
-  roots.forEach(root => root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
-  transit?.vehicles?.forEach(vehicle => vehicle.root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
+  const roots=traffic?.set?.roots||[],pc=traffic?.parkedCount||0;
+  roots.forEach((root,i)=>root.traverse(node=>{if(node.isMesh)node.castShadow=cast&&!(mobileProfile&&i<pc);}));
+  transit?.vehicles?.forEach(vehicle=>vehicle.root.traverse(node=>{if(node.isMesh)node.castShadow=cast;}));
 }
 function setDriveTrafficVisibility(visible) {
   const roots = traffic?.set?.roots || [];
@@ -2088,7 +2127,7 @@ function setDrivePerformanceMode(active) {
     drivePerf.savedDof = FX.dof;
     drivePerf.savedBloom = FX.bloom;
     drivePerf.savedFxaa = FX.fxaa;
-    drivePerf.maxPr = tierName === 'high' ? 1.35 : tierName === 'medium' ? 1.12 : 1;
+    drivePerf.maxPr=mobileProfile?Math.min(qualityDpr,tierName==='low'?1.1:1.5):(tierName==='high'?1.35:tierName==='medium'?1.2:1);
     const nextPr = Math.min(pr, drivePerf.maxPr);
     // Driving is a near-camera experience. Keep native geometry/material detail
     // intact while disabling the costly blur stack, FXAA pass and distant shadows.
@@ -2106,6 +2145,7 @@ function setDrivePerformanceMode(active) {
     setDriveTrafficVisibility(true);
     setDriveVehicleShadowMode(true);
     if (pr !== drivePerf.savedPr) { pr = drivePerf.savedPr; resize(); }
+    updateViewTrafficLod(true);
   }
 }
 function fitNativeTransitWheels(root, kind) {
@@ -2767,6 +2807,7 @@ function frame(now) {
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
   if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
   camDist = camera.position.distanceTo(controls.target);
+  if(!drive.on)updateViewTrafficLod(false);
   updateCinematicCamera(dt, now);
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
@@ -2776,10 +2817,21 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, drivePerf.active ? drivePerf.maxPr : T.dpr);
-    if (now - lastAdj > 2000) {
-      if (avg > 1 / 38) { if (pr > .7) { pr = Math.max(.7, pr - .2); resize(); } else if (FX.bloom) FX.bloom = false; else if (FX.dof > 0) FX.dof = 0; else FX.se = Math.min(6, FX.se + 1); lastAdj = now; }   // degrade gracefully
-      else if (avg < 1 / 57 && pr < cap - .01) { pr = Math.min(cap, pr + .1); resize(); lastAdj = now; }
+  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr),floor=mobileProfile?Math.min(cap,tierName==='low'?1.0:(drivePerf.active?1.35:1.45)):.8;
+    if(now-lastAdj>2000){
+      /* Never solve a transient camera-motion spike by dropping a phone all
+         the way to 0.7 DPR. Preserve sharpness first; shed optional bloom,
+         then make only small DPR adjustments above a readable floor. */
+      if(avg>1/38){
+        if(FX.dof>0)FX.dof=0;
+        else if(FX.bloom)FX.bloom=false;
+        else if(pr>floor+.01){pr=Math.max(floor,pr-.08);resize();}
+        else FX.se=Math.min(6,FX.se+1);
+        lastAdj=now;
+      }else if(avg<1/57){
+        if(pr<cap-.01){pr=Math.min(cap,pr+.08);resize();lastAdj=now;}
+        else if(!drivePerf.active&&!FX.bloom&&baseFX.bloom){FX.bloom=true;lastAdj=now;}
+      }
     }
     if (DEBUG) { $('perf').hidden = false; $('perf').textContent = `${(1 / avg).toFixed(0)} fps · pr ${pr.toFixed(2)} · ${tierName}${hdr ? ' hdr' : ''}\ncalls ${renderer.info.render.calls} · tris ${(renderer.info.render.triangles / 1000) | 0}k\ntex ${renderer.info.memory.textures} · geo ${renderer.info.memory.geometries}\nfx dof ${FX.dof} bloom ${FX.bloom} shadow/${FX.se}`; } }
 }
@@ -2876,11 +2928,11 @@ addEventListener('visibilitychange', () => {
 });
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
-  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, CU, stars, clouds, keyLight,
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, CU, stars, clouds, keyLight, shadowTrack, viewPerf,
   interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
-  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod, updateViewTrafficLod,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
