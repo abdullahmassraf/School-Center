@@ -826,7 +826,7 @@ const CU = compMat.uniforms, PT = {};
  * composite is still full-resolution and uses the same depth mask, so nearby
  * geometry/textures remain untouched while the already-blurred background
  * costs ~75% fewer blur pixels on mobile. */
-const postPerf={blurDiv:isMobile?4:2,bloomDiv:8};
+const postPerf={blurDiv:(isMobile||isTouchDriveDevice)?4:2,bloomDiv:8};
 function buildPost() {
   for (const k of ['scene', 'a', 'b', 'c', 'd', 'ldr']) if (PT[k]) { PT[k].dispose(); if (PT[k].depthTexture) PT[k].depthTexture.dispose(); }
   const w = Math.max(2, Math.floor(innerWidth * pr)), h = Math.max(2, Math.floor(innerHeight * pr)), ty = hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
