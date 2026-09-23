@@ -570,7 +570,7 @@ function vehicleLampAnchors(root, kind) {
 const vehicleLightCandidates = [];
 const mobileNpcLightPool={
   initialized:false,lights:[],target:null,lastSwitch:0,switches:0,
-  p0:new V3(),p1:new V3(),active:false
+  p0:new THREE.Vector3(),p1:new THREE.Vector3(),active:false
 };
 function ensureMobileNpcLightPool(){
   if(mobileNpcLightPool.initialized)return;
