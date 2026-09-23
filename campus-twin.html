@@ -262,18 +262,38 @@ function styleNativeVehicleMaterial(material, kind, meshName = '') {
   if (kind === 'bus' || kind === 'school-bus') {
     const school = kind === 'school-bus';
     const wheel = /wheel/.test(mesh);
+    /* The native front windscreens are large, almost planar rectangles. A
+     * near-black replacement colour made those real Windows faces read as the
+     * reported "black rectangle", especially after the distance-blur pass.
+     * Keep them visibly glass-blue instead of hiding or deleting geometry. */
     const colors = school
-      ? { body: '#f0bd16', window: '#081923', trim: '#20272d', light: '#fff0a8', wheel: '#11161b' }
-      : { body: '#16869b', window: '#071b29', trim: '#1e2d35', light: '#fff0a8', wheel: '#11161b' };
-    if (wheel || /wheel/.test(name)) material.color.set(colors.wheel);
-    else if (/window/.test(name)) material.color.set(colors.window);
-    else if (/light/.test(name)) { material.color.set(colors.light); material.emissive?.set(colors.light); material.emissiveIntensity = 0; }
-    else if (school && /yellow/.test(name)) material.color.set(colors.body);
-    else if (!school && /top|material|details/.test(name)) material.color.set(colors.body);
-    else material.color.set(colors.trim);
-    material.roughness = /window/.test(name) ? .2 : .62;
+      ? { body: '#d7aa16', window: '#2d5262', trim: '#273139', light: '#ffe6a1', wheel: '#12181d' }
+      : { body: '#237f91', window: '#2a5669', trim: '#24343d', light: '#ffe6a1', wheel: '#12181d' };
+    if (wheel || /wheel/.test(name)) {
+      material.color.set(colors.wheel);
+      material.emissive?.set('#000000');
+      material.emissiveIntensity = 0;
+    } else if (/window/.test(name)) {
+      material.color.set(colors.window);
+      material.emissive?.set('#07151c');
+      material.emissiveIntensity = .16;
+      material.specular?.set('#8bb7c5');
+      if ('shininess' in material) material.shininess = 82;
+    } else if (/light/.test(name)) {
+      material.color.set(colors.light);
+      material.emissive?.set(colors.light);
+      material.emissiveIntensity = 0;
+    } else {
+      if (school && /yellow/.test(name)) material.color.set(colors.body);
+      else if (!school && /top|material|details/.test(name)) material.color.set(colors.body);
+      else material.color.set(colors.trim);
+      if (material.emissive) {
+        material.emissive.copy(material.color);
+        material.emissiveIntensity = .08;
+      }
+    }
+    material.roughness = /window/.test(name) ? .18 : .62;
     material.metalness = /wheel|bottom|bumper/.test(name) ? .35 : .06;
-    if (!/window|wheel|light|bumper|bottom/.test(name)) { material.emissive = material.color.clone(); material.emissiveIntensity = .42; }
     material.needsUpdate = true;
   }
 }
@@ -295,14 +315,31 @@ function prepareVehicleInstance(root, { color = null } = {}) {
       if (wheelNode || /wheel/.test(lower)) {
         mat.color?.set(lower.includes('grey') ? '#b8c4cf' : '#111820');
         mat.roughness = .72; mat.metalness = .18; result.wheels.push(mat);
+      } else if (/window|windshield|glass/.test(lower)) {
+        /* Native car glass shipped nearly pure black. That made windshields
+         * read as detached black rectangles at night and at medium distance.
+         * Keep the original glass geometry/material slots but give them a
+         * restrained blue-grey tint and a tiny ambient emissive floor. */
+        mat.color?.set('#355b70');
+        if (mat.emissive?.set) mat.emissive.set('#17303d');
+        else if (mat.emissive !== undefined) mat.emissive = new Col('#17303d');
+        if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = .55;
+        mat.specular?.set?.('#8fb9c9');
+        if ('shininess' in mat) mat.shininess = 76;
+        mat.roughness = .2; mat.metalness = .04;
       } else if (color && CAR_PAINT_MATERIAL.test(name)) {
         mat.color?.set(color);
         mat.emissive = mat.color.clone();
         mat.emissiveIntensity = .42;
         result.paint.push(mat);
       }
-      if (/headlight|lights/.test(lower)) { mat.color?.set('#fff0b0'); mat.emissive = new Col('#fff0b0'); mat.emissiveIntensity = 0; result.head.push(mat); }
-      if (/taillight|tail/.test(lower)) { mat.color?.set('#b81720'); mat.emissive = new Col('#ff1b24'); mat.emissiveIntensity = 0; result.tail.push(mat); }
+      /* TailLights contains the substring "lights"; classify the rear lamps
+       * first so one material never belongs to both semantic roles. */
+      if (/taillight|tail/.test(lower)) {
+        mat.color?.set('#b81720'); mat.emissive = new Col('#ff1b24'); mat.emissiveIntensity = 0; result.tail.push(mat);
+      } else if (/headlight|^lights?$/.test(lower)) {
+        mat.color?.set('#fff0b0'); mat.emissive = new Col('#fff0b0'); mat.emissiveIntensity = 0; result.head.push(mat);
+      }
       mat.needsUpdate = true;
       return mat;
     });
@@ -357,15 +394,46 @@ async function loadObjModel(objUrl, mtlUrl, kind) {
   vehicleCache.set(key, promise);
   try { return await promise; } catch (error) { vehicleCache.delete(key); throw error; }
 }
-function cloneVehicleRoot(sourceRoot) { return sourceRoot.clone(true); }
+function cloneVehicleRoot(sourceRoot) {
+  const root = sourceRoot.clone(true);
+  /* Object3D.clone() keeps material objects shared. Clone every material slot
+   * so per-instance paint/emissive changes cannot leak into another vehicle. */
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.material) return;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(mat => mat?.clone ? mat.clone() : mat)
+      : (mesh.material?.clone ? mesh.material.clone() : mesh.material);
+  });
+  return root;
+}
 
-function materialGroupBoundsInRoot(root, predicate) {
-  const bounds = new THREE.Box3();
+function objectBoundsInRoot(root) {
   root.updateMatrixWorld(true);
-  const invRoot = root.matrixWorld.clone().invert();
-  const point = new V3();
+  const invRoot = root.matrixWorld.clone().invert(), out = new THREE.Box3();
   root.traverse(mesh => {
     if (!mesh.isMesh || !mesh.geometry?.attributes?.position) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    if (!mesh.geometry.boundingBox) return;
+    const toRoot = invRoot.clone().multiply(mesh.matrixWorld);
+    out.union(mesh.geometry.boundingBox.clone().applyMatrix4(toRoot));
+  });
+  return out.isEmpty() ? null : out;
+}
+
+function nodeBoundsInRoot(root, node) {
+  root.updateMatrixWorld(true); node.updateMatrixWorld(true);
+  if (!node.geometry?.boundingBox) node.geometry?.computeBoundingBox?.();
+  if (!node.geometry?.boundingBox) return null;
+  const toRoot = root.matrixWorld.clone().invert().multiply(node.matrixWorld);
+  return node.geometry.boundingBox.clone().applyMatrix4(toRoot);
+}
+
+function materialGroupPointsInRoot(root, predicate) {
+  const points = [];
+  root.updateMatrixWorld(true);
+  const invRoot = root.matrixWorld.clone().invert(), point = new V3();
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.geometry?.attributes?.position || !mesh.material) return;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const geometry = mesh.geometry, position = geometry.attributes.position, index = geometry.index;
     const groups = geometry.groups?.length
@@ -373,84 +441,152 @@ function materialGroupBoundsInRoot(root, predicate) {
       : [{ start: 0, count: index ? index.count : position.count, materialIndex: 0 }];
     const toRoot = invRoot.clone().multiply(mesh.matrixWorld);
     for (const group of groups) {
-      const material = mats[group.materialIndex];
+      const material = mats[group.materialIndex] || mats[0];
       if (!material || !predicate(String(material.name || '').toLowerCase())) continue;
-      const end = group.start + group.count;
+      const end = Math.min(group.start + group.count, index ? index.count : position.count);
       for (let i = group.start; i < end; i++) {
         const vertex = index ? index.getX(i) : i;
         point.fromBufferAttribute(position, vertex).applyMatrix4(toRoot);
-        bounds.expandByPoint(point);
+        points.push(point.clone());
       }
     }
   });
-  return bounds.isEmpty() ? null : bounds;
+  return points;
+}
+
+function boundsFromPoints(points) {
+  const box = new THREE.Box3();
+  points.forEach(point => box.expandByPoint(point));
+  return box.isEmpty() ? null : box;
+}
+function pairCentersFromPoints(points, lateralAxis) {
+  const bounds = boundsFromPoints(points); if (!bounds) return [];
+  const mid = (bounds.min[lateralAxis] + bounds.max[lateralAxis]) * .5;
+  return [points.filter(p => p[lateralAxis] <= mid), points.filter(p => p[lateralAxis] > mid)]
+    .map(side => boundsFromPoints(side)?.getCenter(new V3()))
+    .filter(Boolean)
+    .sort((a,b) => a[lateralAxis] - b[lateralAxis]);
+}
+function fallbackLampPair(bounds, axis, lateralAxis, frontSign) {
+  if (!bounds) return [new V3(), new V3()];
+  const axial = frontSign > 0 ? bounds.max[axis] : bounds.min[axis];
+  const y = bounds.min.y + (bounds.max.y - bounds.min.y) * .42;
+  const center = (bounds.min[lateralAxis] + bounds.max[lateralAxis]) * .5;
+  const half = (bounds.max[lateralAxis] - bounds.min[lateralAxis]) * .31;
+  return [-1, 1].map(side => {
+    const p = new V3(); p[axis] = axial; p[lateralAxis] = center + side * half; p.y = y; return p;
+  });
 }
 
 function vehicleLampAnchors(root, kind) {
-  root.updateMatrixWorld(true);
-  const worldBox = new THREE.Box3().setFromObject(root), invRoot = root.matrixWorld.clone().invert();
-  const bodyMin = worldBox.min.clone().applyMatrix4(invRoot), bodyMax = worldBox.max.clone().applyMatrix4(invRoot);
-  const isCar = kind === 'car', axis = isCar ? 'z' : 'x', lateral = isCar ? 'x' : 'z';
-
-  const pair = (bounds, front) => {
-    const minA=bounds.min[axis], maxA=bounds.max[axis], spanA=Math.max(.08,maxA-minA);
-    const minL=bounds.min[lateral], maxL=bounds.max[lateral], spanL=Math.max(.08,maxL-minL);
-    const axial=front ? maxA-spanA*.02 : minA+spanA*.02, y=(bounds.min.y+bounds.max.y)*.5;
-    const left=(minL+maxL)*.5-spanL*.34, right=(minL+maxL)*.5+spanL*.34;
-    return [-1,1].map(side=>{const p=new V3();p[axis]=axial;p[lateral]=side<0?left:right;p.y=y;return p;});
-  };
-
+  const body = objectBoundsInRoot(root), isCar = kind === 'car';
   if (isCar) {
-    const head=materialGroupBoundsInRoot(root,n=>/headlights?|headlight/.test(n));
-    const tail=materialGroupBoundsInRoot(root,n=>/taillights?|tail\s*lights?/.test(n));
-    return { head:pair(head||new THREE.Box3(bodyMin,bodyMax),true), tail:pair(tail||new THREE.Box3(bodyMin,bodyMax),false) };
+    const headPoints = materialGroupPointsInRoot(root, n => /headlights?|headlight/.test(n));
+    const tailPoints = materialGroupPointsInRoot(root, n => /taillights?|tail\s*lights?/.test(n));
+    const head = pairCentersFromPoints(headPoints, 'x');
+    const tail = pairCentersFromPoints(tailPoints, 'x');
+    return {
+      head: head.length === 2 ? head : fallbackLampPair(body, 'z', 'x', 1),
+      tail: tail.length === 2 ? tail : fallbackLampPair(body, 'z', 'x', -1),
+      forward: new V3(0, 0, 1)
+    };
   }
 
-  const lights=materialGroupBoundsInRoot(root,n=>/lights?/.test(n))||new THREE.Box3(bodyMin,bodyMax);
-  const minA=lights.min[axis], maxA=lights.max[axis], spanA=Math.max(.08,maxA-minA);
-  const minL=lights.min[lateral], maxL=lights.max[lateral], spanL=Math.max(.08,maxL-minL);
-  const side=Math.min(.46,spanL*.34), y=(lights.min.y+lights.max.y)*.5;
-  const frontA=maxA-spanA*.02, rearA=minA+spanA*.02;
+  /* Bus.obj and SchoolBus.obj are authored lengthwise on X. The objects named
+   * FrontWheels sit at the MIN-X end and BackWheels at MAX-X, so native
+   * forward is -X. Their one Lights material contains two lamps at each end.
+   * Split those real vertices by longitudinal end, then by left/right side. */
+  const lightPoints = materialGroupPointsInRoot(root, n => /^lights?$/.test(n));
+  const lightBounds = boundsFromPoints(lightPoints);
+  let head = [], tail = [];
+  if (lightBounds) {
+    const midX = (lightBounds.min.x + lightBounds.max.x) * .5;
+    head = pairCentersFromPoints(lightPoints.filter(p => p.x <= midX), 'z');
+    tail = pairCentersFromPoints(lightPoints.filter(p => p.x > midX), 'z');
+  }
   return {
-    head:[-1,1].map(sideSign=>{const p=new V3();p[axis]=frontA;p[lateral]=sideSign*side;p.y=y;return p;}),
-    tail:[-1,1].map(sideSign=>{const p=new V3();p[axis]=rearA;p[lateral]=sideSign*side;p.y=y;return p;})
+    head: head.length === 2 ? head : fallbackLampPair(body, 'x', 'z', -1),
+    tail: tail.length === 2 ? tail : fallbackLampPair(body, 'x', 'z', 1),
+    forward: new V3(-1, 0, 0)
   };
+}
+
+const vehicleLightCandidates = [];
+function refreshVehicleLightBudget() {
+  vehicleLightCandidates.length = 0;
+  const add = rig => {
+    if (!rig || rig.player || !rig.root?.visible) return;
+    const p = rig._worldPos || (rig._worldPos = new V3());
+    rig.root.getWorldPosition(p);
+    rig._distanceSq = p.distanceToSquared(camera.position);
+    vehicleLightCandidates.push(rig);
+  };
+  (traffic?.cars || []).forEach(car => add(car.lightRig));
+  (transit?.vehicles || []).forEach(vehicle => add(vehicle.lightRig));
+  vehicleLightCandidates.sort((a,b) => a._distanceSq - b._distanceSq);
+  const maxActive = tierName === 'high' ? 6 : tierName === 'medium' ? 4 : 2;
+  vehicleLightCandidates.forEach((rig, i) => {
+    const range = rig.kind === 'car' ? 95 : 135;
+    rig.dynamicEnabled = i < maxActive && rig._distanceSq <= range * range;
+  });
 }
 
 function attachVehicleLightRig(root, kind, { player=false } = {}) {
-  const anchors=vehicleLampAnchors(root,kind), group=new THREE.Group();
-  group.name='VehicleLightRig'; root.add(group);
-  const headLights=[],tailLights=[],headMaterials=[],tailMaterials=[];
-  root.traverse(mesh=>{
-    if(!mesh.isMesh||!mesh.material)return;
-    const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
-    mats.forEach(mat=>{
-      const n=String(mat?.name||'').toLowerCase();
-      if(kind==='car'){
-        if(/headlights?|headlight/.test(n))headMaterials.push(mat);
-        if(/taillights?|tail\s*lights?/.test(n))tailMaterials.push(mat);
-      }else if(/lights?/.test(n))headMaterials.push(mat);
+  const anchors = vehicleLampAnchors(root, kind), group = new THREE.Group();
+  group.name = 'VehicleLightRig'; root.add(group);
+  const headLights=[], tailLights=[], headMaterials=[], tailMaterials=[], sharedLampMaterials=[];
+  root.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.material) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach(mat => {
+      const n = String(mat?.name || '').toLowerCase();
+      if (kind === 'car') {
+        if (/taillights?|tail\s*lights?/.test(n)) tailMaterials.push(mat);
+        else if (/headlights?|headlight|^lights?$/.test(n)) headMaterials.push(mat);
+      } else if (/^lights?$/.test(n)) sharedLampMaterials.push(mat);
     });
   });
-  anchors.head.forEach(pos=>{
-    const light=player
-      ? new THREE.SpotLight('#fff4cf',0,28,.30,.72,1.65)
-      : new THREE.PointLight('#fff4cf',0,kind==='car'?11:15,2);
-    light.position.copy(pos); light.castShadow=false; group.add(light);
-    if(player){
-      const target=new THREE.Object3D(); target.position.copy(pos); target[axisForVehicle(kind)] += 18; root.add(target);
-      light.target=target; light.userData.target=target;
+
+  anchors.head.forEach(pos => {
+    const light = player
+      ? new THREE.SpotLight('#fff4cf', 0, 27, .27, .76, 1.75)
+      : new THREE.PointLight('#fff4cf', 0, kind === 'car' ? 10 : 14, 2);
+    light.position.copy(pos); light.castShadow = false; group.add(light);
+    if (player) {
+      const target = new THREE.Object3D();
+      target.position.copy(pos).addScaledVector(anchors.forward, 18);
+      root.add(target); light.target = target; light.userData.target = target;
     }
     headLights.push(light);
   });
-  anchors.tail.forEach(pos=>{
-    const light=new THREE.PointLight('#ff2832',0,kind==='car'?7:9,2);
-    light.position.copy(pos); light.castShadow=false; group.add(light); tailLights.push(light);
+  anchors.tail.forEach(pos => {
+    const light = new THREE.PointLight('#ff3038', 0, kind === 'car' ? 6 : 8, 2);
+    light.position.copy(pos); light.castShadow = false; group.add(light); tailLights.push(light);
   });
-  const out={root,kind,player,headAnchors:anchors.head,tailAnchors:anchors.tail,headLights,tailLights,headMaterials:[...new Set(headMaterials)],tailMaterials:[...new Set(tailMaterials)]};
-  root.userData.vehicleLightRig=out; return out;
+
+  /* Transit has one native Lights material shared by both ends. Keep the
+   * original slot intact and add tiny local glow sprites at the exact lamp
+   * vertices so the rear can be red without rewriting material indices. */
+  const headGlows=[], tailGlows=[];
+  if (kind !== 'car') {
+    const texture = ST.glow || (ST.glow = glowTex());
+    const makeGlow = (pos, color, scale) => {
+      const material = new THREE.SpriteMaterial({ map:texture, color, transparent:true, opacity:0, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false });
+      const sprite = new THREE.Sprite(material); sprite.position.copy(pos); sprite.scale.set(scale, scale, 1); group.add(sprite); return sprite;
+    };
+    anchors.head.forEach(pos => headGlows.push(makeGlow(pos, '#fff0bd', .55)));
+    anchors.tail.forEach(pos => tailGlows.push(makeGlow(pos, '#ff3340', .44)));
+  }
+
+  const out = {
+    root, kind, player, headAnchors:anchors.head, tailAnchors:anchors.tail, forward:anchors.forward,
+    headLights, tailLights, headGlows, tailGlows,
+    headMaterials:[...new Set(headMaterials)], tailMaterials:[...new Set(tailMaterials)],
+    sharedLampMaterials:[...new Set(sharedLampMaterials)], dynamicEnabled:player
+  };
+  root.userData.vehicleLightRig = out; return out;
 }
-function axisForVehicle(kind){ return kind==='car'?'z':'x'; }
+
 function setAssetState(key, value, error) {
   if (key === 'bus' || key === 'schoolBus') ASSET_STATE.transit[key] = value;
   else ASSET_STATE[key] = value;
@@ -1025,11 +1161,14 @@ function updatePublicTransport(dt) {
     if (v.z <= minZ) { v.z = minZ; v.dir = 1; v.servedStop = false; }
 
     v.root.position.set(v.x, 0.04, v.z);
-    /* Source buses are modeled front-first along +X. The campus corridor is
-     * along Z, so +/-90° keeps headlights/front end facing travel direction. */
+    /* Native Bus/SchoolBus front is local -X (the FrontWheels and windscreen
+     * are at the min-X end). +/-90deg maps that -X forward vector onto the
+     * campus +/-Z corridor without any hidden 180deg inversion. */
     v.root.rotation.y = v.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
     if (v.wheelRigs?.length) {
-      const rollDistance = -v.dir * v.speed * dt;
+      /* The root flips to face the new travel direction at each endpoint, so
+       * local forward remains -X in both directions and wheel roll stays -Z. */
+      const rollDistance = -v.speed * dt;
       for (const rig of v.wheelRigs) {
         rig.roll += rollDistance / Math.max(rig.radius, .08);
         rig.pivot.rotation.set(rig.baseX, rig.baseY, rig.baseZ);
@@ -1641,50 +1780,56 @@ function fitNativeTransitWheels(root, kind) {
     if (!body && node.isMesh && bodyPattern.test(String(node.name || ''))) body = node;
     if (node.isMesh && /(?:BackWheels|FrontWheels)_Cylinder/i.test(String(node.name || ''))) wheelNodes.push(node);
   });
-  const bodyBox = new THREE.Box3().setFromObject(body || root), bodySize = bodyBox.getSize(new V3());
-  const desiredDiameter = clamp(bodySize.y * .26, .72, 1.35);
+  const bodyBox = objectBoundsInRoot(body || root);
   return wheelNodes.map((node, index) => {
+    const before = nodeBoundsInRoot(root, node), beforeCenter = before?.getCenter(new V3()) || new V3();
     const pivot = createWheelPivot(node, node.name);
-    const wheelBox = new THREE.Box3().setFromObject(node), wheelSize = wheelBox.getSize(new V3());
-    const nativeDiameter = Math.max(wheelSize.x, wheelSize.y, wheelSize.z);
-    const fit = nativeDiameter > .001 ? desiredDiameter / nativeDiameter : .25;
+    const localBox = nodeBoundsInRoot(root, node), localSize = localBox?.getSize(new V3()) || new V3();
+    const afterCenter = localBox?.getCenter(new V3()) || new V3();
+    const sizes = [{axis:'x',value:localSize.x},{axis:'y',value:localSize.y},{axis:'z',value:localSize.z}].sort((a,b)=>b.value-a.value);
+    const axleAxis = sizes[0]?.axis || 'z';
+    const worldSize = new THREE.Box3().setFromObject(node).getSize(new V3());
+    const worldDims = [worldSize.x,worldSize.y,worldSize.z].sort((a,b)=>b-a);
+    const diameter = worldDims[1] || worldDims[0] || .2;
 
-    /*
-     * Transit source wheel cylinders are authored on local X while the bus
-     * body is lengthwise on local +X. The bus turns ±90° onto the campus Z
-     * corridor, so leaving the wheel axis untouched puts the disk on the bus
-     * front/rear and creates the reported large black rectangular artifact.
-     * Rotate only the rig around bus-local Y: wheel axle becomes local Z
-     * (world X after the bus turn). Original vertices/materials stay intact.
-     */
-    pivot.rotateY(Math.PI / 2);
-    pivot.userData.transitWheelAxis = 'z';
-    pivot.scale.multiplyScalar(fit);
-    pivot.userData.nativeWheelFit = fit;
-    pivot.userData.nativeWheelDiameter = nativeDiameter * fit;
-    return { node, pivot, index, radius: Math.max(.08, nativeDiameter * fit * .5), baseX: pivot.rotation.x, baseY: pivot.rotation.y, baseZ: pivot.rotation.z, roll: 0 };
+    /* Both transit assets already contain a two-wheel axle group whose longest
+     * source dimension is local Z. Do not rotate or rescale it: the previous
+     * +90deg Y rotation turned that axle longitudinally toward the bus ends,
+     * while measuring its full track width as a "diameter" shrank the mesh.
+     * Preserve the authored transform and roll the pivot about local Z only. */
+    pivot.userData.transitWheelAxis = axleAxis;
+    pivot.userData.nativeWheelFit = 1;
+    pivot.userData.nativeWheelDiameter = diameter;
+    pivot.userData.nativeWheelLocalSize = localSize.toArray();
+    pivot.userData.originalCenter = beforeCenter.toArray();
+    pivot.userData.centerAfterPivot = afterCenter.toArray();
+    pivot.userData.bodySize = bodyBox?.getSize(new V3()).toArray() || [];
+    return {
+      node, pivot, index, radius:Math.max(.08, diameter * .5),
+      baseX:pivot.rotation.x, baseY:pivot.rotation.y, baseZ:pivot.rotation.z, roll:0
+    };
   });
 }
 function createWheelPivot(node, name) {
-  const parent=node.parent;
-  if(!parent) return node;
-  parent.updateMatrixWorld(true);
-  node.updateMatrixWorld(true);
-  const worldBox=new THREE.Box3().setFromObject(node);
-  const center=worldBox.getCenter(new V3());
+  const parent = node.parent;
+  if (!parent) return node;
+  parent.updateMatrixWorld(true); node.updateMatrixWorld(true);
+  const beforeWorld = node.matrixWorld.clone();
+  const center = new THREE.Box3().setFromObject(node).getCenter(new V3());
   parent.worldToLocal(center);
-  const worldMatrix=node.matrixWorld.clone();
-  const pivot=new THREE.Group();
-  pivot.name=`${name}Pivot`;
-  parent.add(pivot);
-  pivot.position.copy(center);
-  pivot.updateMatrixWorld(true);
-  pivot.add(node);
-  const localMatrix=pivot.matrixWorld.clone().invert().multiply(worldMatrix);
-  localMatrix.decompose(node.position,node.quaternion,node.scale);
+  const pivot = new THREE.Group();
+  pivot.name = `${name}Pivot`;
+  parent.add(pivot); pivot.position.copy(center); pivot.updateMatrixWorld(true);
+  /* attach() preserves the node world transform while moving it under the new
+   * axle-center pivot. No position/rotation/scale is double-applied. */
+  pivot.attach(node);
   node.updateMatrixWorld(true);
+  let maxError = 0;
+  for (let i=0;i<16;i++) maxError = Math.max(maxError, Math.abs(beforeWorld.elements[i] - node.matrixWorld.elements[i]));
+  pivot.userData.reparentWorldMatrixError = maxError;
   return pivot;
 }
+
 async function initPhysics() {
   if (drive.world) return;
   if (drive.initPromise) return drive.initPromise;
@@ -1782,11 +1927,11 @@ async function initPhysics() {
   drive.lightRig = attachVehicleLightRig(drive.packedCar,'car',{player:true});
   const dn=84,drr=rng(7474),dpos=new Float32Array(dn*3);
   for(let i=0;i<dn;i++){
-    const anchor=drive.lightRig.headAnchors[i<dn/2?0:1],j=i*3,t=(drr()*.9+.1)*18;
+    const anchor=drive.lightRig.headAnchors[i<dn/2?0:1],j=i*3,t=(drr()*.9+.1)*8;
     dpos[j]=anchor.x+(drr()-.5)*.26; dpos[j+1]=anchor.y+(drr()-.5)*.24; dpos[j+2]=anchor.z+t;
   }
   const dgeo=new THREE.BufferGeometry(); dgeo.setAttribute('position',new THREE.BufferAttribute(dpos,3));
-  const dmat=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.18,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+  const dmat=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.13,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
   drive.dust=new THREE.Points(dgeo,dmat); drive.dust.frustumCulled=false; drive.dust.renderOrder=8; drive.lightRig.root.add(drive.dust);
   drive.wheels = [[-1, -1.35], [1, -1.35], [-1, 1.35], [1, 1.35]].map(([sx, z]) => { const wh = P(new THREE.CylinderGeometry(.44, .44, .34, 16).rotateZ(Math.PI / 2), tm, sx * .98, .44, z, 'wheel'); return wh; });
   if (drive.packedCar) drive.wheels.forEach(wheel => wheel.visible = false);
@@ -1908,26 +2053,38 @@ async function toggleDrive() {
   bt.classList.add('on'); $('hint').textContent = 'Drag to orbit car · Scroll/pinch to zoom · WASD / arrows drive · Space handbrake · Esc exits'; panel(false);
 }
 function updateVehicleLighting(dt,now) {
-  const night=sstep(.10,.52,ST.night);
-  const applyRig=rig=>{
-    if(!rig)return;
-    rig.headMaterials?.forEach(m=>{if(m?.emissiveIntensity!==undefined)m.emissiveIntensity=night*5.2;});
-    rig.tailMaterials?.forEach(m=>{if(m?.emissiveIntensity!==undefined)m.emissiveIntensity=night*4.5;});
-    rig.headLights?.forEach(l=>{l.intensity=night*(rig.player?3.2:(rig.kind==='car'?1.0:1.8));});
-    rig.tailLights?.forEach(l=>{l.intensity=night*(rig.player?.85:.55);});
+  const night = sstep(.10,.52,ST.night);
+  if (frameNo % 12 === 0) refreshVehicleLightBudget();
+  const applyRig = rig => {
+    if (!rig) return;
+    rig.headMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 5.0; });
+    rig.tailMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 4.3; });
+    rig.sharedLampMaterials?.forEach(m => { if (m?.emissiveIntensity !== undefined) m.emissiveIntensity = night * 1.35; });
+    rig.headGlows?.forEach(g => { if (g?.material) g.material.opacity = night * .80; });
+    rig.tailGlows?.forEach(g => { if (g?.material) g.material.opacity = night * .72; });
+    const dynamic = rig.player || rig.dynamicEnabled;
+    const lightsVisible = dynamic && night > .015;
+    rig.headLights?.forEach(l => {
+      l.visible = lightsVisible;
+      l.intensity = lightsVisible ? night * (rig.player ? 2.7 : (rig.kind === 'car' ? .85 : 1.45)) : 0;
+    });
+    rig.tailLights?.forEach(l => {
+      l.visible = lightsVisible;
+      l.intensity = lightsVisible ? night * (rig.player ? .72 : .42) : 0;
+    });
   };
   applyRig(drive.lightRig);
-  (traffic?.cars||[]).forEach(car=>applyRig(car.lightRig));
-  (transit?.vehicles||[]).forEach(vehicle=>applyRig(vehicle.lightRig));
-  if(drive.dust){
-    drive.dust.material.opacity=night*.30;
-    const a=drive.dust.geometry.attributes.position;
-    for(let i=0;i<a.count;i++){
-      const anchor=drive.lightRig?.headAnchors[i<a.count/2?0:1]; if(!anchor)continue;
-      const j=i*3,phase=(now*.0009+i*.71)%1;
-      a.setXYZ(i,anchor.x+Math.sin(now*.0017+i)*.03,anchor.y+Math.sin(now*.0021+i*.7)*.05,anchor.z+phase*18);
+  (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
+  (transit?.vehicles||[]).forEach(vehicle => applyRig(vehicle.lightRig));
+  if (drive.dust) {
+    drive.dust.material.opacity = night * .14;
+    const a = drive.dust.geometry.attributes.position;
+    for (let i=0;i<a.count;i++) {
+      const anchor = drive.lightRig?.headAnchors[i<a.count/2?0:1]; if (!anchor) continue;
+      const phase = (now*.0009+i*.71)%1;
+      a.setXYZ(i, anchor.x+Math.sin(now*.0017+i)*.03, anchor.y+Math.sin(now*.0021+i*.7)*.05, anchor.z+phase*8);
     }
-    a.needsUpdate=true;
+    a.needsUpdate = true;
   }
 }
 
@@ -2112,7 +2269,8 @@ addEventListener('visibilitychange', () => {
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  interaction, AUTO, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
+  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
