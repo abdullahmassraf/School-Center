@@ -151,9 +151,9 @@ const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').p
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
 await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');const p=v.root.position;d.camera.position.set(p.x+15,7,p.z+13);d.controls.target.set(p.x,1.4,p.z);d.controls.update();return true})()");
-await sleep(1000);await screenshot('transit-bus-close');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;const p=v.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.set(p.x+14,p.y+6,p.z+14);d.controls.target.set(p.x,p.y+1.1,p.z);d.controls.update();return{p:[p.x,p.y,p.z],cam:[d.camera.position.x,d.camera.position.y,d.camera.position.z]}})()`);await sleep(900);await screenshot('transit-bus-close');
 await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');const p=v.root.position;d.camera.position.set(p.x+95,65,p.z+95);d.controls.target.set(p.x,1,p.z);d.controls.update();return true})()");
-await sleep(1000);await screenshot('transit-bus-far');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='bus');d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;const p=v.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.set(p.x+85,p.y+52,p.z+85);d.controls.target.set(p.x,p.y+1,p.z);d.controls.update();return true})()`);await sleep(900);await screenshot('transit-bus-far');
 await ev("(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key==='schoolBus');const p=v.root.position;d.camera.position.set(p.x+16,7,p.z+12);d.controls.target.set(p.x,1.4,p.z);d.controls.update();return true})()");
 await sleep(1000);await screenshot('transit-schoolbus-close');
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
@@ -162,6 +162,25 @@ const transitAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__D
 if(transitBefore.every((v,i)=>Math.abs(v-transitAfter[i])<.1))throw new Error(`public transport is not moving: ${JSON.stringify({before:transitBefore,after:transitAfter})}`);
 console.log('TRANSIT MOTION',JSON.stringify({before:transitBefore,after:transitAfter}));
 console.log('BOOT',JSON.stringify(boot));
+
+/* Sunset/night lighting regression: moving NPC cars, commute buses and their
+ * lamp materials must become active when the sun is below the horizon. */
+await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='0';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value})()`);
+await sleep(700);
+const nightLights=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{
+  night:d.ST.night,
+  traffic:(d.traffic?.cars||[]).slice(0,3).map(c=>({head:c.lightRig?.headLights?.map(l=>l.intensity)||[],tail:c.lightRig?.tailLights?.map(l=>l.intensity)||[]})),
+  transit:(d.transit?.vehicles||[]).map(v=>{let receive=true;v.root.traverse(o=>{if(o.isMesh&&o.receiveShadow)receive=false});return{key:v.key,head:v.lightRig?.headLights?.map(l=>l.intensity)||[],tail:v.lightRig?.tailLights?.map(l=>l.intensity)||[],receiveShadow:receive}})
+}})()`);
+if(nightLights.night<.85)throw new Error('night time did not produce a strong night state: '+JSON.stringify(nightLights));
+for(const car of nightLights.traffic){
+  if(!car.head.length||!car.head.some(v=>v>0)||!car.tail.length||!car.tail.some(v=>v>0))throw new Error('moving NPC vehicle lights did not activate: '+JSON.stringify(nightLights));
+}
+for(const bus of nightLights.transit){
+  if(!bus.head.length||!bus.head.some(v=>v>0)||!bus.tail.length||!bus.tail.some(v=>v>0))throw new Error('commute vehicle lights did not activate: '+JSON.stringify(nightLights));
+  if(!bus.receiveShadow)throw new Error('commute vehicle shadow receiver is still enabled: '+JSON.stringify(nightLights));
+}
+console.log('NIGHT VEHICLE LIGHTS',JSON.stringify(nightLights));
 
 const dOutside=await ev(`(()=>{window.__SC_CAMPUS_MAP_3D__.frame.focus();return window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.on})()`);
 await key('KeyD');
@@ -187,6 +206,16 @@ await key('KeyD');
 await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return d.drive.on&&!!d.drive.packedCar})()`,12000,150);
 let drive=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{on:d.drive.on,fs:d.actualFullscreen(),keys:{d:d.drive.keys.d},distance:d.driveCamera?.distance,packed:!!d.drive.packedCar}})()`);
 if(!drive.on||!drive.fs||!drive.packed)throw new Error(`fullscreen D/packed car failed: ${JSON.stringify({drive,errors})}`);
+const driveLightRig=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=d.drive.lightRig;return{
+  head:r?.headAnchors?.map((p,i)=>({anchor:[p.x,p.y,p.z],light:[r.headLights[i]?.position.x,r.headLights[i]?.position.y,r.headLights[i]?.position.z]})),
+  tail:r?.tailAnchors?.map((p,i)=>({anchor:[p.x,p.y,p.z],light:[r.tailLights[i]?.position.x,r.tailLights[i]?.position.y,r.tailLights[i]?.position.z]})),
+  oldBeam:!!d.drive.beamMat,oldPool:!!d.drive.poolM,shadowReceiver:d.drive.packedCar.traverse?.(()=>{})
+}})()`);
+for(const side of ['head','tail'])for(const w of (driveLightRig[side]||[])){
+  if(Math.hypot(w.anchor[0]-w.light[0],w.anchor[1]-w.light[1],w.anchor[2]-w.light[2])>.001)throw new Error('Drive native lamp light is detached from its anchor: '+JSON.stringify(driveLightRig));
+}
+if(driveLightRig.oldBeam||driveLightRig.oldPool)throw new Error('legacy fixed-position Drive beam geometry is still present: '+JSON.stringify(driveLightRig));
+console.log('DRIVE NATIVE LIGHT ALIGNMENT',JSON.stringify(driveLightRig));
 const playerAppearance=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const mats=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&mats.push(m.color.getHexString()))}});return{model:d.drive.packedCar.userData.vehicleModel,color:d.drive.packedCar.userData.vehicleColor,materials:[...new Set(mats)]}})()`);
 if(playerAppearance.model!=='NormalCar1'||playerAppearance.color!=='#1f4d8a')throw new Error(`Drive did not use the intended native NormalCar1 visual: ${JSON.stringify(playerAppearance)}`);
 const driveBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const out=[];d.drive.packedCar.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];out.push({mesh:o.name,materials:ms.map(m=>({name:m?.name,color:m?.color?.getHexString()}))})}});return out})()`);
