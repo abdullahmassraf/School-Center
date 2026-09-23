@@ -49,13 +49,6 @@
   .glass{background:rgba(14,16,36,.86);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.35)}
   .hud{position:absolute;z-index:5}
 
-  /* title */
-  #title{top:calc(14px + var(--safe-t));left:14px;padding:12px 16px 12px 14px;border-radius:16px;display:flex;gap:12px;align-items:center;max-width:calc(100vw - 90px)}
-  #title .mark{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#22d3ee);display:grid;place-items:center;font-size:15px;color:#fff;flex:none}
-  #title h1{margin:0;font-size:14px;font-weight:600;letter-spacing:-.005em}
-  #title p{margin:2px 0 0;font-size:11.5px;color:var(--ink-dim)}
-  #title .aaa{margin-left:7px;padding:2px 6px;border-radius:999px;border:1px solid color-mix(in srgb,var(--accent) 55%,rgba(255,255,255,.18));background:color-mix(in srgb,var(--accent) 16%,rgba(7,9,20,.65));font-size:8.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#fff;vertical-align:1px}
-
   /* panel */
   #panelBtn{top:calc(14px + var(--safe-t));right:14px;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
 
@@ -67,7 +60,7 @@
   .seg button:hover,.btn:hover{background:rgba(255,255,255,.11)}
   .seg button:active,.btn:active{transform:scale(.97)}
   .seg button.on{background:color-mix(in srgb,var(--accent) 34%,transparent);border-color:var(--accent)}
-  .seg button:focus-visible,.btn:focus-visible,#panelBtn:focus-visible,#dock button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .seg button:focus-visible,.btn:focus-visible,#panelBtn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fff;outline-offset:2px}
   input[type=range]{width:100%;accent-color:var(--accent)}
   select{font:inherit;font-size:12px;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
   select option{color:#111}
@@ -87,14 +80,6 @@
   #info .stat b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
   #info .stat span{font-size:11px;color:var(--ink-dim)}
   #infoClose{position:absolute;top:10px;right:10px;width:30px;height:30px;border-radius:9px;border:0;background:rgba(255,255,255,.07);color:var(--ink);cursor:pointer}
-
-  /* dock */
-  #dock{left:50%;bottom:calc(14px + var(--safe-b));transform:translateX(-50%);display:flex;gap:6px;padding:7px;border-radius:18px;max-width:calc(100vw - 20px);overflow-x:auto;scrollbar-width:none}
-  #dock::-webkit-scrollbar{display:none}
-  #dock button{flex:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:12px;padding:8px 12px;cursor:pointer;transition:background .15s,border-color .15s;white-space:nowrap}
-  #dock button:hover{background:rgba(255,255,255,.08)}
-  #dock button.on{background:color-mix(in srgb,var(--accent) 38%,transparent);border-color:var(--accent)}
-  #dock .sep{width:1px;background:var(--line);margin:4px 2px;flex:none}
 
   #compass{left:14px;bottom:calc(74px + var(--safe-b));width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--ink)}
   #compass i{position:absolute;inset:5px;border-radius:50%;border:1px dashed rgba(255,255,255,.2)}
@@ -168,7 +153,7 @@
     #info{left:10px;right:10px;width:auto;bottom:calc(72px + var(--safe-b))}
     #compass,#hint{display:none}
   }
-  body.embed #title,body.embed #dock,body.embed #hint,body.embed #compass,body.embed #info,body.embed #panelBtn,body.embed #panel,body.embed #loader,body.embed #fatal{display:none!important}
+  body.embed #hint,body.embed #compass,body.embed #info,body.embed #panelBtn,body.embed #panel,body.embed #loader,body.embed #fatal{display:none!important}
   body.embed #loader p,body.embed #loader .bar{display:none}
   @media (prefers-reduced-motion:reduce){ #info{animation:none} #loader{transition:none} }
 </style>
@@ -177,14 +162,6 @@
 <body>
 <div id="app">
   <canvas id="scene" tabindex="0" aria-label="Interactive 3D map of Sheridan Davis Campus"></canvas>
-  
-  <header id="title" class="hud glass">
-    <div class="mark"><i class="fa-solid fa-building-columns"></i></div>
-    <div>
-      <h1>Sheridan · Davis Campus <span class="aaa">AAA v4</span></h1>
-      <p>7899 McLaughlin Rd, Brampton, ON</p>
-    </div>
-  </header>
 
   <button id="panelBtn" class="hud glass" aria-label="Environment controls" aria-expanded="false"><i class="fa-solid fa-sliders"></i></button>
 
@@ -256,7 +233,6 @@
   </section>
 
   <div id="compass" class="hud glass" title="North"><i></i><span>N</span><b id="compassNeedle" style="font-size:16px;color:#fff;line-height:1"><i class="fa-solid fa-location-arrow" style="position:static;border:0;transform:rotate(-45deg);display:block"></i></b></div>
-  <nav id="dock" class="hud glass" aria-label="Buildings"></nav>
   <div id="hint" class="hud">Drag to orbit · Right-drag to pan · Scroll to zoom</div>
   <div id="perf" class="hud" hidden></div>
   <button id="mobileDriveActivate" type="button" aria-label="Start driving" title="Start driving" hidden></button>
@@ -2041,7 +2017,7 @@ function select(id, fly = true) {
   markUserInteraction();
   if (id && !BLD[id]) return; ST.sel = id;
   for (const k in BG) Tw.to(BG[k].edgeMat, { opacity: k === id ? .95 : 0, duration: .45 });
-  document.querySelectorAll('#dock [data-id]').forEach(b => b.classList.toggle('on', b.dataset.id === id)); applyGlass();
+  applyGlass();
   if (!id) { R.grp.visible = false; $('info').hidden = true; if (fly) flyTo(OV.pos, OV.tgt); window.dispatchEvent(new CustomEvent('davis:select', { detail: { id: null } })); return; }
   const b = BLD[id]; showRoute(id); $('info').hidden = false; $('infoName').textContent = b.name; $('infoSub').innerHTML = `${b.description}<br><span style="opacity:.75">${b.meta.join(' · ')}</span>`;
   $('infoWalk').textContent = Math.max(1, Math.round(R.len / 1.35 / 60)) + ' min'; $('infoDist').textContent = Math.round(R.len) + ' m';
@@ -2935,8 +2911,6 @@ function wireUI() {
   $('btnGlass').onclick = () => { ST.glass = !ST.glass; applyGlass(); }; $('btnDrive').onclick = toggleDrive;
   $('infoClose').onclick = () => select(null); $('btnOverview').onclick = () => select(null);
   $('btnRoute').onclick = () => { R.grp.visible = !R.grp.visible; $('btnRoute').innerHTML = `<i class="fa-solid fa-route"></i> ${R.grp.visible ? 'Hide' : 'Show'} route`; };
-  const dock = $('dock'); dock.innerHTML = '<button data-ov>Overview</button><span class="sep"></span>' + BUILDINGS.map(b => `<button data-id="${b.id}" title="${b.name}">${b.id}</button>`).join('') + '<span class="sep"></span><button data-bus><i class="fa-solid fa-bus"></i> Bus stop</button>';
-  dock.onclick = e => { const t = e.target.closest('button'); if (!t) return; if (t.dataset.id) select(t.dataset.id); else if (t.hasAttribute('data-ov')) select(null); else if (t.hasAttribute('data-bus')) { select(null, false); flyTo([-100, 55, -80], [-58, 0, -122]); } };
   addEventListener('keydown', e => {
   if (editableTarget(e.target)) return;
   if (e.repeat) return;

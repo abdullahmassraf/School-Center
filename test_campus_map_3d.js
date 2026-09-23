@@ -105,6 +105,18 @@ const screenshot=async name=>{
   console.log('SCREENSHOT',out);
 };
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+/* The twin integrates physics, camera damping and its cinematic idle on its own
+ * frame loop at a fixed step, so on a GPU-less runner (the CI job renders with
+ * SwiftShader at roughly one to two frames per second) a wall-clock sleep leaves
+ * the simulation far behind: CI once measured a Drive chase strength of 0.26 after
+ * a 700 ms sleep, where the same step reaches ~0.99 on a machine that renders at a
+ * normal rate. Any "sleep, then assert a converged value" step therefore waits
+ * for the value instead, with a budget generous enough for a slow renderer. */
+const waitForTwin=async(expression,timeout=15000,interval=150)=>{
+  const started=Date.now();
+  while(Date.now()-started<timeout){if(await ev(expression))return Date.now()-started;await sleep(interval);}
+  return null;
+};
 const clickSelectorInFrame=async selector=>{
   const p=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame,fb=f.getBoundingClientRect(),b=f.contentWindow.document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:fb.left+b.left+b.width/2,y:fb.top+b.top+b.height/2}})()`);
   await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none',buttons:0});
@@ -142,8 +154,8 @@ let ready=false;
 for(let i=0;i<120&&!ready;i++){await sleep(500);ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`)}
 if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
 
-const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),rb=document.querySelector('.cm3d-reset'),hud=document.querySelector('.cm3d-hud'),pill=document.querySelector('.cm3d-pill'),chip=document.querySelector('.cm3d-weather'),u=new URL(m.frame.src),R=e=>e?.getBoundingClientRect?.().toJSON();return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),resetLabel:rb?.getAttribute('aria-label'),pillExists:!!pill,groupRole:pill?.getAttribute('role'),samePill:!!pill&&pill.contains(b)&&pill.contains(rb),sep:!!pill?.querySelector('.cm3d-pill-sep'),hudChildren:hud?.children.length,pillRect:R(pill),resetRect:R(rb),fsRect:R(b),chipRect:R(chip),viewport:[innerWidth,innerHeight],ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
-if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
+const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),rb=document.querySelector('.cm3d-reset'),hud=document.querySelector('.cm3d-hud'),pill=document.querySelector('.cm3d-pill'),chip=document.querySelector('.cm3d-weather'),u=new URL(m.frame.src),R=e=>e?.getBoundingClientRect?.().toJSON();return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),pressed:b?.getAttribute('aria-pressed'),resetLabel:rb?.getAttribute('aria-label'),pillExists:!!pill,groupRole:pill?.getAttribute('role'),samePill:!!pill&&pill.contains(b)&&pill.contains(rb),sep:!!pill?.querySelector('.cm3d-pill-sep'),hudChildren:hud?.children.length,pillRect:R(pill),resetRect:R(rb),fsRect:R(b),chipRect:R(chip),viewport:[innerWidth,innerHeight],ui:['#panel','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none']),chromeRemoved:!f.document.querySelector('#title,#dock')}})()`);
+if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||!boot.chromeRemoved||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
 if(boot.label!=='Toggle Fullscreen'||boot.pressed!=='false'||boot.resetLabel!=='Reset View')throw new Error(`pill accessible labels regressed: ${JSON.stringify({label:boot.label,pressed:boot.pressed,resetLabel:boot.resetLabel})}`);
 if(!boot.pillExists||boot.groupRole!=='group'||!boot.samePill||!boot.sep||boot.hudChildren!==2)throw new Error(`reset+fullscreen are not one continuous pill: ${JSON.stringify({pill:boot.pillExists,role:boot.groupRole,samePill:boot.samePill,sep:boot.sep,hudChildren:boot.hudChildren})}`);
 const pillCenter=boot.pillRect.y+boot.pillRect.height/2, chipCenter=boot.chipRect.y+boot.chipRect.height/2;
@@ -311,10 +323,15 @@ await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_
 /* Existing non-Drive traffic must obey the signal too. Put one northbound car
  * just before the south stop line, hold its axis red, then release it on green. */
 const signalNpcSetup=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars.find(c=>c.ax==='z'&&c.d>0),stop=d.MAIN_INTERSECTION.stop.southZ,coord=stop-7;c.t=(coord+320)/640;c.signalV=c.v;d.setTrafficSignalPhase('ew-green');return{base:c.v,stop,coord,index:d.traffic.cars.indexOf(c)}})()`);
-await sleep(900);
+/* A GPU-less runner renders only one or two frames per second, so a fixed sleep
+ * leaves the NPC mid-brake and reads a barely-changed speed. Wait for the
+ * signal-aware speed to converge instead of trusting wall-clock time. */
+const signalCar=`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.traffic.cars[${signalNpcSetup.index}]`;
+await waitForTwin(`(()=>{const c=${signalCar};return c.signalV<${signalNpcSetup.base}*.8})()`,12000);
 const signalNpcRed=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars[${signalNpcSetup.index}],dist=d.signalDistanceForEntity(c,c.z);return{speed:c.signalV,base:c.v,z:c.z,dist,phase:d.trafficSignal.phase}})()`);
 if(signalNpcRed.phase!=='ew-green'||signalNpcRed.speed>=signalNpcRed.base*.8||signalNpcRed.dist<-.7)throw new Error('NPC failed to slow/hold for a red traffic light: '+JSON.stringify({signalNpcSetup,signalNpcRed}));
-await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.setTrafficSignalPhase('ns-green')`);await sleep(900);
+await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.setTrafficSignalPhase('ns-green')`);
+await waitForTwin(`(()=>{const c=${signalCar};return c.signalV>${signalNpcRed.speed}+.4})()`,12000);
 const signalNpcGreen=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,c=d.traffic.cars[${signalNpcSetup.index}];return{speed:c.signalV,base:c.v,phase:d.trafficSignal.phase}})()`);
 if(signalNpcGreen.phase!=='ns-green'||signalNpcGreen.speed<=signalNpcRed.speed+.4)throw new Error('NPC did not resume after its traffic light turned green: '+JSON.stringify({signalNpcRed,signalNpcGreen}));
 console.log('SIGNALIZED INTERSECTION/NPC COMPLIANCE',JSON.stringify({intersection,signalNpcRed,signalNpcGreen}));
@@ -588,22 +605,36 @@ await sleep(300);
 /* Smart Drive chase: the existing Drive physics is reused. Hold forward long
  * enough to move, then verify automatic rear alignment engages. */
 await clickSelector('.cm3d-fullscreen'); await sleep(400); await key('KeyD'); await sleep(500);
-await key('KeyW',false); await sleep(1600);
+/* The collision scenarios above can leave the player car resting against
+ * whatever it hit, and the chase only blends in above a forward-speed
+ * threshold, so a wedged car reads a flat, oscillating chase strength. Put the
+ * car back on its clear spawn stretch before measuring the chase. */
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,b=d.drive.body;b.setTranslation({x:-150,y:1.2,z:138},true);b.setRotation({x:0,y:Math.SQRT1_2,z:0,w:Math.SQRT1_2},true);b.setLinvel({x:0,y:0,z:0},true);b.setAngvel({x:0,y:0,z:0},true);d.driveCamera.chaseStrength=0;return true})()`);
+await sleep(120);
+await key('KeyW',false);
+await waitForTwin(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const v=d.drive.body.linvel();return Math.hypot(v.x,v.z)>=.6&&d.driveCamera.chaseStrength>=.25})()`,20000);
 const moving=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;const p=d.drive.body.linvel();return{speed:Math.hypot(p.x,p.z),chase:d.driveCamera.chaseStrength,rotating:d.driveCamera.userRotating}})()`);
 const cameraFinite=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,a=d.drive.anchor,p=d.camera.position,t=d.controls.target;const vals=[p.x,p.y,p.z,t.x,t.y,t.z,a.x,a.y,a.z];return{finite:vals.every(Number.isFinite),targetGap:t.distanceTo(a),distance:d.driveCamera.distance}})()`);
 if(!cameraFinite.finite||cameraFinite.targetGap>8||!Number.isFinite(cameraFinite.distance))throw new Error("Drive camera state became unstable: "+JSON.stringify(cameraFinite));
 console.log("DRIVE CAMERA FINITE",JSON.stringify(cameraFinite));
-await key('KeyW');
 if(moving.speed<0.5||moving.rotating||moving.chase<0.2)throw new Error(`smart drive chase did not engage: ${JSON.stringify(moving)}`);
 const distanceBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.distance`);
-await sleep(700);
-const chaseAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.chaseStrength`);
-if(chaseAfter<.45)throw new Error(`smart drive chase did not sustain: ${chaseAfter}`);
-console.log('SMART DRIVE CHASE',JSON.stringify({moving,distanceBefore,chaseAfter}));
+/* The chase strength follows the car's forward speed, so it keeps climbing
+ * while the throttle is held and decays within a few frames of the release.
+ * Sample it while still driving, twice, rather than after the key release,
+ * which used to catch the blend mid-ramp (or mid-decay) and flake. */
+const chaseTwin=`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.driveCamera.chaseStrength`;
+await waitForTwin(`${chaseTwin}>=.8`,12000);
+const chaseAfter=await ev(chaseTwin);
+await sleep(400);
+const chaseSustained=await ev(chaseTwin);
+if(chaseAfter<.45||chaseSustained<.45)throw new Error(`smart drive chase did not sustain: ${chaseAfter} -> ${chaseSustained}`);
+console.log('SMART DRIVE CHASE',JSON.stringify({moving,distanceBefore,chaseAfter,chaseSustained}));
+await key('KeyW');
 await key('Escape'); await sleep(800);
 await ev(`window.__SC_CAMPUS_MAP_3D__.reset()`);
 await waitFor(`!window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.cameraTransition`,10000,150);
-await sleep(1500);
+await waitForTwin(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.idleStrength>=.12`,15000);
 
 const idleOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition}})()`);
 if(idleOverview.sel!==null||idleOverview.pivot!==null||idleOverview.strength<.08||idleOverview.transition)throw new Error(`overview cinematic idle failed: ${JSON.stringify(idleOverview)}`);
@@ -611,7 +642,7 @@ console.log('CINEMATIC OVERVIEW',JSON.stringify(idleOverview));
 
 await ev(`window.__SC_CAMPUS_MAP_3D__.focus('H')`);
 await waitFor(`!window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.cameraTransition`,10000,150);
-await sleep(1500);
+await waitForTwin(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.idleStrength>=.12`,15000);
 const idleSelected=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{sel:d.ST.sel,strength:d.interaction.idleStrength,pivot:d.interaction.pivotId,transition:d.interaction.cameraTransition,route:d.R.grp.visible}})()`);
 if(idleSelected.sel!=='H'||idleSelected.pivot!=='H'||idleSelected.strength<.08||idleSelected.transition||!idleSelected.route)throw new Error(`selected cinematic idle failed: ${JSON.stringify(idleSelected)}`);
 console.log('CINEMATIC SELECTED H',JSON.stringify(idleSelected));
@@ -625,7 +656,7 @@ await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:drag.x+100,y:drag.
  * same-origin iframe so this regression exercises the real child interaction
  * handler rather than relying on browser-specific iframe event routing. */
 await ev(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.document.querySelector('#scene');const o={bubbles:true,clientX:100,clientY:100,buttons:1};s.dispatchEvent(new MouseEvent('mousedown',o));s.dispatchEvent(new MouseEvent('mousemove',{...o,clientX:200,clientY:130}));s.dispatchEvent(new MouseEvent('mouseup',{...o,buttons:0}));})()`);
-await sleep(800);
+await waitForTwin(`(()=>{const s=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.idleStrength;return s<=.18||s<${JSON.stringify(beforeManual)}*.65})()`,15000);
 const afterManual=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.interaction.idleStrength`);
 if(afterManual>=beforeManual*.65&&afterManual>.18)throw new Error(`manual input did not suppress cinematic idle: ${beforeManual}->${afterManual}`);
 console.log('CINEMATIC MANUAL OVERRIDE',JSON.stringify({before:beforeManual,after:afterManual}));
