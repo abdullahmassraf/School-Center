@@ -178,7 +178,7 @@ await frameVehicle('bus',[-8,3.2,5.5],'transit-bus-close');
 await frameVehicle('bus',[-38,20,24],'transit-bus-far');
 await frameVehicle('bus',[-9,2.6,0],'transit-bus-front');
 await frameVehicle('bus',[9,2.6,0],'transit-bus-rear');
-await frameVehicle('schoolBus',[-8,3.2,5.5],'transit-schoolbus-close');
+await frameVehicle('schoolBus',[-11,4.4,7.5],'transit-schoolbus-close');
 await frameVehicle('schoolBus',[-9,2.6,0],'transit-schoolbus-front');
 await frameVehicle('schoolBus',[9,2.6,0],'transit-schoolbus-rear');
 await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-far');
@@ -272,6 +272,8 @@ const driveBindings=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.co
 const driveBody=driveBindings.find(m=>/NormalCar1_Cube/i.test(m.mesh||''));
 if(!driveBody||driveBody.materials.length<5)throw new Error(`Drive body lost its native material groups: ${JSON.stringify(driveBody)}`);
 for(const slot of ['Blue','Windows','Headlights','TailLights'])if(!driveBody.materials.some(m=>m.name===slot))throw new Error(`Drive body is missing the native ${slot} material slot: ${JSON.stringify(driveBody.materials)}`);
+const driveWindow=driveBody.materials.find(m=>m.name==='Windows');
+if(!driveWindow||driveWindow.color==='070707'||driveWindow.color==='000000')throw new Error('Drive windshield regressed to a black rectangle: '+JSON.stringify(driveBody));
 console.log('DRIVE MATERIALS',JSON.stringify(driveBody));
 const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{active:d.drivePerf.active,dpr:d.renderer.getPixelRatio(),dof:d.CU.uDof.value,bloom:d.CU.uBloom.value,maxPr:d.drivePerf.maxPr}})()`);
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
