@@ -128,8 +128,11 @@ await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5})
 await send('Emulation.setDeviceMetricsOverride',{width:900,height:640,deviceScaleFactor:2,mobile:false});
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/campus-twin.html?debug=1&touchtest=1`});
 await waitFor(`!!window.DavisTwin&&!!window.__DAVIS_TWIN_DEBUG__`,60000,200);
-const hiDpiProbe=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),dof:d.FX.dof,profile:d.mobileProfile,size:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight]}})()`);
-if(hiDpiProbe.deviceDpr<1.9||hiDpiProbe.qualityDpr<1.3||hiDpiProbe.pr<1.29||hiDpiProbe.dof!==0||!hiDpiProbe.profile)throw new Error('isolated high-DPR mobile probe failed: '+JSON.stringify(hiDpiProbe));
+await waitFor(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__,l=document.querySelector('#loader');return l?.hidden&&!d.interaction.cameraTransition})()`,12000,120);
+await ev(`(()=>{const e=document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));const d=window.__DAVIS_TWIN_DEBUG__;d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;return true})()`);
+await sleep(650);
+const hiDpiProbe=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),dof:d.FX.dof,profile:d.mobileProfile,size:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight],loader:document.querySelector('#loader').hidden,transition:d.interaction.cameraTransition,night:d.ST.night}})()`);
+if(hiDpiProbe.deviceDpr<1.9||hiDpiProbe.qualityDpr<1.3||hiDpiProbe.pr<1.29||hiDpiProbe.dof!==0||!hiDpiProbe.profile||!hiDpiProbe.loader||hiDpiProbe.transition||hiDpiProbe.night>.22)throw new Error('isolated high-DPR mobile probe failed: '+JSON.stringify(hiDpiProbe));
 const hiShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
 fs.writeFileSync(path.join(QA_DIR,'mobile-sharp-high-dpr-probe.png'),Buffer.from(hiShot.result.data,'base64'));
 console.log('HIGH DPR MOBILE PROBE',JSON.stringify(hiDpiProbe));
