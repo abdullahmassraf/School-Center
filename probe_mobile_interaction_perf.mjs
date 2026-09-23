@@ -246,7 +246,17 @@ const nightWorstDrops = ['night-orbit', 'night-pan', 'night-pinch'].reduce((s, g
 console.log('GESTURE WORST max=' + worstMax + 'ms drops=' + worstDrops + ' movedOk=' + movedOk);
 console.log('NIGHT WORST max=' + nightWorstMax + 'ms drops=' + nightWorstDrops + ' programsDelta=' + ['night-orbit', 'night-pan', 'night-pinch'].map((g) => results[g].programsDelta).join(','));
 
-const summary = { setup, phases: results, errors: pageErrors.slice(0, 5), worstMax, worstDrops, movedOk, nightWorstMax, nightWorstDrops };
+const gestureTags=['orbit','pan','pinch','night-orbit','night-pan','night-pinch'];
+const noGestureShadowRebuilds=gestureTags.every(g=>results[g].shadowBuilds===0);
+const noGestureEnvRebuilds=gestureTags.every(g=>results[g].envBuilds===0);
+const noNightProgramChurn=['night-orbit','night-pan','night-pinch'].every(g=>results[g].programsDelta===0);
+console.log('PERF INVARIANTS',JSON.stringify({movedOk,noGestureShadowRebuilds,noGestureEnvRebuilds,noNightProgramChurn}));
+if(!movedOk||!noGestureShadowRebuilds||!noGestureEnvRebuilds||!noNightProgramChurn){
+  console.log('PERF INVARIANT FAILURE',JSON.stringify({movedOk,noGestureShadowRebuilds,noGestureEnvRebuilds,noNightProgramChurn}));
+  process.exitCode=1;
+}
+
+const summary = { setup, phases: results, errors: pageErrors.slice(0, 5), worstMax, worstDrops, movedOk, nightWorstMax, nightWorstDrops, noGestureShadowRebuilds, noGestureEnvRebuilds, noNightProgramChurn };
 const baselinePath = path.join(ROOT, 'qa-artifacts', 'mobile-perf-baseline.json');
 if (process.argv.includes('--save')) {
   fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
