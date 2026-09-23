@@ -1836,6 +1836,8 @@ function driveStep(dt) {
     w.roll += sf * dt / Math.max(w.radius, .08);
     w.pivot.rotation.set(w.baseX, w.baseY, w.baseZ);
     if (w.index < 2) w.pivot.rotateY(d.steer);
+    /* NormalCar1 wheel axles are local X; transit rigs are corrected separately
+     * to a local-Z axle in fitNativeTransitWheels/updatePublicTransport. */
     w.pivot.rotateX(w.roll);
   });
   d.props.forEach(({ im, bodies }) => {
