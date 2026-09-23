@@ -75,7 +75,7 @@ const waitFor=async(expression,timeout=10000,interval=120)=>{
 };
 const QA_DIR=path.join(ROOT,'qa-artifacts');fs.mkdirSync(QA_DIR,{recursive:true});
 const screenshot=async name=>{
-  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;if(d){d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;}document.querySelector('#cm3d-mount iframe')?.scrollIntoView({block:'center',inline:'center'});return true})()`);
+  const autoWas=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__,v=d?.AUTO?.on??false;if(d){d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;}document.querySelector('#cm3d-mount iframe')?.scrollIntoView({block:'center',inline:'center'});return v})()`);
   await sleep(220);
   /* CDP clip coordinates are page-space. The old helper passed viewport-space
    * iframe bounds after scrolling, so CI captured unrelated page sections even
@@ -85,6 +85,7 @@ const screenshot=async name=>{
   const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,fromSurface:true,clip});
   const out=path.join(QA_DIR,name+'.png');
   fs.writeFileSync(out,Buffer.from(shot.result.data,'base64'));
+  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__;if(d){d.AUTO.on=${JSON.stringify(autoWas)};d.interaction.lastInput=performance.now();}return true})()`);
   console.log('SCREENSHOT',out);
 };
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -169,18 +170,18 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
-const frameVehicle=async(key,offset,name)=>{
-  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});d.AUTO.on=false;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3());d.camera.position.set(p.x+${offset[0]},p.y+${offset[1]},p.z+${offset[2]});d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
-  await sleep(350);await screenshot(name);
+const frameVehicle=async(key,localOffset,name)=>{
+  await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});d.AUTO.on=false;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
+  await sleep(180);await screenshot(name);
 };
-await frameVehicle('bus',[12,4,9],'transit-bus-close');
-await frameVehicle('bus',[70,35,64],'transit-bus-far');
-await frameVehicle('bus',[-12,3,0],'transit-bus-front');
-await frameVehicle('bus',[12,3,0],'transit-bus-rear');
-await frameVehicle('schoolBus',[13,4,10],'transit-schoolbus-close');
-await frameVehicle('schoolBus',[-13,3,0],'transit-schoolbus-front');
-await frameVehicle('schoolBus',[13,3,0],'transit-schoolbus-rear');
-await frameVehicle('schoolBus',[72,38,66],'transit-schoolbus-far');
+await frameVehicle('bus',[-8,3.2,5.5],'transit-bus-close');
+await frameVehicle('bus',[-38,20,24],'transit-bus-far');
+await frameVehicle('bus',[-9,2.6,0],'transit-bus-front');
+await frameVehicle('bus',[9,2.6,0],'transit-bus-rear');
+await frameVehicle('schoolBus',[-8,3.2,5.5],'transit-schoolbus-close');
+await frameVehicle('schoolBus',[-9,2.6,0],'transit-schoolbus-front');
+await frameVehicle('schoolBus',[9,2.6,0],'transit-schoolbus-rear');
+await frameVehicle('schoolBus',[-38,20,24],'transit-schoolbus-far');
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;for(const v of d.transit.vehicles){v.speed=v.key==='bus'?10.5:8.5;v.stopTimer=0;}return true})()`);
 const transitBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.transit.vehicles.map(v=>v.z)`);
 await new Promise(r=>setTimeout(r,1200));
@@ -276,7 +277,9 @@ const drivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.conten
 if(!drivePerf.active||drivePerf.dof!==0||drivePerf.bloom!==0||drivePerf.dpr>(drivePerf.maxPr+.02))throw new Error("Drive performance mode did not activate cleanly: "+JSON.stringify(drivePerf));
 console.log("DRIVE PERFORMANCE MODE",JSON.stringify(drivePerf));
 console.log('PLAYER APPEARANCE',JSON.stringify(playerAppearance));
-await sleep(700);await screenshot('drive-native-wheels-chase');await screenshot('vehicle-player-lights');
+await sleep(700);await screenshot('drive-native-wheels-chase');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,r=d.drive.packedCar;r.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(r),p=box.getCenter(new d.THREE.Vector3()),q=r.getWorldQuaternion(new d.THREE.Quaternion()),front=new d.THREE.Vector3(0,0,1).applyQuaternion(q),side=new d.THREE.Vector3(1,0,0).applyQuaternion(q);d.driveCamera.userRotating=true;d.camera.position.copy(p).addScaledVector(front,6.5).addScaledVector(side,4.5);d.camera.position.y+=2.4;d.controls.target.copy(p);d.controls.target.y+=.5;d.controls.update();return true})()`);
+await sleep(120);await screenshot('vehicle-player-lights');
 const wheelMapping=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({node,pivot})=>({node:node.name,pivot:pivot.name}))`);
 const wheelLayout=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,car=d.drive.packedCar;car.updateMatrixWorld(true);let body=null;car.traverse(o=>{if(!body&&o.isMesh&&/NormalCar1_Cube/i.test(o.name||""))body=o});const bb=new d.THREE.Box3().setFromObject(body),out=d.drive.objWheels.map(w=>{const wb=new d.THREE.Box3().setFromObject(w.node),c=wb.getCenter(new d.THREE.Vector3()),l=car.worldToLocal(c.clone());return{name:w.node.name,scale:[w.pivot.scale.x,w.pivot.scale.y,w.pivot.scale.z],local:[l.x,l.y,l.z],box:wb.getSize(new d.THREE.Vector3()).toArray()}});return{body:bb.getSize(new d.THREE.Vector3()).toArray(),wheels:out}})()`);
 for(const w of wheelLayout.wheels){if(w.scale.some(v=>!Number.isFinite(v)||v<.9||v>1.1))throw new Error("Drive native wheel scale drifted: "+JSON.stringify(wheelLayout));if(Math.abs(w.local[0])>1.02||Math.abs(w.local[2])>1.85||w.local[1]<-.1||w.local[1]>.8)throw new Error("Drive wheel detached from body: "+JSON.stringify(wheelLayout));}
