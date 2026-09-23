@@ -29,7 +29,13 @@ export class CampusMap3DManager {
 
     const q=new URLSearchParams({embed:'1',autoorbit:this.autoOrbit?'1':'0'});
     for(const [k,v] of Object.entries({building:idOf(opts.building),weather:weatherOf(opts.weather),season:opts.season,quality:opts.quality,time:opts.time})) if(v!=null) q.set(k,String(v));
-    if(location.hostname==='127.0.0.1'||location.hostname==='localhost') q.set('debug','1');
+    if(location.hostname==='127.0.0.1'||location.hostname==='localhost'){
+      q.set('debug','1');
+      /* Local-only deterministic touch capability switch for browser QA. It
+       * never affects production URLs and lets headless Chromium exercise the
+       * exact fullscreen mobile controls without spoofing app architecture. */
+      if(new URLSearchParams(location.search).has('touchtest'))q.set('touchtest','1');
+    }
 
     const f=this.frame=document.createElement('iframe');
     f.src=`${TWIN_URL.href}?${q}`; f.title='Interactive 3D map of Davis Campus'; f.loading='eager';
