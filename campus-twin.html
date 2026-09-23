@@ -2051,8 +2051,15 @@ function updateVehicleLighting(dt,now) {
     rig.headGlows?.forEach(g => { if (g?.material) g.material.opacity = night * .80; });
     rig.tailGlows?.forEach(g => { if (g?.material) g.material.opacity = night * .72; });
     const dynamic = rig.player || rig.dynamicEnabled;
-    rig.headLights?.forEach(l => { l.intensity = dynamic ? night * (rig.player ? 2.7 : (rig.kind === 'car' ? .85 : 1.45)) : 0; });
-    rig.tailLights?.forEach(l => { l.intensity = dynamic ? night * (rig.player ? .72 : .42) : 0; });
+    const lightsVisible = dynamic && night > .015;
+    rig.headLights?.forEach(l => {
+      l.visible = lightsVisible;
+      l.intensity = lightsVisible ? night * (rig.player ? 2.7 : (rig.kind === 'car' ? .85 : 1.45)) : 0;
+    });
+    rig.tailLights?.forEach(l => {
+      l.visible = lightsVisible;
+      l.intensity = lightsVisible ? night * (rig.player ? .72 : .42) : 0;
+    });
   };
   applyRig(drive.lightRig);
   (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
