@@ -1915,11 +1915,11 @@ async function initPhysics() {
   drive.lightRig = attachVehicleLightRig(drive.packedCar,'car',{player:true});
   const dn=84,drr=rng(7474),dpos=new Float32Array(dn*3);
   for(let i=0;i<dn;i++){
-    const anchor=drive.lightRig.headAnchors[i<dn/2?0:1],j=i*3,t=(drr()*.9+.1)*18;
+    const anchor=drive.lightRig.headAnchors[i<dn/2?0:1],j=i*3,t=(drr()*.9+.1)*8;
     dpos[j]=anchor.x+(drr()-.5)*.26; dpos[j+1]=anchor.y+(drr()-.5)*.24; dpos[j+2]=anchor.z+t;
   }
   const dgeo=new THREE.BufferGeometry(); dgeo.setAttribute('position',new THREE.BufferAttribute(dpos,3));
-  const dmat=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.18,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+  const dmat=new THREE.PointsMaterial({map:ST.glow||(ST.glow=glowTex()),color:'#ffe8bd',size:.13,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
   drive.dust=new THREE.Points(dgeo,dmat); drive.dust.frustumCulled=false; drive.dust.renderOrder=8; drive.lightRig.root.add(drive.dust);
   drive.wheels = [[-1, -1.35], [1, -1.35], [-1, 1.35], [1, 1.35]].map(([sx, z]) => { const wh = P(new THREE.CylinderGeometry(.44, .44, .34, 16).rotateZ(Math.PI / 2), tm, sx * .98, .44, z, 'wheel'); return wh; });
   if (drive.packedCar) drive.wheels.forEach(wheel => wheel.visible = false);
@@ -2065,12 +2065,12 @@ function updateVehicleLighting(dt,now) {
   (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
   (transit?.vehicles||[]).forEach(vehicle => applyRig(vehicle.lightRig));
   if (drive.dust) {
-    drive.dust.material.opacity = night * .22;
+    drive.dust.material.opacity = night * .14;
     const a = drive.dust.geometry.attributes.position;
     for (let i=0;i<a.count;i++) {
       const anchor = drive.lightRig?.headAnchors[i<a.count/2?0:1]; if (!anchor) continue;
       const phase = (now*.0009+i*.71)%1;
-      a.setXYZ(i, anchor.x+Math.sin(now*.0017+i)*.03, anchor.y+Math.sin(now*.0021+i*.7)*.05, anchor.z+phase*13);
+      a.setXYZ(i, anchor.x+Math.sin(now*.0017+i)*.03, anchor.y+Math.sin(now*.0021+i*.7)*.05, anchor.z+phase*8);
     }
     a.needsUpdate = true;
   }
