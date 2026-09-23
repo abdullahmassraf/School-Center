@@ -568,6 +568,50 @@ function vehicleLampAnchors(root, kind) {
 }
 
 const vehicleLightCandidates = [];
+const mobileNpcLightPool={
+  initialized:false,lights:[],target:null,lastSwitch:0,switches:0,
+  p0:new V3(),p1:new V3(),active:false
+};
+function ensureMobileNpcLightPool(){
+  if(mobileNpcLightPool.initialized)return;
+  const defs=[['#fff4cf',10],['#fff4cf',10],['#ff3038',6],['#ff3038',6]];
+  for(const [color,range] of defs){
+    const l=new THREE.PointLight(color,0,range,2);l.castShadow=false;l.visible=false;scene.add(l);mobileNpcLightPool.lights.push(l);
+  }
+  mobileNpcLightPool.initialized=true;
+}
+function chooseMobileNpcLightTarget(now){
+  if(!drivePerf.active||!mobileProfile){mobileNpcLightPool.target=null;return;}
+  ensureMobileNpcLightPool();
+  const candidate=vehicleLightCandidates[0]||null,current=mobileNpcLightPool.target;
+  const currentValid=current&&current.root?.visible&&Number.isFinite(current._distanceSq)&&current._distanceSq<105*105;
+  let next=currentValid?current:null;
+  if(candidate&&candidate._distanceSq<105*105){
+    if(!next)next=candidate;
+    else if(candidate!==next&&now-mobileNpcLightPool.lastSwitch>650&&candidate._distanceSq<next._distanceSq*.58)next=candidate;
+  }
+  if(next!==current){mobileNpcLightPool.target=next;mobileNpcLightPool.lastSwitch=now;mobileNpcLightPool.switches++;}
+}
+function updateMobileNpcLightPool(night,dt,now){
+  if(!mobileProfile||!drivePerf.active){
+    if(mobileNpcLightPool.initialized)mobileNpcLightPool.lights.forEach(l=>{l.visible=false;l.intensity=0;});
+    mobileNpcLightPool.active=false;return;
+  }
+  ensureMobileNpcLightPool();chooseMobileNpcLightTarget(now);
+  const rig=mobileNpcLightPool.target,ls=mobileNpcLightPool.lights,active=night>.015;
+  mobileNpcLightPool.active=!!rig&&active;
+  if(!rig||!active){ls.forEach(l=>{l.visible=active;l.intensity=0;});return;}
+  const alpha=1-Math.exp(-dt*20),kind=rig.kind;
+  const anchors=[rig.headAnchors?.[0],rig.headAnchors?.[1],rig.tailAnchors?.[0],rig.tailAnchors?.[1]];
+  anchors.forEach((a,i)=>{
+    const l=ls[i];if(!a){l.intensity=0;return;}
+    mobileNpcLightPool.p0.copy(a);rig.root.localToWorld(mobileNpcLightPool.p0);
+    if(!l.visible||l.position.lengthSq()===0)l.position.copy(mobileNpcLightPool.p0);else l.position.lerp(mobileNpcLightPool.p0,alpha);
+    l.visible=true;
+    l.distance=i<2?(kind==='car'?10:14):(kind==='car'?6:8);
+    l.intensity=night*(i<2?(kind==='car'?.85:1.45):.42);
+  });
+}
 function refreshVehicleLightBudget() {
   vehicleLightCandidates.length = 0;
   const add = rig => {
@@ -585,7 +629,12 @@ function refreshVehicleLightBudget() {
      device keep only the closest vehicle's physical light spill; all vehicles
      retain their native emissive lamp materials/glow, so the visible lamps do
      not disappear. */
-  const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
+  if(drivePerf.active&&mobileProfile){
+    vehicleLightCandidates.forEach(rig=>{rig.dynamicEnabled=false;});
+    chooseMobileNpcLightTarget(performance.now());
+    return;
+  }
+  const maxActive=drivePerf.active?2:(tierName==='high'?6:tierName==='medium'?4:2);
   vehicleLightCandidates.forEach((rig,i)=>{
     const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
     rig.dynamicEnabled=i<maxActive&&rig._distanceSq<=range*range;
@@ -2715,6 +2764,7 @@ function updateVehicleLighting(dt,now) {
   applyRig(drive.lightRig);
   (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
   (transit?.vehicles||[]).forEach(vehicle => applyRig(vehicle.lightRig));
+  updateMobileNpcLightPool(night,dt,now);
   if (drive.dust) {
     drive.dust.material.opacity = night * .14;
     const a = drive.dust.geometry.attributes.position;
@@ -2931,7 +2981,7 @@ if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, CU, stars, clouds, keyLight, shadowTrack, viewPerf,
   interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
-  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
+  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, mobileNpcLightPool, updateMobileNpcLightPool, Tw,
   isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod, updateViewTrafficLod,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
