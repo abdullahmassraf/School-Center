@@ -960,9 +960,10 @@ function ribbonGeo(pts, w, y, tile, smooth = true) {
 }
 const flat = (geo, x, y, z, ry = 0) => { geo.rotateX(-Math.PI / 2); const m = new THREE.Mesh(geo); m.position.set(x, y, z); m.rotation.y = ry; return m; };
 function setSignalLamp(material,on,color){
-  material.color.set(on?color:'#121519');
+  material.color.set(on?color:'#101318');
   material.emissive.set(color);
-  material.emissiveIntensity=on?3.0:.045;
+  material.emissiveIntensity=on?5.2:.035;
+  material.opacity=on?1:.92;
   material.needsUpdate=true;
 }
 function applyTrafficSignalVisuals(){
@@ -993,15 +994,16 @@ function updateTrafficSignal(dt){
 }
 function makeSignalHead(parent,x,y,z,yaw,axis){
   const g=new THREE.Group();g.position.set(x,y,z);g.rotation.y=yaw;parent.add(g);
-  const shell=std({color:'#20252b',roughness:.58,metalness:.38});
-  const housing=new THREE.Mesh(new THREE.BoxGeometry(.76,1.78,.46),shell);housing.castShadow=true;g.add(housing);
-  const visor=std({color:'#111419',roughness:.7,metalness:.25});
+  const shell=std({color:'#252b32',roughness:.58,metalness:.38});
+  const backplate=new THREE.Mesh(new THREE.BoxGeometry(1.00,2.16,.18),std({color:'#171b20',roughness:.68,metalness:.3}));backplate.position.z=-.16;backplate.castShadow=true;g.add(backplate);
+  const housing=new THREE.Mesh(new THREE.BoxGeometry(.82,1.92,.48),shell);housing.castShadow=true;g.add(housing);
+  const visor=std({color:'#0d1014',roughness:.72,metalness:.24});
   const lamps={};
-  [['red',.56,'#f04444'],['yellow',0,'#f1c84b'],['green',-.56,'#55d979']].forEach(([name,yy,color])=>{
-    const hood=new THREE.Mesh(new THREE.CylinderGeometry(.24,.24,.18,12,1,false,0,Math.PI),visor);
-    hood.rotation.x=Math.PI/2;hood.position.set(0,yy,.30);hood.castShadow=true;g.add(hood);
-    const mat=new THREE.MeshStandardMaterial({color:'#121519',emissive:color,emissiveIntensity:.045,roughness:.22,metalness:.05,toneMapped:false});
-    const lens=new THREE.Mesh(new THREE.CircleGeometry(.17,14),mat);lens.position.set(0,yy,.245);g.add(lens);lamps[name]=mat;
+  [['red',.61,'#f34d4d'],['yellow',0,'#f3cb51'],['green',-.61,'#55df7d']].forEach(([name,yy,color])=>{
+    const hood=new THREE.Mesh(new THREE.CylinderGeometry(.30,.30,.20,12,1,false,0,Math.PI),visor);
+    hood.rotation.x=Math.PI/2;hood.position.set(0,yy,.32);hood.castShadow=true;g.add(hood);
+    const mat=new THREE.MeshStandardMaterial({color:'#101318',emissive:color,emissiveIntensity:.035,roughness:.18,metalness:.03,transparent:true,opacity:.92,toneMapped:false});
+    const lens=new THREE.Mesh(new THREE.CircleGeometry(.225,16),mat);lens.position.set(0,yy,.258);g.add(lens);lamps[name]=mat;
   });
   trafficSignal.heads.push({axis,group:g,...lamps});return g;
 }
