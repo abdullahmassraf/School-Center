@@ -1720,11 +1720,11 @@ function updateEnv(dt) {
 }
 const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred:false };
 function maybeUpdateShadow(now, force = false) {
-  /* Re-rendering the directional shadow map while a finger is actively
-     orbiting/panning is a large synchronous GPU spike near the parking lots.
-     Keep the last valid shadow during the gesture/fly animation, then refresh
-     once at rest. Final visual quality is unchanged. */
-  if(!force&&!drive.on&&(interaction.controlsActive||interaction.cameraTransition)){shadowTrack.deferred=true;return;}
+  /* Re-rendering the directional shadow map while a finger is orbiting,
+     pinching or rapidly wheeling is a large synchronous GPU spike near the
+     lots. Hold the last valid shadow through the gesture and refresh once
+     after input has actually gone quiet (not after every wheel event). */
+  if(!force&&!drive.on&&(interaction.controlsActive||interaction.cameraTransition||now-interaction.lastInput<190)){shadowTrack.deferred=true;return;}
   const minInterval = drive.on ? drivePerf.shadowEveryMs : 340;
   if (!force && now - shadowTrack.at < minInterval) return;
   const targetMoved = controls.target.distanceToSquared(shadowTrack.target) > (drive.on ? 9 : 36);
@@ -1830,9 +1830,17 @@ const interaction = {
   prevPanZ: 0,
   prevPitch: 0,
   prevBreath: 1,
-  initialized: false,
-  pivotId: null
+  initialized:false,pivotId:null,settleTimer:0
 };
+function scheduleCameraSettle(delay=210){
+  clearTimeout(interaction.settleTimer);
+  interaction.settleTimer=setTimeout(()=>{
+    interaction.settleTimer=0;
+    if(drive.on||interaction.controlsActive||interaction.cameraTransition)return;
+    updateViewTrafficLod(true);
+    if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);
+  },delay);
+}
 const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinUp = new V3(0, 1, 0), cinQ = new THREE.Quaternion();
 
 function actualFullscreen() {
@@ -1959,9 +1967,9 @@ controls.addEventListener('start', () => {
 });
 controls.addEventListener('change', () => { if (interaction.controlsActive && !drive.on) markUserInteraction(); });
 controls.addEventListener('end', () => {
-  interaction.controlsActive = false; markUserInteraction();
-  if (drive.on) { driveCamera.userRotating = false; driveCamera.releaseAt = performance.now(); }
-  else{updateViewTrafficLod(true);if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);}
+  interaction.controlsActive=false;markUserInteraction();
+  if(drive.on){driveCamera.userRotating=false;driveCamera.releaseAt=performance.now();}
+  else scheduleCameraSettle(220);
 });
 function select(id, fly = true) {
   markUserInteraction();
@@ -1978,7 +1986,7 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let ptr = null, dX
 const pick = (x, y) => { const r = $('scene').getBoundingClientRect(); ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(pickables, false); return h.length ? h[0].object.userData.bid : null; };
 $('scene').addEventListener('pointermove', e => { if (!e.buttons) ptr = [e.clientX, e.clientY]; else markPointerInteraction(); });
 $('scene').addEventListener('pointerdown', () => markUserInteraction());
-$('scene').addEventListener('wheel', () => markUserInteraction(), { passive: true });
+$('scene').addEventListener('wheel',()=>{markUserInteraction();if(!drive.on)scheduleCameraSettle(240);},{passive:true});
 $('scene').addEventListener('pointerleave', () => { ptr = null; });
 $('scene').addEventListener('wheel', () => {
   if (drive.on) {
@@ -2045,6 +2053,7 @@ const viewPerf={
 function updateViewTrafficLod(force=false){
   if(drivePerf.active||traffic?.mode!=='packed')return;
   const now=performance.now(),target=controls.target,dist=camDist;
+  if(!force&&(interaction.controlsActive||interaction.cameraTransition||now-interaction.lastInput<190))return;
   if(!force){
     if(now-viewPerf.at<viewPerf.interval)return;
     const moved=target.distanceToSquared(viewPerf.target)>64,zoomed=Math.abs(dist-viewPerf.distance)>10;
@@ -2867,20 +2876,24 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr),floor=mobileProfile?Math.min(cap,tierName==='low'?1.2:(drivePerf.active?1.35:1.45)):.8;
-    if(now-lastAdj>2000){
-      /* Never solve a transient camera-motion spike by dropping a phone all
-         the way to 0.7 DPR. Preserve sharpness first; shed optional bloom,
-         then make only small DPR adjustments above a readable floor. */
-      if(avg>1/38){
-        if(FX.dof>0)FX.dof=0;
-        else if(FX.bloom)FX.bloom=false;
-        else if(pr>floor+.01){pr=Math.max(floor,pr-.08);resize();}
-        else FX.se=Math.min(6,FX.se+1);
-        lastAdj=now;
-      }else if(avg<1/57){
-        if(pr<cap-.01){pr=Math.min(cap,pr+.08);resize();lastAdj=now;}
-        else if(!drivePerf.active&&!FX.bloom&&baseFX.bloom){FX.bloom=true;lastAdj=now;}
+  fAcc+=dt;fN++;if(fN===40){const avg=fAcc/fN;fAcc=0;fN=0;const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr);
+    if(now-lastAdj>2400){
+      if(mobileProfile){
+        /* Pixel ratio is fixed for the whole mobile viewing mode. Rebuilding
+           all render targets during pinch/zoom looked like texture LOD and
+           caused the exact hitch users felt. Mobile can shed/recover optional
+           bloom, but never resizes the scene because of a transient frame dip. */
+        if(avg>1/36&&FX.bloom){FX.bloom=false;lastAdj=now;}
+        else if(avg<1/58&&!drivePerf.active&&!FX.bloom&&baseFX.bloom&&now-interaction.lastInput>1200){FX.bloom=true;lastAdj=now;}
+      }else{
+        const floor=.8;
+        if(avg>1/38){
+          if(FX.dof>0)FX.dof=0;
+          else if(FX.bloom)FX.bloom=false;
+          else if(pr>floor+.01){pr=Math.max(floor,pr-.1);resize();}
+          else FX.se=Math.min(6,FX.se+1);
+          lastAdj=now;
+        }else if(avg<1/57&&pr<cap-.01){pr=Math.min(cap,pr+.1);resize();lastAdj=now;}
       }
     }
     if (DEBUG) { $('perf').hidden = false; $('perf').textContent = `${(1 / avg).toFixed(0)} fps · pr ${pr.toFixed(2)} · ${tierName}${hdr ? ' hdr' : ''}\ncalls ${renderer.info.render.calls} · tris ${(renderer.info.render.triangles / 1000) | 0}k\ntex ${renderer.info.memory.textures} · geo ${renderer.info.memory.geometries}\nfx dof ${FX.dof} bloom ${FX.bloom} shadow/${FX.se}`; } }
@@ -2929,6 +2942,7 @@ const disposeTwin = () => {
     ownerDoc.removeEventListener('fullscreenchange', onFullscreenChange);
     if (ownerDoc !== document) document.removeEventListener('fullscreenchange', onFullscreenChange);
   } catch {}
+  clearTimeout(interaction.settleTimer);
   try { if (envRT) envRT.dispose(); } catch {}
   try { drive.world?.free?.(); } catch {}
   drive.world=null;drive.body=null;drive.collider=null;drive.npcPhysics.bodies.length=0;drive.npcPhysics.ready=false;
