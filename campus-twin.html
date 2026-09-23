@@ -1979,12 +1979,13 @@ const wrapAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
 const yawQuat=y=>({x:0,y:Math.sin(y*.5),z:0,w:Math.cos(y*.5)});
 
 function routeFrame(ai) {
-  const e=ai.entity;
+  /* Reuse one frame object per NPC; this runs at the fixed physics cadence. */
+  const e=ai.entity,o=ai.frame||(ai.frame={fx:0,fz:0,rx:0,rz:0,lane:0,axis:'z'});
   if(ai.kind==='car'){
-    if(e.ax==='z') return {fx:0,fz:e.d,rx:e.d,rz:0,lane:e.f,axis:'z'};
-    return {fx:e.d,fz:0,rx:0,rz:-e.d,lane:e.f,axis:'x'};
-  }
-  return {fx:0,fz:e.dir,rx:e.dir,rz:0,lane:e.x,axis:'z'};
+    if(e.ax==='z'){o.fx=0;o.fz=e.d;o.rx=e.d;o.rz=0;o.lane=e.f;o.axis='z';}
+    else{o.fx=e.d;o.fz=0;o.rx=0;o.rz=-e.d;o.lane=e.f;o.axis='x';}
+  }else{o.fx=0;o.fz=e.dir;o.rx=e.dir;o.rz=0;o.lane=e.x;o.axis='z';}
+  return o;
 }
 function laneError(ai,p,rf=routeFrame(ai)) {
   if(ai.kind==='car') return rf.axis==='z'?(p.x-rf.lane)*rf.rx:(p.z-rf.lane)*rf.rz;
@@ -2019,7 +2020,9 @@ function registerNpcPhysics(entity,root,kind) {
   const ai={
     entity,root,kind,body,collider,size,halfWidth:size.width*.46,halfLength:size.length*.46,
     baseSpeed:kind==='car'?entity.v:entity.speed,targetSpeed:kind==='car'?entity.v:entity.speed,
-    avoidSide:0,avoidHold:0,urgency:0,targetOffset:0,recoverFor:0,stuckFor:0,lastForwardSpeed:0
+    avoidSide:0,avoidHold:0,urgency:0,targetOffset:0,recoverFor:0,stuckFor:0,lastForwardSpeed:0,
+    frame:{fx:0,fz:0,rx:0,rz:0,lane:0,axis:'z'},threat:{risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity},
+    nextVel:{x:0,y:0,z:0},nextAng:{x:0,y:0,z:0}
   };
   entity.physics=ai;drive.npcPhysics.bodies.push(ai);drive.npcPhysics.created++;
   return ai;
@@ -2064,19 +2067,21 @@ function sideClear(ai,side,p,rf) {
   return true;
 }
 function playerThreat(ai,p,lv,rf) {
-  if(!drive.body)return {risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity};
+  const out=ai.threat||(ai.threat={risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity});
+  if(!drive.body){out.risk=0;out.ahead=out.lateral=out.ttc=Infinity;return out;}
   const pp=drive.body.translation(),pv=drive.body.linvel(),dx=pp.x-p.x,dz=pp.z-p.z;
   const ahead=dx*rf.fx+dz*rf.fz,lateral=dx*rf.rx+dz*rf.rz;
   const npcForward=lv.x*rf.fx+lv.z*rf.fz,playerForward=pv.x*rf.fx+pv.z*rf.fz;
   const closing=Math.max(.45,npcForward-playerForward);
   const look=TRAFFIC_AI.lookBase+Math.max(0,npcForward)*TRAFFIC_AI.predictionTime;
   const corridor=ai.halfWidth+TRAFFIC_AI.playerHalfWidth+.62;
-  if(ahead<-(ai.halfLength+TRAFFIC_AI.playerHalfLength)||ahead>look||Math.abs(lateral)>corridor)return {risk:0,ahead,lateral,ttc:Infinity};
+  out.ahead=ahead;out.lateral=lateral;out.ttc=Infinity;out.risk=0;
+  if(ahead<-(ai.halfLength+TRAFFIC_AI.playerHalfLength)||ahead>look||Math.abs(lateral)>corridor)return out;
   const ttc=ahead<=0?0:ahead/closing;
   const overlap=ahead<ai.halfLength+TRAFFIC_AI.playerHalfLength+.7?1:0;
   const timeRisk=clamp((TRAFFIC_AI.predictionTime-ttc)/TRAFFIC_AI.predictionTime,0,1);
   const laneRisk=clamp(1-Math.abs(lateral)/corridor,0,1);
-  return {risk:Math.max(overlap,timeRisk*laneRisk),ahead,lateral,ttc};
+  out.ttc=ttc;out.risk=Math.max(overlap,timeRisk*laneRisk);return out;
 }
 function leadVehicleSpeed(ai,p,rf,target) {
   let best=Infinity,lead=target;
@@ -2162,13 +2167,13 @@ function updateNpcPhysicsStep(dt) {
 
     const err=laneError(ai,p,frameNow),latTarget=clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
     const desiredX=frameNow.fx*ai.targetSpeed+frameNow.rx*latTarget,desiredZ=frameNow.fz*ai.targetSpeed+frameNow.rz*latTarget;
-    const rate=ai.targetSpeed<forwardSpeed?TRAFFIC_AI.brakeResponse:TRAFFIC_AI.accelResponse,blend=1-Math.exp(-dt*rate);
-    b.setLinvel({x:lv.x+(desiredX-lv.x)*blend,y:lv.y,z:lv.z+(desiredZ-lv.z)*blend},true);
+    const rate=ai.targetSpeed<forwardSpeed?TRAFFIC_AI.brakeResponse:TRAFFIC_AI.accelResponse,blend=1-Math.exp(-dt*rate),nv=ai.nextVel;
+    nv.x=lv.x+(desiredX-lv.x)*blend;nv.y=lv.y;nv.z=lv.z+(desiredZ-lv.z)*blend;b.setLinvel(nv,true);
 
     const desiredMag=Math.hypot(desiredX,desiredZ),dfx=desiredMag>.1?desiredX/desiredMag:frameNow.fx,dfz=desiredMag>.1?desiredZ/desiredMag:frameNow.fz;
     const desiredYaw=rootYawForForward(ai.kind==='car'?'car':'bus',dfx,dfz),q=b.rotation(),yaw=2*Math.atan2(q.y,q.w);
-    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate);
-    b.setAngvel({x:0,y:yawRate,z:0},true);
+    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate),na=ai.nextAng;
+    na.x=0;na.y=yawRate;na.z=0;b.setAngvel(na,true);
 
     ai.stuckFor=forwardSpeed<.12&&ai.targetSpeed>3&&threat.risk<.08?ai.stuckFor+dt:0;
     if(ai.stuckFor>TRAFFIC_AI.stuckDelay){b.setLinvel({x:frameNow.fx*2,y:lv.y,z:frameNow.fz*2},true);ai.stuckFor=0;}
@@ -2304,7 +2309,13 @@ async function initPhysics() {
   const initPos = drive.body.translation(), initRot = drive.body.rotation();
   drive.physicsPrevPos.set(initPos.x, initPos.y, initPos.z); drive.physicsCurrPos.set(initPos.x, initPos.y, initPos.z); drive.renderPos.set(initPos.x, initPos.y, initPos.z);
   drive.physicsPrevQuat.set(initRot.x, initRot.y, initRot.z, initRot.w); drive.physicsCurrQuat.copy(drive.physicsPrevQuat); drive.renderQuat.copy(drive.physicsPrevQuat);
-  w.createCollider(RAP.ColliderDesc.cuboid(.95, .5, 2.1).setTranslation(0, .5, 0).setMass(900).setFriction(.3).setRestitution(.05), drive.body);
+  /* Match the player collider to the currently loaded native car instead of
+   * carrying forward dimensions from the old procedural shell. */
+  drive.packedCar.updateMatrixWorld(true);
+  const playerSize=new THREE.Box3().setFromObject(drive.packedCar).getSize(new V3());
+  const playerHalfX=clamp(playerSize.x*.46,.72,1.20),playerHalfZ=clamp(playerSize.z*.46,1.55,2.45),playerHalfY=clamp(playerSize.y*.38,.38,.72);
+  drive.colliderSize={width:playerHalfX*2,height:playerHalfY*2,length:playerHalfZ*2};
+  drive.collider=w.createCollider(RAP.ColliderDesc.cuboid(playerHalfX,playerHalfY,playerHalfZ).setTranslation(0,playerHalfY,0).setMass(1180).setFriction(.72).setRestitution(.04),drive.body);
   // physical props: cones, crates, balls
   const spec = [], add = (kind, x, y, z) => spec.push({ kind, x, y, z });
   for (let i = 0; i < 12; i++) { const t = i / 11, x = -185 + t * 80, z = 145 - t * 30 + (i % 2 ? 3 : -3); add('cone', x, .5, z); }
@@ -2593,6 +2604,8 @@ const disposeTwin = () => {
     if (ownerDoc !== document) document.removeEventListener('fullscreenchange', onFullscreenChange);
   } catch {}
   try { if (envRT) envRT.dispose(); } catch {}
+  try { drive.world?.free?.(); } catch {}
+  drive.world=null;drive.body=null;drive.collider=null;drive.npcPhysics.bodies.length=0;drive.npcPhysics.ready=false;
   try { pmrem.dispose(); } catch {}
   try { renderer.dispose(); } catch {}
 };
