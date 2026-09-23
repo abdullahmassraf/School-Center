@@ -7,7 +7,7 @@ import path from 'node:path';
 const ROOT=process.cwd(),PORT=8984,DEBUG_PORT=9284;
 const CHROME_CANDIDATES = process.platform === 'win32'
   ? ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe','C:/Program Files/Microsoft/Edge/Application/msedge.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe']
-  : ['chromium','chromium-browser','google-chrome','google-chrome-stable'];
+  : ['google-chrome','google-chrome-stable','chromium','chromium-browser'];
 const CHROME=CHROME_CANDIDATES.find(c=>process.platform === 'win32' ? fs.existsSync(c) : (()=>{try{execFileSync('which',[c],{stdio:'ignore'});return true}catch{return false}})());
 if(!CHROME){console.error('no chromium');process.exit(2)}
 
@@ -48,7 +48,12 @@ chrome.stdout?.on('data',b=>{chromeStdout+=b.toString();});
 chrome.stderr?.on('data',b=>{chromeStderr+=b.toString();});
 
 let target, cdpVersion = null, cdpLastError = null;
-for(let i=0;i<120&&!target;i++){
+/* A cold CI runner's snap-shimmed chromium can spend well over 30 seconds in
+ * first-boot work (font caches, dbus probes) before its --remote-debugging-port
+ * answers; the old 30s budget aborted a healthy browser, so budget two minutes
+ * and say how long the wait took when it fails. */
+const cdpStarted=Date.now();
+for(let i=0;i<480&&!target;i++){
   if (chrome.exitCode !== null) break;
   try{
     const vr=await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
@@ -58,8 +63,12 @@ for(let i=0;i<120&&!target;i++){
     const lr=await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`);
     if(lr.ok) target=(await lr.json()).find(t=>t.type==='page');
   }catch(e){ cdpLastError=String(e?.message||e); }
-  if(!target) await new Promise(r=>setTimeout(r,250));
+  if(!target){
+    if(i>0&&i%40===0)console.log(`waiting for CDP... ${((Date.now()-cdpStarted)/1000)|0}s`);
+    await new Promise(r=>setTimeout(r,250));
+  }
 }
+console.log(`CDP ready in ${((Date.now()-cdpStarted)/1000).toFixed(1)}s`);
 if(!target)throw new Error(`no CDP page (exitCode=${chrome.exitCode}, signal=${chrome.signalCode}, version=${JSON.stringify(cdpVersion)}, lastError=${cdpLastError||'none'}, stdout=${JSON.stringify(chromeStdout.slice(-2000))}, stderr=${JSON.stringify(chromeStderr.slice(-4000))}, chrome=${CHROME})`);
 
 const ws=new WebSocket(target.webSocketDebuggerUrl);
