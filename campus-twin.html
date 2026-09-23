@@ -2241,18 +2241,24 @@ function leadVehicleSpeed(ai,p,rf,target) {
   return lead;
 }
 function recoverNpc(ai,p,lv,rf,dt) {
-  const err=Math.abs(laneError(ai,p,rf));
+  const err=Math.abs(laneError(ai,p,rf)),safeY=ai.kind==='car'?.02:.04;
   if(!finiteXZ(p)||p.y<-2||p.y>8){
     const e=ai.entity,x=ai.kind==='car'&&e.ax==='z'?e.f:p.x,z=ai.kind==='car'&&e.ax==='x'?e.f:p.z;
-    ai.body.setTranslation({x:Number.isFinite(x)?x:0,y:ai.root.position.y||.02,z:Number.isFinite(z)?z:0},true);
-    ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);drive.npcPhysics.recoveries++;ai.recoverFor=0;return true;
+    /* Never recover to the visual root's current Y: if a collision has already
+       knocked that root below the ground, copying it creates an endless
+       recover/fall loop. Reset to the authored road height instead. */
+    ai.body.setTranslation({x:Number.isFinite(x)?x:0,y:safeY,z:Number.isFinite(z)?z:0},true);
+    ai.body.setRotation(yawQuat(rootYawForForward(ai.kind==='car'?'car':'bus',rf.fx,rf.fz)),true);
+    ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);ai.body.setAngvel({x:0,y:0,z:0},true);
+    drive.npcPhysics.recoveries++;ai.recoverFor=0;ai.stuckFor=0;return true;
   }
   ai.recoverFor=err>TRAFFIC_AI.laneRecover?ai.recoverFor+dt:Math.max(0,ai.recoverFor-dt*2);
   if(err>TRAFFIC_AI.hardRecover&&ai.recoverFor>TRAFFIC_AI.recoverDelay){
-    const e=ai.entity,np={x:p.x,y:ai.root.position.y||.02,z:p.z};
+    const e=ai.entity,np={x:p.x,y:safeY,z:p.z};
     if(ai.kind==='car'){if(e.ax==='z')np.x=e.f;else np.z=e.f;}else np.x=e.x;
-    ai.body.setTranslation(np,true);ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);
-    ai.recoverFor=0;drive.npcPhysics.recoveries++;return true;
+    ai.body.setTranslation(np,true);ai.body.setRotation(yawQuat(rootYawForForward(ai.kind==='car'?'car':'bus',rf.fx,rf.fz)),true);
+    ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);ai.body.setAngvel({x:0,y:0,z:0},true);
+    ai.recoverFor=0;ai.stuckFor=0;drive.npcPhysics.recoveries++;return true;
   }
   return false;
 }
