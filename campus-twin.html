@@ -817,15 +817,21 @@ const downMat = fsMat(DOWN_FS, { tSrc: { value: null }, uPx: { value: new THREE.
 const fxaaMat = fsMat(FXAA_FS, { tLdr: { value: null }, uPx: { value: new THREE.Vector2() } });
 const compMat = fsMat(COMP_FS, { tScene: { value: null }, tDepth: { value: null }, tBlur: { value: null }, tBloom: { value: null }, uNear: { value: 1 }, uFar: { value: 6000 }, uStart: { value: 300 }, uEnd: { value: 900 }, uDof: { value: 0 }, uBloom: { value: 0 }, uThr: { value: hdr ? 1.3 : .8 }, uExp: { value: .6 }, uNight: { value: 0 }, uWet: { value: 0 }, uOver: { value: 0 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } });
 const CU = compMat.uniforms, PT = {};
+/* Far-field DOF is deliberately lower-resolution on phones. The final
+ * composite is still full-resolution and uses the same depth mask, so nearby
+ * geometry/textures remain untouched while the already-blurred background
+ * costs ~75% fewer blur pixels on mobile. */
+const postPerf={blurDiv:isMobile?4:2,bloomDiv:8};
 function buildPost() {
   for (const k of ['scene', 'a', 'b', 'c', 'd', 'ldr']) if (PT[k]) { PT[k].dispose(); if (PT[k].depthTexture) PT[k].depthTexture.dispose(); }
   const w = Math.max(2, Math.floor(innerWidth * pr)), h = Math.max(2, Math.floor(innerHeight * pr)), ty = hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
   const o = { type: ty, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false };
   PT.scene = new THREE.WebGLRenderTarget(w, h, { ...o, depthBuffer: true, depthTexture: new THREE.DepthTexture(w, h) });
-  PT.a = new THREE.WebGLRenderTarget(w >> 1, h >> 1, o); PT.b = new THREE.WebGLRenderTarget(w >> 1, h >> 1, o);
-  PT.c = new THREE.WebGLRenderTarget(Math.max(2, w >> 3), Math.max(2, h >> 3), o); PT.d = new THREE.WebGLRenderTarget(Math.max(2, w >> 3), Math.max(2, h >> 3), o);
+  const blurDiv=postPerf.blurDiv,blurW=Math.max(2,Math.floor(w/blurDiv)),blurH=Math.max(2,Math.floor(h/blurDiv));
+  PT.a = new THREE.WebGLRenderTarget(blurW, blurH, o); PT.b = new THREE.WebGLRenderTarget(blurW, blurH, o);
+  PT.c = new THREE.WebGLRenderTarget(Math.max(2, Math.floor(w/postPerf.bloomDiv)), Math.max(2, Math.floor(h/postPerf.bloomDiv)), o); PT.d = new THREE.WebGLRenderTarget(Math.max(2, Math.floor(w/postPerf.bloomDiv)), Math.max(2, Math.floor(h/postPerf.bloomDiv)), o);
   PT.ldr = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
-  PT.w = w; PT.h = h; CU.uRes.value.set(w, h); fxaaMat.uniforms.uPx.value.set(1 / w, 1 / h);
+  PT.w = w; PT.h = h; PT.blurDiv=blurDiv; CU.uRes.value.set(w, h); fxaaMat.uniforms.uPx.value.set(1 / w, 1 / h);
 }
 function pass(mat, target) { fsMesh.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
 function renderPost() {
@@ -833,7 +839,9 @@ function renderPost() {
   const doBlur = FX.dof > 0 || FX.bloom, bu = blurMat.uniforms;
   if (doBlur) {
     bu.tSrc.value = PT.scene.texture; bu.uDir.value.set(2 / PT.w, 0); pass(blurMat, PT.a);
-    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, 1.6 / PT.a.height); pass(blurMat, PT.b);
+    /* Compensate the vertical kernel for the smaller mobile blur target so the
+       apparent DOF radius stays close to the previous half-res version. */
+    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, (3.2 / PT.blurDiv) / PT.a.height); pass(blurMat, PT.b);
     if (FX.bloom) {
       downMat.uniforms.tSrc.value = PT.b.texture; downMat.uniforms.uPx.value.set(1 / PT.b.width, 1 / PT.b.height); pass(downMat, PT.c);
       bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
@@ -2823,7 +2831,7 @@ addEventListener('visibilitychange', () => {
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, CU, stars, clouds, keyLight,
-  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
+  interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
