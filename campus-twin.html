@@ -1134,6 +1134,7 @@ async function buildCars() {
       car.lightRig=rig;
     });
     traffic = { mode: 'packed', cars: moving, parkedCount: parked.length, set, vehicles, modelCount: sources.length, modelNames: CAMPUS_ASSETS.carVariants.map(([name]) => name) };
+    if(drive.world)ensureNpcPhysics();
     if (drivePerf.active) setDriveVehicleShadowMode(false);
     setAssetState('car', 'loaded');
   } catch (e) {
@@ -1145,6 +1146,7 @@ async function buildCars() {
 
 function updateTraffic(dt) {
   if (!traffic) return;
+  if(drive.on&&drive.npcPhysics.ready){syncTrafficPhysicsVisuals();return;}
   if (traffic.mode === 'packed') {
     const { cars, parkedCount, set, vehicles } = traffic;
     cars.forEach((car, i) => {
@@ -1184,6 +1186,7 @@ async function buildPublicTransport() {
       const lightRig = attachVehicleLightRig(root, spec.key === 'schoolBus' ? 'school-bus' : 'bus');
       scene.add(root);
       transit.vehicles.push({ root, wheelRigs, lightRig, ...spec, stopTimer: 0, servedStop: false });
+      if(drive.world)ensureNpcPhysics();
       if (drivePerf.active) setDriveVehicleShadowMode(false);
       setAssetState(spec.key, 'loaded');
     });
@@ -1197,6 +1200,7 @@ async function buildPublicTransport() {
 
 function updatePublicTransport(dt) {
   if (!transit?.vehicles?.length) return;
+  if(drive.on&&drive.npcPhysics.ready){syncTransitPhysicsVisuals(dt);return;}
   const stopZ = BUS_STOP[2], minZ = -246, maxZ = 92;
   transit.vehicles.forEach(v => {
     if (v.stopTimer > 0) {
@@ -1963,6 +1967,232 @@ function createWheelPivot(node, name) {
   return pivot;
 }
 
+const TRAFFIC_AI = Object.freeze({
+  predictionTime:3.0,lookBase:9,playerHalfWidth:1.0,playerHalfLength:2.15,
+  avoidHold:.9,carOffset:2.25,busOffset:1.25,lateralGain:1.65,maxLateralSpeed:3.1,
+  accelResponse:2.0,brakeResponse:5.4,turnResponse:4.8,maxYawRate:1.35,
+  laneRecover:9,hardRecover:18,recoverDelay:2.6,stuckDelay:5.0
+});
+const AI_BOX=new THREE.Box3(),AI_SIZE=new V3();
+const finiteXZ=p=>Number.isFinite(p?.x)&&Number.isFinite(p?.z);
+const wrapAngle=a=>Math.atan2(Math.sin(a),Math.cos(a));
+const yawQuat=y=>({x:0,y:Math.sin(y*.5),z:0,w:Math.cos(y*.5)});
+
+function routeFrame(ai) {
+  const e=ai.entity;
+  if(ai.kind==='car'){
+    if(e.ax==='z') return {fx:0,fz:e.d,rx:e.d,rz:0,lane:e.f,axis:'z'};
+    return {fx:e.d,fz:0,rx:0,rz:-e.d,lane:e.f,axis:'x'};
+  }
+  return {fx:0,fz:e.dir,rx:e.dir,rz:0,lane:e.x,axis:'z'};
+}
+function laneError(ai,p,rf=routeFrame(ai)) {
+  if(ai.kind==='car') return rf.axis==='z'?(p.x-rf.lane)*rf.rx:(p.z-rf.lane)*rf.rz;
+  return (p.x-rf.lane)*rf.rx;
+}
+function rootYawForForward(kind,fx,fz) {
+  return kind==='car'?Math.atan2(fx,fz):Math.atan2(fz,-fx);
+}
+function vehicleFootprint(root,kind,routeAxis='z') {
+  root.updateMatrixWorld(true);AI_BOX.setFromObject(root);AI_BOX.getSize(AI_SIZE);
+  const longitudinal=routeAxis==='z'?AI_SIZE.z:AI_SIZE.x,lateral=routeAxis==='z'?AI_SIZE.x:AI_SIZE.z;
+  const length=clamp(longitudinal,kind==='car'?3.6:7.5,kind==='car'?5.4:11.0);
+  const width=clamp(lateral,kind==='car'?1.55:1.9,kind==='car'?2.35:3.0);
+  const height=clamp(AI_SIZE.y,kind==='car'?1.0:2.0,kind==='car'?2.1:3.8);
+  return {length,width,height};
+}
+function registerNpcPhysics(entity,root,kind) {
+  if(!drive.world||!drive.R||!root||entity.physics)return entity.physics||null;
+  const RAP=drive.R,w=drive.world,routeAxis=kind==='car'?entity.ax:'z',size=vehicleFootprint(root,kind,routeAxis);
+  const yaw=root.rotation.y,p=root.position,body=w.createRigidBody(
+    RAP.RigidBodyDesc.dynamic().setTranslation(p.x,p.y,p.z).setRotation(yawQuat(yaw))
+      .enabledRotations(false,true,false).setLinearDamping(kind==='car'?.32:.46).setAngularDamping(kind==='car'?4.2:5.5).setCcdEnabled(true)
+  );
+  const localHalfX=kind==='car'?size.width*.46:size.length*.46;
+  const localHalfZ=kind==='car'?size.length*.46:size.width*.46;
+  const halfY=size.height*.38;
+  const mass=kind==='car'?1180:(entity.key==='schoolBus'?6100:7200);
+  const collider=w.createCollider(
+    RAP.ColliderDesc.cuboid(localHalfX,halfY,localHalfZ).setTranslation(0,halfY,0).setMass(mass).setFriction(.72).setRestitution(.04),
+    body
+  );
+  const ai={
+    entity,root,kind,body,collider,size,halfWidth:size.width*.46,halfLength:size.length*.46,
+    baseSpeed:kind==='car'?entity.v:entity.speed,targetSpeed:kind==='car'?entity.v:entity.speed,
+    avoidSide:0,avoidHold:0,urgency:0,targetOffset:0,recoverFor:0,stuckFor:0,lastForwardSpeed:0
+  };
+  entity.physics=ai;drive.npcPhysics.bodies.push(ai);drive.npcPhysics.created++;
+  return ai;
+}
+function ensureNpcPhysics() {
+  if(!drive.world||!drive.R)return;
+  if(traffic?.mode==='packed'){
+    for(const car of traffic.cars||[]) registerNpcPhysics(car,car.lightRig?.root,'car');
+  }
+  for(const v of transit?.vehicles||[]) registerNpcPhysics(v,v.root,v.key==='schoolBus'?'schoolBus':'bus');
+  drive.npcPhysics.ready=drive.npcPhysics.bodies.length>0;
+}
+function resetNpcPhysicsFromRoutes() {
+  ensureNpcPhysics();
+  for(const ai of drive.npcPhysics.bodies){
+    const e=ai.entity,r=ai.root,b=ai.body,rf=routeFrame(ai),yaw=r.rotation.y;
+    b.setTranslation({x:r.position.x,y:r.position.y,z:r.position.z},true);
+    b.setRotation(yawQuat(yaw),true);b.setAngvel({x:0,y:0,z:0},true);
+    const speed=ai.baseSpeed;
+    b.setLinvel({x:rf.fx*speed,y:0,z:rf.fz*speed},true);
+    ai.targetSpeed=speed;ai.avoidSide=0;ai.avoidHold=0;ai.urgency=0;ai.targetOffset=0;ai.recoverFor=0;ai.stuckFor=0;
+  }
+}
+function syncNpcRoutesFromPhysics() {
+  if(!drive.npcPhysics.ready)return;
+  for(const ai of drive.npcPhysics.bodies){
+    const p=ai.body.translation(),e=ai.entity;if(!finiteXZ(p))continue;
+    if(ai.kind==='car'){
+      const coord=e.ax==='z'?p.z:p.x;
+      let t=e.d>0?(coord+320)/640:1-(coord+320)/640;t=((t%1)+1)%1;e.t=t;e.x=p.x;e.z=p.z;
+    }else{e.x=p.x;e.z=p.z;}
+  }
+}
+function sideClear(ai,side,p,rf) {
+  const offset=(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset)*side;
+  const tx=p.x+rf.fx*5.5+rf.rx*offset,tz=p.z+rf.fz*5.5+rf.rz*offset;
+  for(const other of drive.npcPhysics.bodies){
+    if(other===ai)continue;const op=other.body.translation();if(!finiteXZ(op))continue;
+    const rr=ai.halfWidth+other.halfWidth+1.25,dx=op.x-tx,dz=op.z-tz;
+    if(dx*dx+dz*dz<rr*rr)return false;
+  }
+  return true;
+}
+function playerThreat(ai,p,lv,rf) {
+  if(!drive.body)return {risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity};
+  const pp=drive.body.translation(),pv=drive.body.linvel(),dx=pp.x-p.x,dz=pp.z-p.z;
+  const ahead=dx*rf.fx+dz*rf.fz,lateral=dx*rf.rx+dz*rf.rz;
+  const npcForward=lv.x*rf.fx+lv.z*rf.fz,playerForward=pv.x*rf.fx+pv.z*rf.fz;
+  const closing=Math.max(.45,npcForward-playerForward);
+  const look=TRAFFIC_AI.lookBase+Math.max(0,npcForward)*TRAFFIC_AI.predictionTime;
+  const corridor=ai.halfWidth+TRAFFIC_AI.playerHalfWidth+.62;
+  if(ahead<-(ai.halfLength+TRAFFIC_AI.playerHalfLength)||ahead>look||Math.abs(lateral)>corridor)return {risk:0,ahead,lateral,ttc:Infinity};
+  const ttc=ahead<=0?0:ahead/closing;
+  const overlap=ahead<ai.halfLength+TRAFFIC_AI.playerHalfLength+.7?1:0;
+  const timeRisk=clamp((TRAFFIC_AI.predictionTime-ttc)/TRAFFIC_AI.predictionTime,0,1);
+  const laneRisk=clamp(1-Math.abs(lateral)/corridor,0,1);
+  return {risk:Math.max(overlap,timeRisk*laneRisk),ahead,lateral,ttc};
+}
+function leadVehicleSpeed(ai,p,rf,target) {
+  let best=Infinity,lead=target;
+  for(const other of drive.npcPhysics.bodies){
+    if(other===ai)continue;const op=other.body.translation(),dx=op.x-p.x,dz=op.z-p.z;
+    const ahead=dx*rf.fx+dz*rf.fz,lat=dx*rf.rx+dz*rf.rz;
+    if(ahead>0&&ahead<18&&Math.abs(lat)<ai.halfWidth+other.halfWidth+.45&&ahead<best){
+      const ov=other.body.linvel();best=ahead;lead=Math.min(lead,Math.max(0,ov.x*rf.fx+ov.z*rf.fz)*clamp((ahead-2.2)/8,0,1));
+    }
+  }
+  return lead;
+}
+function recoverNpc(ai,p,lv,rf,dt) {
+  const err=Math.abs(laneError(ai,p,rf));
+  if(!finiteXZ(p)||p.y<-2||p.y>8){
+    const e=ai.entity,x=ai.kind==='car'&&e.ax==='z'?e.f:p.x,z=ai.kind==='car'&&e.ax==='x'?e.f:p.z;
+    ai.body.setTranslation({x:Number.isFinite(x)?x:0,y:ai.root.position.y||.02,z:Number.isFinite(z)?z:0},true);
+    ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);drive.npcPhysics.recoveries++;ai.recoverFor=0;return true;
+  }
+  ai.recoverFor=err>TRAFFIC_AI.laneRecover?ai.recoverFor+dt:Math.max(0,ai.recoverFor-dt*2);
+  if(err>TRAFFIC_AI.hardRecover&&ai.recoverFor>TRAFFIC_AI.recoverDelay){
+    const e=ai.entity,np={x:p.x,y:ai.root.position.y||.02,z:p.z};
+    if(ai.kind==='car'){if(e.ax==='z')np.x=e.f;else np.z=e.f;}else np.x=e.x;
+    ai.body.setTranslation(np,true);ai.body.setLinvel({x:rf.fx*2,y:0,z:rf.fz*2},true);
+    ai.recoverFor=0;drive.npcPhysics.recoveries++;return true;
+  }
+  return false;
+}
+function updateNpcPhysicsStep(dt) {
+  if(!drive.on)return;ensureNpcPhysics();
+  for(const ai of drive.npcPhysics.bodies){
+    const b=ai.body,p=b.translation(),lv=b.linvel(),e=ai.entity,rf=routeFrame(ai);
+    if(recoverNpc(ai,p,lv,rf,dt))continue;
+    if(ai.kind==='car'){
+      const coord=rf.axis==='z'?p.z:p.x;
+      if(Math.abs(coord)>332){
+        const pp=drive.body?.translation(),far=!pp||Math.hypot(pp.x-p.x,pp.z-p.z)>45;
+        if(far){
+          const np={x:p.x,y:Math.max(0,p.y),z:p.z},wrapped=coord>0?-318:318;
+          if(rf.axis==='z')np.z=wrapped;else np.x=wrapped;b.setTranslation(np,true);
+        }
+      }
+    }else{
+      if(p.z>=91){e.dir=-1;e.servedStop=false;}
+      else if(p.z<=-245){e.dir=1;e.servedStop=false;}
+    }
+
+    const frameNow=routeFrame(ai),forwardSpeed=Math.max(0,lv.x*frameNow.fx+lv.z*frameNow.fz);
+    let target=ai.baseSpeed;
+    if(ai.kind!=='car'){
+      if(e.stopTimer>0){e.stopTimer=Math.max(0,e.stopTimer-dt);target=0;}
+      else if(!e.servedStop){
+        const dist=(BUS_STOP[2]-p.z)*e.dir;
+        if(dist>=0&&dist<18){
+          target=Math.min(target,Math.sqrt(Math.max(0,2*5.5*dist)));
+          if(dist<.65&&forwardSpeed<2.2){e.stopTimer=2.25;e.servedStop=true;target=0;}
+        }
+      }
+    }
+
+    const threat=playerThreat(ai,p,lv,frameNow);ai.urgency=threat.risk;
+    ai.avoidHold=Math.max(0,ai.avoidHold-dt);
+    if(threat.risk>.08){
+      const preferred=threat.lateral>=0?-1:1;
+      if(ai.avoidHold<=0||!ai.avoidSide){
+        ai.avoidSide=sideClear(ai,preferred,p,frameNow)?preferred:(sideClear(ai,-preferred,p,frameNow)?-preferred:0);
+        ai.avoidHold=TRAFFIC_AI.avoidHold;
+      }
+      if(ai.kind==='car'&&ai.avoidSide){
+        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.carOffset*clamp(.45+threat.risk*.7,.45,1);
+        target=Math.min(target,ai.baseSpeed*(1-.64*threat.risk));
+      }else if(ai.kind!=='car'&&ai.avoidSide&&threat.risk<.72){
+        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.busOffset*clamp(.35+threat.risk,.35,1);
+        target=Math.min(target,ai.baseSpeed*(1-.72*threat.risk));
+      }else{
+        ai.targetOffset=0;target=Math.min(target,ai.baseSpeed*(1-.96*threat.risk));
+      }
+      if(threat.ttc<.75&&(!ai.avoidSide||ai.kind!=='car'))target=0;
+    }else if(ai.avoidHold<=0){
+      ai.avoidSide=0;ai.targetOffset=0;
+    }
+    target=leadVehicleSpeed(ai,p,frameNow,target);ai.targetSpeed=clamp(target,0,ai.baseSpeed);
+
+    const err=laneError(ai,p,frameNow),latTarget=clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
+    const desiredX=frameNow.fx*ai.targetSpeed+frameNow.rx*latTarget,desiredZ=frameNow.fz*ai.targetSpeed+frameNow.rz*latTarget;
+    const rate=ai.targetSpeed<forwardSpeed?TRAFFIC_AI.brakeResponse:TRAFFIC_AI.accelResponse,blend=1-Math.exp(-dt*rate);
+    b.setLinvel({x:lv.x+(desiredX-lv.x)*blend,y:lv.y,z:lv.z+(desiredZ-lv.z)*blend},true);
+
+    const desiredMag=Math.hypot(desiredX,desiredZ),dfx=desiredMag>.1?desiredX/desiredMag:frameNow.fx,dfz=desiredMag>.1?desiredZ/desiredMag:frameNow.fz;
+    const desiredYaw=rootYawForForward(ai.kind==='car'?'car':'bus',dfx,dfz),q=b.rotation(),yaw=2*Math.atan2(q.y,q.w);
+    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate);
+    b.setAngvel({x:0,y:yawRate,z:0},true);
+
+    ai.stuckFor=forwardSpeed<.12&&ai.targetSpeed>3&&threat.risk<.08?ai.stuckFor+dt:0;
+    if(ai.stuckFor>TRAFFIC_AI.stuckDelay){b.setLinvel({x:frameNow.fx*2,y:lv.y,z:frameNow.fz*2},true);ai.stuckFor=0;}
+    ai.lastForwardSpeed=forwardSpeed;
+  }
+}
+function syncTrafficPhysicsVisuals() {
+  if(traffic?.mode!=='packed')return;
+  const {cars,parkedCount,set}=traffic;
+  cars.forEach((car,i)=>{
+    const ai=car.physics;if(!ai)return;const p=ai.body.translation(),q=ai.body.rotation(),root=set.roots[parkedCount+i];if(!root||!finiteXZ(p))return;
+    root.position.set(p.x,p.y,p.z);root.quaternion.set(q.x,q.y,q.z,q.w);car.x=p.x;car.z=p.z;car.y=root.position.y;
+  });
+  if(drivePerf.active&&frameNo%drivePerf.lodEvery===0)updateDriveTrafficLod();
+}
+function syncTransitPhysicsVisuals(dt) {
+  for(const v of transit?.vehicles||[]){
+    const ai=v.physics;if(!ai)continue;const p=ai.body.translation(),q=ai.body.rotation(),lv=ai.body.linvel();if(!finiteXZ(p))continue;
+    v.root.position.set(p.x,p.y,p.z);v.root.quaternion.set(q.x,q.y,q.z,q.w);v.x=p.x;v.z=p.z;
+    const rf=routeFrame(ai),rollDistance=-(lv.x*rf.fx+lv.z*rf.fz)*dt;
+    for(const rig of v.wheelRigs||[]){rig.roll+=rollDistance/Math.max(rig.radius,.08);rig.pivot.rotation.set(rig.baseX,rig.baseY,rig.baseZ);rig.pivot.rotateZ(rig.roll);}
+  }
+}
+
 async function initPhysics() {
   if (drive.world) return;
   if (drive.initPromise) return drive.initPromise;
@@ -2099,6 +2329,7 @@ function driveStep(dt) {
   while (d.acc >= d.fixedStep && n++ < 4) {
     d.physicsPrevPos.copy(d.physicsCurrPos);
     d.physicsPrevQuat.copy(d.physicsCurrQuat);
+    updateNpcPhysicsStep(d.fixedStep);
     d.world.step();
     const pt = b.translation(), prt = b.rotation();
     d.physicsCurrPos.set(pt.x, pt.y, pt.z);
@@ -2412,6 +2643,7 @@ if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
   interaction, AUTO, drive, drivePerf, driveCamera, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, resize, actualFullscreen,
   objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
   isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer,
+  TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };
 frameId = requestAnimationFrame(frame);
