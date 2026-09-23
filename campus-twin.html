@@ -568,6 +568,50 @@ function vehicleLampAnchors(root, kind) {
 }
 
 const vehicleLightCandidates = [];
+const mobileNpcLightPool={
+  initialized:false,lights:[],target:null,lastSwitch:0,switches:0,
+  p0:new THREE.Vector3(),p1:new THREE.Vector3(),active:false
+};
+function ensureMobileNpcLightPool(){
+  if(mobileNpcLightPool.initialized)return;
+  const defs=[['#fff4cf',10],['#fff4cf',10],['#ff3038',6],['#ff3038',6]];
+  for(const [color,range] of defs){
+    const l=new THREE.PointLight(color,0,range,2);l.castShadow=false;l.visible=false;scene.add(l);mobileNpcLightPool.lights.push(l);
+  }
+  mobileNpcLightPool.initialized=true;
+}
+function chooseMobileNpcLightTarget(now){
+  if(!drivePerf.active||!mobileProfile){mobileNpcLightPool.target=null;return;}
+  ensureMobileNpcLightPool();
+  const candidate=vehicleLightCandidates[0]||null,current=mobileNpcLightPool.target;
+  const currentValid=current&&current.root?.visible&&Number.isFinite(current._distanceSq)&&current._distanceSq<105*105;
+  let next=currentValid?current:null;
+  if(candidate&&candidate._distanceSq<105*105){
+    if(!next)next=candidate;
+    else if(candidate!==next&&now-mobileNpcLightPool.lastSwitch>650&&candidate._distanceSq<next._distanceSq*.58)next=candidate;
+  }
+  if(next!==current){mobileNpcLightPool.target=next;mobileNpcLightPool.lastSwitch=now;mobileNpcLightPool.switches++;}
+}
+function updateMobileNpcLightPool(night,dt,now){
+  if(!mobileProfile||!drivePerf.active){
+    if(mobileNpcLightPool.initialized)mobileNpcLightPool.lights.forEach(l=>{l.visible=false;l.intensity=0;});
+    mobileNpcLightPool.active=false;return;
+  }
+  ensureMobileNpcLightPool();chooseMobileNpcLightTarget(now);
+  const rig=mobileNpcLightPool.target,ls=mobileNpcLightPool.lights,active=night>.015;
+  mobileNpcLightPool.active=!!rig&&active;
+  if(!rig||!active){ls.forEach(l=>{l.visible=active;l.intensity=0;});return;}
+  const alpha=1-Math.exp(-dt*20),kind=rig.kind;
+  const anchors=[rig.headAnchors?.[0],rig.headAnchors?.[1],rig.tailAnchors?.[0],rig.tailAnchors?.[1]];
+  anchors.forEach((a,i)=>{
+    const l=ls[i];if(!a){l.intensity=0;return;}
+    mobileNpcLightPool.p0.copy(a);rig.root.localToWorld(mobileNpcLightPool.p0);
+    if(!l.visible||l.position.lengthSq()===0)l.position.copy(mobileNpcLightPool.p0);else l.position.lerp(mobileNpcLightPool.p0,alpha);
+    l.visible=true;
+    l.distance=i<2?(kind==='car'?10:14):(kind==='car'?6:8);
+    l.intensity=night*(i<2?(kind==='car'?.85:1.45):.42);
+  });
+}
 function refreshVehicleLightBudget() {
   vehicleLightCandidates.length = 0;
   const add = rig => {
@@ -585,7 +629,12 @@ function refreshVehicleLightBudget() {
      device keep only the closest vehicle's physical light spill; all vehicles
      retain their native emissive lamp materials/glow, so the visible lamps do
      not disappear. */
-  const maxActive=drivePerf.active?(isTouchDriveDevice?1:2):(tierName==='high'?6:tierName==='medium'?4:2);
+  if(drivePerf.active&&mobileProfile){
+    vehicleLightCandidates.forEach(rig=>{rig.dynamicEnabled=false;});
+    chooseMobileNpcLightTarget(performance.now());
+    return;
+  }
+  const maxActive=drivePerf.active?2:(tierName==='high'?6:tierName==='medium'?4:2);
   vehicleLightCandidates.forEach((rig,i)=>{
     const range=drivePerf.active?(rig.kind==='car'?72:105):(rig.kind==='car'?95:135);
     rig.dynamicEnabled=i<maxActive&&rig._distanceSq<=range*range;
@@ -745,6 +794,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (match
 const TOUCH_DRIVE_TEST = DEBUG && Q.has('touchtest');
 const coarseNoHover = matchMedia?.('(hover:none) and (pointer:coarse)').matches === true;
 const isTouchDriveDevice = TOUCH_DRIVE_TEST || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && coarseNoHover);
+const mobileProfile=isMobile||TOUCH_DRIVE_TEST;
 const weak = isMobile && ((navigator.deviceMemory && navigator.deviceMemory <= 3) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
 // v4 budget: one scene pass + a handful of tiny half/eighth-res passes. No MSAA, no AO pass, no second depth render, no dynamic spot lights.
 const TIERS = {
@@ -752,8 +802,9 @@ const TIERS = {
   medium: { sh: 1024, dpr: 1.35, bloom: true,  dof: .6, fxaa: true,  rain: 4500, snow: 3500, trees: .7,  clouds: 8,  se: 3 },
   low:    { sh: 512,  dpr: 1,    bloom: false, dof: 0,  fxaa: false, rain: 2200, snow: 1800, trees: .45, clouds: 4,  se: 4 },
 };
-const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : isMobile ? 'medium' : 'high');
-const T = TIERS[tierName], FX = { dof: T.dof, bloom: T.bloom, fxaa: T.fxaa, se: T.se };
+const tierName = TIERS[CFG.quality] ? CFG.quality : (weak ? 'low' : mobileProfile ? 'medium' : 'high');
+const T=TIERS[tierName],baseFX={dof:mobileProfile?0:T.dof,bloom:T.bloom,fxaa:T.fxaa,se:T.se},FX={...baseFX};
+const qualityDpr=mobileProfile?(tierName==='low'?1.35:1.6):T.dpr;
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, stencil: false, powerPreference: 'high-performance' }); }
 catch (e) { fatal('WebGL unavailable', 'This browser or device could not create a WebGL context. Try enabling hardware acceleration.'); throw e; }
@@ -778,7 +829,7 @@ controls.target.set(0, 0, 10);
    → 3 tiny passes at ⅛ res (wide bloom)
    → composite: depth-based far blur mix, bloom, ACES tone-map, grade, vignette, grain, sRGB
    → FXAA → screen                                                                                */
-let pr = Math.min(devicePixelRatio || 1, T.dpr);
+let pr = Math.min(devicePixelRatio || 1, qualityDpr);
 const hdr = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
 const FS_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }';
 const BLUR_FS = 'uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv; void main(){ vec3 c = texture2D(tSrc, vUv).rgb*.227027027; vec3 a = texture2D(tSrc, vUv+uDir*1.3846153846).rgb + texture2D(tSrc, vUv-uDir*1.3846153846).rgb; vec3 b = texture2D(tSrc, vUv+uDir*3.2307692308).rgb + texture2D(tSrc, vUv-uDir*3.2307692308).rgb; gl_FragColor = vec4(c + a*.3162162162 + b*.0702702703, 1.); }';
@@ -841,19 +892,21 @@ function buildPost() {
 function pass(mat, target) { fsMesh.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
 function renderPost() {
   renderer.setRenderTarget(PT.scene); renderer.render(scene, camera);
-  const doBlur = FX.dof > 0 || FX.bloom, bu = blurMat.uniforms;
-  if (doBlur) {
-    bu.tSrc.value = PT.scene.texture; bu.uDir.value.set(2 / PT.w, 0); pass(blurMat, PT.a);
-    /* Compensate the vertical kernel for the smaller mobile blur target so the
-       apparent DOF radius stays close to the previous half-res version. */
-    bu.tSrc.value = PT.a.texture; bu.uDir.value.set(0, (3.2 / PT.blurDiv) / PT.a.height); pass(blurMat, PT.b);
-    if (FX.bloom) {
-      downMat.uniforms.tSrc.value = PT.b.texture; downMat.uniforms.uPx.value.set(1 / PT.b.width, 1 / PT.b.height); pass(downMat, PT.c);
-      bu.tSrc.value = PT.c.texture; bu.uDir.value.set(1.5 / PT.c.width, 0); pass(blurMat, PT.d);
-      bu.tSrc.value = PT.d.texture; bu.uDir.value.set(0, 1.5 / PT.c.height); pass(blurMat, PT.c);
-    }
+  const needDof=FX.dof>0,bu=blurMat.uniforms;
+  if(needDof){
+    bu.tSrc.value=PT.scene.texture;bu.uDir.value.set(2/PT.w,0);pass(blurMat,PT.a);
+    bu.tSrc.value=PT.a.texture;bu.uDir.value.set(0,(3.2/PT.blurDiv)/PT.a.height);pass(blurMat,PT.b);
   }
-  CU.tScene.value = PT.scene.texture; CU.tDepth.value = PT.scene.depthTexture; CU.tBlur.value = doBlur ? PT.b.texture : PT.scene.texture; CU.tBloom.value = FX.bloom ? PT.c.texture : PT.scene.texture;
+  if(FX.bloom){
+    /* Mobile no longer pays the quarter-resolution DOF blur just to produce
+       bloom. Downsample the sharp scene directly to the tiny bloom target. */
+    const bloomSource=needDof?PT.b.texture:PT.scene.texture;
+    downMat.uniforms.tSrc.value=bloomSource;
+    downMat.uniforms.uPx.value.set(1/(needDof?PT.b.width:PT.w),1/(needDof?PT.b.height:PT.h));pass(downMat,PT.c);
+    bu.tSrc.value=PT.c.texture;bu.uDir.value.set(1.5/PT.c.width,0);pass(blurMat,PT.d);
+    bu.tSrc.value=PT.d.texture;bu.uDir.value.set(0,1.5/PT.c.height);pass(blurMat,PT.c);
+  }
+  CU.tScene.value=PT.scene.texture;CU.tDepth.value=PT.scene.depthTexture;CU.tBlur.value=needDof?PT.b.texture:PT.scene.texture;CU.tBloom.value=FX.bloom?PT.c.texture:PT.scene.texture;
   CU.uNear.value = camera.near; CU.uFar.value = camera.far; CU.uDof.value = FX.dof; CU.uBloom.value = FX.bloom ? .5 + ST.night * .4 : 0;
   const start = Math.max(camDist * 1.6, 90); CU.uStart.value = start; CU.uEnd.value = start + Math.max(camDist * 3, 260);
   if (FX.fxaa) { pass(compMat, PT.ldr); fxaaMat.uniforms.tLdr.value = PT.ldr.texture; pass(fxaaMat, null); } else pass(compMat, null);
@@ -866,7 +919,7 @@ function ctex(w, h, draw, o = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c); if (o.srgb !== false) t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; if (o.rep) t.repeat.set(o.rep[0], o.rep[1]);
-  t.anisotropy = Math.min(isMobile ? 4 : 8, maxAniso); return t;
+  t.anisotropy=Math.min(mobileProfile&&tierName==='low'?4:8,maxAniso);return t;
 }
 const speck = (g, w, h, n, r, cols, a0 = .04, a1 = .16, s = 2) => { for (let i = 0; i < n; i++) { g.globalAlpha = a0 + r() * (a1 - a0); g.fillStyle = cols[(r() * cols.length) | 0]; g.fillRect(r() * w, r() * h, 1 + r() * s, 1 + r() * s); } g.globalAlpha = 1; };
 const asphaltTex = () => ctex(512, 512, (g, w, h) => { const r = rng(3); g.fillStyle = '#41444c'; g.fillRect(0, 0, w, h); speck(g, w, h, 9000, r, ['#6d7078', '#25272c', '#8b8e96', '#2f3238']); }, { rep: [1, 1] });
@@ -1241,7 +1294,8 @@ function makeVehicleInstanceSet(sourceRoots, vehicles) {
     root.position.set(vehicle.x, vehicle.y || 0, vehicle.z);
     root.rotation.y = vehicle.yaw || 0;
     root.scale.multiplyScalar(vehicle.scale || 1);
-    root.traverse(mesh => { if (mesh.isMesh) { mesh.castShadow = !drivePerf.active; mesh.receiveShadow = false; } });
+    const parked=!vehicle.ax;
+    root.traverse(mesh=>{if(mesh.isMesh){mesh.castShadow=!drivePerf.active&&!(mobileProfile&&parked);mesh.receiveShadow=false;}});
     scene.add(root);
     if(!vehicle.ax)staticRoots.push(root);
     return root;
@@ -1664,8 +1718,13 @@ function updateEnv(dt) {
   if (traffic?.tlMat?.color) traffic.tlMat.color.setRGB(2.4, 2.2, 1.6).multiplyScalar(.3 + .7 * ST.night);
   const now = performance.now(); if ((envDirty || Math.abs(sd.y - lastEnvT) > .006) && now - (updateEnv.last || 0) > (clock.speed > 1 ? 500 : 2500)) { updateEnv.last = now; lastEnvT = sd.y; envDirty = false; skyEnvScene.add(sky); if (envRT) envRT.dispose(); envRT = pmrem.fromScene(skyEnvScene); scene.add(sky); scene.environment = envRT.texture; }
 }
-const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0 };
+const shadowTrack = { target: new V3(1e9, 0, 1e9), dir: new V3(), at: 0, deferred:false };
 function maybeUpdateShadow(now, force = false) {
+  /* Re-rendering the directional shadow map while a finger is orbiting,
+     pinching or rapidly wheeling is a large synchronous GPU spike near the
+     lots. Hold the last valid shadow through the gesture and refresh once
+     after input has actually gone quiet (not after every wheel event). */
+  if(!force&&!drive.on&&(interaction.controlsActive||interaction.cameraTransition||now-interaction.lastInput<190)){shadowTrack.deferred=true;return;}
   const minInterval = drive.on ? drivePerf.shadowEveryMs : 340;
   if (!force && now - shadowTrack.at < minInterval) return;
   const targetMoved = controls.target.distanceToSquared(shadowTrack.target) > (drive.on ? 9 : 36);
@@ -1675,7 +1734,7 @@ function maybeUpdateShadow(now, force = false) {
   renderer.shadowMap.needsUpdate = true;
   shadowTrack.target.copy(controls.target);
   shadowTrack.dir.copy(keyDir);
-  shadowTrack.at = now;
+  shadowTrack.at = now;shadowTrack.deferred=false;
 }
 function updateShadow() {
   const S = clamp(camDist * .8, 60, 300), cam = keyLight.shadow.camera; if (Math.abs(cam.right - S) > 2) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 10; cam.far = 1300; cam.updateProjectionMatrix(); }
@@ -1771,9 +1830,17 @@ const interaction = {
   prevPanZ: 0,
   prevPitch: 0,
   prevBreath: 1,
-  initialized: false,
-  pivotId: null
+  initialized:false,pivotId:null,settleTimer:0
 };
+function scheduleCameraSettle(delay=210){
+  clearTimeout(interaction.settleTimer);
+  interaction.settleTimer=setTimeout(()=>{
+    interaction.settleTimer=0;
+    if(drive.on||interaction.controlsActive||interaction.cameraTransition)return;
+    updateViewTrafficLod(true);
+    if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);
+  },delay);
+}
 const cinPivot = new V3(), cinOffset = new V3(), cinRight = new V3(), cinUp = new V3(0, 1, 0), cinQ = new THREE.Quaternion();
 
 function actualFullscreen() {
@@ -1884,6 +1951,8 @@ function flyTo(pos, tgt, dur = 2.2, onComplete = null) {
     settled = true;
     clearTimeout(timer);
     interaction.cameraTransition = false;
+    updateViewTrafficLod(true);
+    if(shadowTrack.deferred)maybeUpdateShadow(performance.now(),true);
     onComplete?.();
   };
   timer = setTimeout(done, Math.max(0, dur) * 1000 + 160);
@@ -1898,8 +1967,9 @@ controls.addEventListener('start', () => {
 });
 controls.addEventListener('change', () => { if (interaction.controlsActive && !drive.on) markUserInteraction(); });
 controls.addEventListener('end', () => {
-  interaction.controlsActive = false; markUserInteraction();
-  if (drive.on) { driveCamera.userRotating = false; driveCamera.releaseAt = performance.now(); }
+  interaction.controlsActive=false;markUserInteraction();
+  if(drive.on){driveCamera.userRotating=false;driveCamera.releaseAt=performance.now();}
+  else scheduleCameraSettle(220);
 });
 function select(id, fly = true) {
   markUserInteraction();
@@ -1916,7 +1986,7 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let ptr = null, dX
 const pick = (x, y) => { const r = $('scene').getBoundingClientRect(); ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(pickables, false); return h.length ? h[0].object.userData.bid : null; };
 $('scene').addEventListener('pointermove', e => { if (!e.buttons) ptr = [e.clientX, e.clientY]; else markPointerInteraction(); });
 $('scene').addEventListener('pointerdown', () => markUserInteraction());
-$('scene').addEventListener('wheel', () => markUserInteraction(), { passive: true });
+$('scene').addEventListener('wheel',()=>{markUserInteraction();if(!drive.on)scheduleCameraSettle(240);},{passive:true});
 $('scene').addEventListener('pointerleave', () => { ptr = null; });
 $('scene').addEventListener('wheel', () => {
   if (drive.on) {
@@ -1976,6 +2046,33 @@ const drivePerf = {
   transitLodSq:(isTouchDriveDevice?315:380)*(isTouchDriveDevice?315:380),
   lodEvery:isTouchDriveDevice?10:8,shadowEveryMs:180
 };
+const viewPerf={
+  at:0,target:new V3(1e9,0,1e9),distance:-1,visibleParked:0,
+  interval:mobileProfile?90:150
+};
+function updateViewTrafficLod(force=false){
+  if(drivePerf.active||traffic?.mode!=='packed')return;
+  const now=performance.now(),target=controls.target,dist=camDist;
+  if(!force&&(interaction.controlsActive||interaction.cameraTransition||now-interaction.lastInput<190))return;
+  if(!force){
+    if(now-viewPerf.at<viewPerf.interval)return;
+    const moved=target.distanceToSquared(viewPerf.target)>64,zoomed=Math.abs(dist-viewPerf.distance)>10;
+    if(!moved&&!zoomed)return;
+  }
+  const roots=traffic.set.roots,pc=traffic.parkedCount||0;
+  /* At overview distance the radius expands enough to retain the full campus
+     parking pattern. Close to an intersection/building, far parking lots stop
+     consuming draw calls even though near vehicle geometry stays native. */
+  const radius=clamp((mobileProfile?135:170)+dist*(mobileProfile?.78:.9),mobileProfile?190:240,560),r2=radius*radius;
+  let visible=0;
+  for(let i=0;i<pc;i++){
+    const root=roots[i];if(!root)continue;const dx=root.position.x-target.x,dz=root.position.z-target.z,on=dx*dx+dz*dz<=r2;
+    root.visible=on;if(on)visible++;
+  }
+  for(let i=pc;i<roots.length;i++)if(roots[i])roots[i].visible=true;
+  transit?.vehicles?.forEach(v=>v.root.visible=true);
+  viewPerf.visibleParked=visible;viewPerf.at=now;viewPerf.target.copy(target);viewPerf.distance=dist;
+}
 const driveCamera = {
   userRotating: false,
   chaseStrength: 0,
@@ -2059,9 +2156,9 @@ function unwireMobileDriveControls() {
 }
 
 function setDriveVehicleShadowMode(cast) {
-  const roots = traffic?.set?.roots || [];
-  roots.forEach(root => root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
-  transit?.vehicles?.forEach(vehicle => vehicle.root.traverse(node => { if (node.isMesh) node.castShadow = cast; }));
+  const roots=traffic?.set?.roots||[],pc=traffic?.parkedCount||0;
+  roots.forEach((root,i)=>root.traverse(node=>{if(node.isMesh)node.castShadow=cast&&!(mobileProfile&&i<pc);}));
+  transit?.vehicles?.forEach(vehicle=>vehicle.root.traverse(node=>{if(node.isMesh)node.castShadow=cast;}));
 }
 function setDriveTrafficVisibility(visible) {
   const roots = traffic?.set?.roots || [];
@@ -2088,7 +2185,7 @@ function setDrivePerformanceMode(active) {
     drivePerf.savedDof = FX.dof;
     drivePerf.savedBloom = FX.bloom;
     drivePerf.savedFxaa = FX.fxaa;
-    drivePerf.maxPr = tierName === 'high' ? 1.35 : tierName === 'medium' ? 1.12 : 1;
+    drivePerf.maxPr=mobileProfile?Math.min(qualityDpr,tierName==='low'?1.3:1.5):(tierName==='high'?1.35:tierName==='medium'?1.2:1);
     const nextPr = Math.min(pr, drivePerf.maxPr);
     // Driving is a near-camera experience. Keep native geometry/material detail
     // intact while disabling the costly blur stack, FXAA pass and distant shadows.
@@ -2106,6 +2203,7 @@ function setDrivePerformanceMode(active) {
     setDriveTrafficVisibility(true);
     setDriveVehicleShadowMode(true);
     if (pr !== drivePerf.savedPr) { pr = drivePerf.savedPr; resize(); }
+    updateViewTrafficLod(true);
   }
 }
 function fitNativeTransitWheels(root, kind) {
@@ -2167,8 +2265,9 @@ function createWheelPivot(node, name) {
 
 const TRAFFIC_AI = Object.freeze({
   predictionTime:3.0,lookBase:9,playerHalfWidth:1.0,playerHalfLength:2.15,
-  avoidHold:.9,carOffset:2.25,busOffset:1.25,lateralGain:1.65,maxLateralSpeed:3.1,
+  avoidHold:.9,carOffset:2.25,busOffset:2.1,lateralGain:1.65,maxLateralSpeed:3.1,
   accelResponse:2.0,brakeResponse:5.4,turnResponse:4.8,maxYawRate:1.35,
+  blockPause:1.15,playerStationarySpeed:.45,blockLook:12,passCarSpeed:4.8,passBusSpeed:3.2,passMax:6.0,
   laneRecover:9,hardRecover:18,recoverDelay:2.6,stuckDelay:5.0
 });
 const AI_BOX=new THREE.Box3(),AI_SIZE=new V3();
@@ -2219,6 +2318,7 @@ function registerNpcPhysics(entity,root,kind) {
     entity,root,kind,body,collider,size,halfWidth:size.width*.46,halfLength:size.length*.46,
     baseSpeed:kind==='car'?entity.v:entity.speed,targetSpeed:kind==='car'?entity.v:entity.speed,
     avoidSide:0,avoidHold:0,urgency:0,targetOffset:0,recoverFor:0,stuckFor:0,lastForwardSpeed:0,
+    playerBlockState:'none',playerBlockWait:0,playerPassSide:0,playerPassFor:0,blockHoldOffset:0,
     frame:{fx:0,fz:0,rx:0,rz:0,lane:0,axis:'z'},threat:{risk:0,ahead:Infinity,lateral:Infinity,ttc:Infinity},
     nextVel:{x:0,y:0,z:0},nextAng:{x:0,y:0,z:0}
   };
@@ -2242,6 +2342,7 @@ function resetNpcPhysicsFromRoutes() {
     const speed=ai.baseSpeed;
     b.setLinvel({x:rf.fx*speed,y:0,z:rf.fz*speed},true);
     ai.targetSpeed=speed;ai.avoidSide=0;ai.avoidHold=0;ai.urgency=0;ai.targetOffset=0;ai.recoverFor=0;ai.stuckFor=0;
+    ai.playerBlockState='none';ai.playerBlockWait=0;ai.playerPassSide=0;ai.playerPassFor=0;ai.blockHoldOffset=0;
   }
 }
 function syncNpcRoutesFromPhysics() {
@@ -2261,6 +2362,23 @@ function sideClear(ai,side,p,rf) {
     if(other===ai)continue;const op=other.body.translation();if(!finiteXZ(op))continue;
     const rr=ai.halfWidth+other.halfWidth+1.25,dx=op.x-tx,dz=op.z-tz;
     if(dx*dx+dz*dz<rr*rr)return false;
+  }
+  return true;
+}
+function maneuverSideClear(ai,side,p,rf){
+  if(!side||!sideClear(ai,side,p,rf))return false;
+  const offset=(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset)*side;
+  const forwardWindow=ai.kind==='car'?15:20;
+  for(const other of drive.npcPhysics.bodies){
+    if(other===ai)continue;
+    const op=other.body.translation();if(!finiteXZ(op))continue;
+    const dx=op.x-p.x,dz=op.z-p.z,ahead=dx*rf.fx+dz*rf.fz,lat=dx*rf.rx+dz*rf.rz;
+    if(ahead<-3-other.halfLength||ahead>forwardWindow+other.halfLength)continue;
+    const clearance=ai.halfWidth+other.halfWidth+.75;
+    if(Math.abs(lat-offset)<clearance)return false;
+    const ov=other.body.linvel(),futureAhead=ahead+(ov.x*rf.fx+ov.z*rf.fz)*.8;
+    const futureLat=lat+(ov.x*rf.rx+ov.z*rf.rz)*.8;
+    if(futureAhead>-3-other.halfLength&&futureAhead<forwardWindow+other.halfLength&&Math.abs(futureLat-offset)<clearance)return false;
   }
   return true;
 }
@@ -2352,36 +2470,94 @@ function updateNpcPhysicsStep(dt) {
     }
 
     const threat=playerThreat(ai,p,lv,frameNow);ai.urgency=threat.risk;
-    ai.avoidHold=Math.max(0,ai.avoidHold-dt);
-    if(threat.risk>.08){
-      const preferred=threat.lateral>=0?-1:1;
-      if(ai.avoidHold<=0||!ai.avoidSide){
-        ai.avoidSide=sideClear(ai,preferred,p,frameNow)?preferred:(sideClear(ai,-preferred,p,frameNow)?-preferred:0);
-        ai.avoidHold=TRAFFIC_AI.avoidHold;
-      }
-      if(ai.kind==='car'&&ai.avoidSide){
-        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.carOffset*clamp(.45+threat.risk*.7,.45,1);
-        target=Math.min(target,ai.baseSpeed*(1-.64*threat.risk));
-      }else if(ai.kind!=='car'&&ai.avoidSide&&threat.risk<.72){
-        ai.targetOffset=ai.avoidSide*TRAFFIC_AI.busOffset*clamp(.35+threat.risk,.35,1);
-        target=Math.min(target,ai.baseSpeed*(1-.72*threat.risk));
+    const pv=drive.body?.linvel(),playerSpeed=pv?Math.hypot(pv.x,pv.z):0;
+    const playerHalfLength=drive.colliderSize?.length*.5||TRAFFIC_AI.playerHalfLength;
+    const directBlock=threat.risk>.18&&threat.ahead>-.75&&threat.ahead<Math.max(TRAFFIC_AI.blockLook,ai.halfLength+playerHalfLength+5);
+    let holdLateral=false,holdYaw=false;
+
+    /* A stopped player directly ahead is handled as a deliberate manoeuvre,
+       not ordinary predictive swerving:
+       STOP -> verify the player stays still -> verify a side corridor is safe
+       -> pass on one locked side -> return to the authored lane.
+       The locked state removes the left/right sign flip that caused stationary
+       NPCs to sway in place. Any player movement cancels the pass and restarts
+       the safety pause. */
+    if(ai.playerBlockState==='pass'){
+      const unsafePlayer=playerSpeed>TRAFFIC_AI.playerStationarySpeed;
+      const sideSafe=maneuverSideClear(ai,ai.playerPassSide,p,frameNow);
+      if(unsafePlayer||!sideSafe){
+        ai.playerBlockState='wait';ai.playerBlockWait=0;ai.blockHoldOffset=laneError(ai,p,frameNow);
+        ai.targetOffset=ai.blockHoldOffset;target=0;holdLateral=holdYaw=true;
       }else{
-        ai.targetOffset=0;target=Math.min(target,ai.baseSpeed*(1-.96*threat.risk));
+        ai.playerPassFor+=dt;
+        ai.targetOffset=ai.playerPassSide*(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset);
+        target=Math.min(target,ai.kind==='car'?TRAFFIC_AI.passCarSpeed:TRAFFIC_AI.passBusSpeed);
+        const passed=threat.ahead<-(ai.halfLength+playerHalfLength+1.1);
+        if(passed||ai.playerPassFor>TRAFFIC_AI.passMax){
+          ai.playerBlockState='return';ai.playerPassFor=0;ai.targetOffset=0;
+        }
       }
-      if(threat.ttc<.75&&(!ai.avoidSide||ai.kind!=='car'))target=0;
-    }else if(ai.avoidHold<=0){
-      ai.avoidSide=0;ai.targetOffset=0;
+    }else if(directBlock){
+      if(ai.playerBlockState!=='wait'){
+        ai.playerBlockState='wait';ai.playerBlockWait=0;ai.playerPassSide=0;
+        ai.blockHoldOffset=laneError(ai,p,frameNow);
+      }
+      ai.targetOffset=ai.blockHoldOffset;target=0;holdLateral=holdYaw=true;
+      const lateralSpeed=Math.abs(lv.x*frameNow.rx+lv.z*frameNow.rz);
+      if(playerSpeed<=TRAFFIC_AI.playerStationarySpeed&&forwardSpeed<.7&&lateralSpeed<.3)ai.playerBlockWait+=dt;
+      else ai.playerBlockWait=0;
+      if(ai.playerBlockWait>=TRAFFIC_AI.blockPause){
+        const preferred=threat.lateral>=0?-1:1;
+        const side=maneuverSideClear(ai,preferred,p,frameNow)?preferred:(maneuverSideClear(ai,-preferred,p,frameNow)?-preferred:0);
+        if(side){
+          ai.playerBlockState='pass';ai.playerPassSide=side;ai.playerPassFor=0;ai.avoidSide=side;
+          ai.targetOffset=side*(ai.kind==='car'?TRAFFIC_AI.carOffset:TRAFFIC_AI.busOffset);
+          target=Math.min(target,ai.kind==='car'?TRAFFIC_AI.passCarSpeed:TRAFFIC_AI.passBusSpeed);
+          holdLateral=holdYaw=false;
+        }
+      }
+    }else{
+      if(ai.playerBlockState==='wait'){
+        ai.playerBlockState='return';ai.playerBlockWait=0;ai.playerPassSide=0;ai.targetOffset=0;
+      }
+      if(ai.playerBlockState==='return'){
+        ai.targetOffset=0;
+        if(Math.abs(laneError(ai,p,frameNow))<.22){ai.playerBlockState='none';ai.playerPassSide=0;}
+      }
+      if(ai.playerBlockState==='none'||ai.playerBlockState==='return'){
+        ai.avoidHold=Math.max(0,ai.avoidHold-dt);
+        if(threat.risk>.08){
+          const preferred=threat.lateral>=0?-1:1;
+          if(ai.avoidHold<=0||!ai.avoidSide){
+            ai.avoidSide=sideClear(ai,preferred,p,frameNow)?preferred:(sideClear(ai,-preferred,p,frameNow)?-preferred:0);
+            ai.avoidHold=TRAFFIC_AI.avoidHold;
+          }
+          if(ai.kind==='car'&&ai.avoidSide){
+            ai.targetOffset=ai.avoidSide*TRAFFIC_AI.carOffset*clamp(.45+threat.risk*.7,.45,1);
+            target=Math.min(target,ai.baseSpeed*(1-.64*threat.risk));
+          }else if(ai.kind!=='car'&&ai.avoidSide&&threat.risk<.72){
+            ai.targetOffset=ai.avoidSide*TRAFFIC_AI.busOffset*clamp(.35+threat.risk,.35,1);
+            target=Math.min(target,ai.baseSpeed*(1-.72*threat.risk));
+          }else{
+            ai.targetOffset=0;target=Math.min(target,ai.baseSpeed*(1-.96*threat.risk));
+          }
+          if(threat.ttc<.75&&(!ai.avoidSide||ai.kind!=='car'))target=0;
+        }else if(ai.avoidHold<=0&&ai.playerBlockState==='none'){
+          ai.avoidSide=0;ai.targetOffset=0;
+        }
+      }
     }
+
     target=leadVehicleSpeed(ai,p,frameNow,target);ai.targetSpeed=clamp(target,0,ai.baseSpeed);
 
-    const err=laneError(ai,p,frameNow),latTarget=clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
+    const err=laneError(ai,p,frameNow),latTarget=holdLateral?0:clamp((ai.targetOffset-err)*TRAFFIC_AI.lateralGain,-TRAFFIC_AI.maxLateralSpeed,TRAFFIC_AI.maxLateralSpeed);
     const desiredX=frameNow.fx*ai.targetSpeed+frameNow.rx*latTarget,desiredZ=frameNow.fz*ai.targetSpeed+frameNow.rz*latTarget;
     const rate=ai.targetSpeed<forwardSpeed?TRAFFIC_AI.brakeResponse:TRAFFIC_AI.accelResponse,blend=1-Math.exp(-dt*rate),nv=ai.nextVel;
     nv.x=lv.x+(desiredX-lv.x)*blend;nv.y=lv.y;nv.z=lv.z+(desiredZ-lv.z)*blend;b.setLinvel(nv,true);
 
     const desiredMag=Math.hypot(desiredX,desiredZ),dfx=desiredMag>.1?desiredX/desiredMag:frameNow.fx,dfz=desiredMag>.1?desiredZ/desiredMag:frameNow.fz;
     const desiredYaw=rootYawForForward(ai.kind==='car'?'car':'bus',dfx,dfz),q=b.rotation(),yaw=2*Math.atan2(q.y,q.w);
-    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate),na=ai.nextAng;
+    const yawErr=wrapAngle(desiredYaw-yaw),yawRate=holdYaw?0:clamp(yawErr*TRAFFIC_AI.turnResponse,-TRAFFIC_AI.maxYawRate,TRAFFIC_AI.maxYawRate),na=ai.nextAng;
     na.x=0;na.y=yawRate;na.z=0;b.setAngvel(na,true);
 
     ai.stuckFor=forwardSpeed<.12&&ai.targetSpeed>3&&threat.risk<.08?ai.stuckFor+dt:0;
@@ -2675,6 +2851,7 @@ function updateVehicleLighting(dt,now) {
   applyRig(drive.lightRig);
   (traffic?.cars||[]).forEach(car => applyRig(car.lightRig));
   (transit?.vehicles||[]).forEach(vehicle => applyRig(vehicle.lightRig));
+  updateMobileNpcLightPool(night,dt,now);
   if (drive.dust) {
     drive.dust.material.opacity = night * .14;
     const a = drive.dust.geometry.attributes.position;
@@ -2767,6 +2944,7 @@ function frame(now) {
   if (clock.mode === 'live') clock.t = Date.now(); else if (clock.mode === 'sim') clock.t += dt * 1000 * clock.speed;
   if (drive.on) driveStep(dt); else { controls.update(); controls.target.x = clamp(controls.target.x, -330, 330); controls.target.z = clamp(controls.target.z, -380, 380); }
   camDist = camera.position.distanceTo(controls.target);
+  if(!drive.on)updateViewTrafficLod(false);
   updateCinematicCamera(dt, now);
   if (tour.on) { tour.t += dt; if (tour.t > 7) { tour.t = 0; tour.i++; select(BUILDINGS[tour.i % BUILDINGS.length].id); } }
   updateEnv(dt); updateVehicleLighting(dt, now); updatePrecip(dt); updateAAAFacelift(dt, now);
@@ -2776,10 +2954,25 @@ function frame(now) {
   const az = controls.getAzimuthalAngle(); if (Math.abs(az - lastAz) > .003) { lastAz = az; needle.style.transform = `rotate(${az}rad)`; }
   if ((clkT += dt) > .5) { clkT = 0; syncClock(); }
   renderPost();
-  fAcc += dt; fN++; if (fN === 40) { const avg = fAcc / fN; fAcc = 0; fN = 0; const cap = Math.min(devicePixelRatio || 1, drivePerf.active ? drivePerf.maxPr : T.dpr);
-    if (now - lastAdj > 2000) {
-      if (avg > 1 / 38) { if (pr > .7) { pr = Math.max(.7, pr - .2); resize(); } else if (FX.bloom) FX.bloom = false; else if (FX.dof > 0) FX.dof = 0; else FX.se = Math.min(6, FX.se + 1); lastAdj = now; }   // degrade gracefully
-      else if (avg < 1 / 57 && pr < cap - .01) { pr = Math.min(cap, pr + .1); resize(); lastAdj = now; }
+  fAcc+=dt;fN++;if(fN===40){const avg=fAcc/fN;fAcc=0;fN=0;const cap=Math.min(devicePixelRatio||1,drivePerf.active?drivePerf.maxPr:qualityDpr);
+    if(now-lastAdj>2400){
+      if(mobileProfile){
+        /* Pixel ratio is fixed for the whole mobile viewing mode. Rebuilding
+           all render targets during pinch/zoom looked like texture LOD and
+           caused the exact hitch users felt. Mobile can shed/recover optional
+           bloom, but never resizes the scene because of a transient frame dip. */
+        if(avg>1/36&&FX.bloom){FX.bloom=false;lastAdj=now;}
+        else if(avg<1/58&&!drivePerf.active&&!FX.bloom&&baseFX.bloom&&now-interaction.lastInput>1200){FX.bloom=true;lastAdj=now;}
+      }else{
+        const floor=.8;
+        if(avg>1/38){
+          if(FX.dof>0)FX.dof=0;
+          else if(FX.bloom)FX.bloom=false;
+          else if(pr>floor+.01){pr=Math.max(floor,pr-.1);resize();}
+          else FX.se=Math.min(6,FX.se+1);
+          lastAdj=now;
+        }else if(avg<1/57&&pr<cap-.01){pr=Math.min(cap,pr+.1);resize();lastAdj=now;}
+      }
     }
     if (DEBUG) { $('perf').hidden = false; $('perf').textContent = `${(1 / avg).toFixed(0)} fps · pr ${pr.toFixed(2)} · ${tierName}${hdr ? ' hdr' : ''}\ncalls ${renderer.info.render.calls} · tris ${(renderer.info.render.triangles / 1000) | 0}k\ntex ${renderer.info.memory.textures} · geo ${renderer.info.memory.geometries}\nfx dof ${FX.dof} bloom ${FX.bloom} shadow/${FX.se}`; } }
 }
@@ -2827,6 +3020,7 @@ const disposeTwin = () => {
     ownerDoc.removeEventListener('fullscreenchange', onFullscreenChange);
     if (ownerDoc !== document) document.removeEventListener('fullscreenchange', onFullscreenChange);
   } catch {}
+  clearTimeout(interaction.settleTimer);
   try { if (envRT) envRT.dispose(); } catch {}
   try { drive.world?.free?.(); } catch {}
   drive.world=null;drive.body=null;drive.collider=null;drive.npcPhysics.bodies.length=0;drive.npcPhysics.ready=false;
@@ -2876,11 +3070,11 @@ addEventListener('visibilitychange', () => {
 });
 addEventListener('pagehide', disposeTwin, { once: true });
 if (DEBUG) window.__DAVIS_TWIN_DEBUG__ = {
-  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, CU, stars, clouds, keyLight,
+  THREE, scene, camera, renderer, controls, BUILDINGS, BLD, BG, R, ST, W, FX, baseFX, qualityDpr, mobileProfile, CU, stars, clouds, keyLight, shadowTrack, viewPerf, maybeUpdateShadow,
   interaction, AUTO, drive, DRIVE_TUNE, drivePerf, driveCamera, postPerf, PT, ASSET_STATE, CAMPUS_ASSETS, updateEnv, updatePrecip, updateCinematicCamera, updateVehicleLighting, resize, actualFullscreen,
   MAIN_INTERSECTION, SIGNAL_PHASES, trafficSignal, setTrafficSignalPhase, updateTrafficSignal, trafficSignalSpeedLimit, signalDistanceForEntity,
-  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, Tw,
-  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod,
+  objectBoundsInRoot, nodeBoundsInRoot, materialGroupPointsInRoot, vehicleLampAnchors, refreshVehicleLightBudget, mobileNpcLightPool, updateMobileNpcLightPool, Tw,
+  isTouchDriveDevice, readDriveInput, resetTouchDriveInput, syncMobileDriveUI, updateJoystickFromPointer, updateDriveTrafficLod, updateViewTrafficLod,
   TRAFFIC_AI, ensureNpcPhysics, resetNpcPhysicsFromRoutes, syncNpcRoutesFromPhysics, updateNpcPhysicsStep, routeFrame, playerThreat,
   get traffic(){ return traffic; }, get transit(){ return transit; }, get assetMeshStats(){ const out={}; try { if(traffic?.set?.roots) out.trafficMeshes=traffic.set.roots.length; if(drive?.packedCar) { let n=0; drive.packedCar.traverse(m=>{if(m.isMesh)n++;}); out.driveMeshes=n; } } catch {} return out; }
 };

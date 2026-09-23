@@ -120,11 +120,28 @@ const joystickRelease=async()=>send('Input.dispatchTouchEvent',{type:'touchEnd',
 
 await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Network.enable');
 await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
+
+/* Isolated high-density probe: validate the renderer as it boots on a 2x
+ * phone display, capture it, then completely clear CDP metrics emulation.
+ * Keeping a metrics override active changes headless fullscreen/touch frame
+ * scheduling, so the gameplay regression deliberately runs without it. */
+await send('Emulation.setDeviceMetricsOverride',{width:900,height:640,deviceScaleFactor:2,mobile:false});
+await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/campus-twin.html?debug=1&touchtest=1`});
+await waitFor(`!!window.DavisTwin&&!!window.__DAVIS_TWIN_DEBUG__`,60000,200);
+await waitFor(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__,l=document.querySelector('#loader');return l?.hidden&&!d.interaction.cameraTransition})()`,12000,120);
+await ev(`(()=>{const e=document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));const d=window.__DAVIS_TWIN_DEBUG__;d.AUTO.on=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;return true})()`);
+await sleep(650);
+const hiDpiProbe=await ev(`(()=>{const d=window.__DAVIS_TWIN_DEBUG__;return{deviceDpr:devicePixelRatio,qualityDpr:d.qualityDpr,pr:d.renderer.getPixelRatio(),dof:d.FX.dof,profile:d.mobileProfile,size:[d.renderer.domElement.clientWidth,d.renderer.domElement.clientHeight],loader:document.querySelector('#loader').hidden,transition:d.interaction.cameraTransition,night:d.ST.night}})()`);
+if(hiDpiProbe.deviceDpr<1.9||hiDpiProbe.qualityDpr<1.3||hiDpiProbe.pr<1.29||hiDpiProbe.dof!==0||!hiDpiProbe.profile||!hiDpiProbe.loader||hiDpiProbe.transition||hiDpiProbe.night>.22)throw new Error('isolated high-DPR mobile probe failed: '+JSON.stringify(hiDpiProbe));
+const hiShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
+fs.writeFileSync(path.join(QA_DIR,'mobile-sharp-high-dpr-probe.png'),Buffer.from(hiShot.result.data,'base64'));
+console.log('HIGH DPR MOBILE PROBE',JSON.stringify(hiDpiProbe));
+await send('Emulation.clearDeviceMetricsOverride');
 await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/index.html?touchtest=1`});
 
 let ready=false;
 for(let i=0;i<120&&!ready;i++){await sleep(500);ready=await ev(`!!window.__SC_CAMPUS_MAP_3D__?.ready&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.DavisTwin&&!!window.__SC_CAMPUS_MAP_3D__?.frame?.contentWindow?.__DAVIS_TWIN_DEBUG__`)}
-if(!ready)throw new Error('Davis twin did not become ready within 60 seconds');
+if(!ready){const bootDiag=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m?.frame?.contentWindow;return{hostReady:m?.ready,frameSrc:m?.frame?.src,fatal:f?.document?.querySelector('#fatalMsg')?.textContent||'',loader:f?.document?.querySelector('#loadMsg')?.textContent||'',hasDebug:!!f?.__DAVIS_TWIN_DEBUG__}})()`).catch(()=>null);throw new Error('Davis twin did not become ready within 60 seconds; errors='+JSON.stringify(errors)+' diag='+JSON.stringify(bootDiag));}
 
 const boot=await ev(`(()=>{const m=window.__SC_CAMPUS_MAP_3D__,f=m.frame.contentWindow,b=document.querySelector('.cm3d-fullscreen'),u=new URL(m.frame.src);return{ready:m.ready,embed:u.searchParams.get('embed'),touchtest:u.searchParams.get('touchtest'),touchDevice:f.__DAVIS_TWIN_DEBUG__.isTouchDriveDevice,mobileActivateHidden:f.document.querySelector('#mobileDriveActivate').hidden,ids:f.DavisTwin.buildings,chips:document.querySelectorAll('[data-map-chip]').length,fsBtn:!!b,label:b?.getAttribute('aria-label'),buttonRect:b?.getBoundingClientRect().toJSON(),ui:['#title','#panel','#dock','#info','#compass','#hint','#loader','#fatal'].map(s=>[s,getComputedStyle(f.document.querySelector(s)).display==='none'])}})()`);
 if(boot.embed!=='1'||boot.touchtest!=='1'||!boot.touchDevice||!boot.mobileActivateHidden||!boot.ready||boot.chips!==6||!boot.fsBtn||boot.label!=='Enter fullscreen'||boot.buttonRect.width>34||boot.buttonRect.height>34||boot.buttonRect.width<30||boot.buttonRect.height<30||boot.ui.some(x=>!x[1]))throw new Error(`boot/UI contract failed: ${JSON.stringify(boot)}`);
@@ -182,21 +199,19 @@ await sleep(250);
 const assetStatuses=Object.fromEntries(assetResponses.map(r=>[r.url.split('/').pop(),r.status]));
 for(const name of ['NormalCar1.obj','NormalCar1.mtl','Bus.obj','Bus.mtl','SchoolBus.obj','SchoolBus.mtl'])if(assetStatuses[name]!==200)throw new Error(`vehicle asset network request failed: ${JSON.stringify({name,status:assetStatuses[name],assetResponses})}`);
 console.log('ASSETS',JSON.stringify({assets,assetStatuses}));
-const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.CU.uDof.value,touch:d.isTouchDriveDevice}})()`);
-if(!postBudget.touch||postBudget.blurDiv!==4||postBudget.blur[0]>Math.ceil(postBudget.scene[0]/4)+1||postBudget.blur[1]>Math.ceil(postBudget.scene[1]/4)+1)throw new Error('touch DOF target is not quarter resolution: '+JSON.stringify(postBudget));
-console.log('MOBILE POST BUDGET',JSON.stringify(postBudget));
+const postBudget=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,p=d.PT;return{profile:d.mobileProfile,qualityDpr:d.qualityDpr,deviceDpr:devicePixelRatio,pr:d.renderer.getPixelRatio(),blurDiv:d.postPerf.blurDiv,scene:[p.w,p.h],blur:[p.a.width,p.a.height],dof:d.FX.dof,bloom:d.FX.bloom,touch:d.isTouchDriveDevice}})()`);
+if(!postBudget.touch||!postBudget.profile||postBudget.qualityDpr<1.3||Math.abs(postBudget.pr-Math.min(postBudget.deviceDpr,postBudget.qualityDpr))>.03||postBudget.dof!==0)throw new Error('mobile sharp-render budget regressed: '+JSON.stringify(postBudget));
+console.log('MOBILE SHARP POST BUDGET',JSON.stringify(postBudget));
 /* Make the close/front/rear/far artifact set explicitly daylight rather than
  * inheriting whatever the wall clock happens to be during CI. */
 await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,e=f.document.querySelector('#timeRange');e.value='720';e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
 await sleep(650);
 const dayState=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.ST.night`);
 if(dayState>.22)throw new Error('daylight visual pass did not reach day state: '+dayState);
-const dofQa=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.__qaSavedDof=d.FX.dof;d.FX.dof=.6;return{saved:d.__qaSavedDof,active:d.FX.dof,blurDiv:d.postPerf.blurDiv}})()`);
 await sleep(180);
-const dofUniform=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.CU.uDof.value`);
-if(dofQa.active<.5||dofQa.blurDiv!==4||dofUniform<.5)throw new Error('forced mobile DOF QA did not activate: '+JSON.stringify({dofQa,dofUniform}));
-await screenshot('mobile-dof-day-overview');
-await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.FX.dof=d.__qaSavedDof;return d.FX.dof})()`);
+const sharpOverview=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{dof:d.FX.dof,uniform:d.CU.uDof.value,pr:d.renderer.getPixelRatio(),qualityDpr:d.qualityDpr}})()`);
+if(sharpOverview.dof!==0||sharpOverview.uniform!==0||sharpOverview.qualityDpr<1.3)throw new Error('mobile overview is not staying sharp: '+JSON.stringify(sharpOverview));
+await screenshot('mobile-sharp-day-overview');
 const frameVehicle=async(key,localOffset,name)=>{
   await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.transit.vehicles.find(v=>v.key===${JSON.stringify(key)});if(d.__qaVisibility){for(const [o,vis] of d.__qaVisibility)o.visible=vis;}d.__qaVisibility=d.scene.children.map(o=>[o,o.visible]);for(const o of d.scene.children)if(o!==v.root&&!o.isLight)o.visible=false;v.root.visible=true;d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.interaction.lastInput=performance.now();d.interaction.idleStrength=0;d.interaction.targetStrength=0;v.speed=0;v.stopTimer=999;v.root.updateMatrixWorld(true);const box=new d.THREE.Box3().setFromObject(v.root),p=box.getCenter(new d.THREE.Vector3()),q=v.root.getWorldQuaternion(new d.THREE.Quaternion()),off=new d.THREE.Vector3(${localOffset[0]},${localOffset[1]},${localOffset[2]}).applyQuaternion(q);d.camera.position.copy(p).add(off);d.controls.target.copy(p);d.controls.update();return{center:p.toArray(),size:box.getSize(new d.THREE.Vector3()).toArray(),cam:d.camera.position.toArray()}})()`);
   await sleep(180);await screenshot(name);
@@ -229,8 +244,19 @@ const intersection=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.con
 if(intersection.mesh!=='MainSignalizedIntersection'||intersection.posts!==4||intersection.heads.length!==4||intersection.size<38||intersection.signalDrawCalls>8)throw new Error('main intersection surface/signal batching failed: '+JSON.stringify(intersection));
 const expectedHead=[['z',Math.PI],['z',0],['x',-Math.PI/2],['x',Math.PI/2]];
 intersection.heads.forEach((h,i)=>{if(h.axis!==expectedHead[i][0]||Math.abs(Math.atan2(Math.sin(h.yaw-expectedHead[i][1]),Math.cos(h.yaw-expectedHead[i][1])))>.01)throw new Error('traffic signal head faces the wrong approach: '+JSON.stringify(intersection));});
-await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.setTrafficSignalPhase('ns-green');d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(250);await screenshot('main-intersection-day-top');
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.setTrafficSignalPhase('ns-green');d.Tw.kill(d.camera.position);d.Tw.kill(d.controls.target);d.interaction.cameraTransition=false;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(250);
+const closeLod=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.updateViewTrafficLod(true);const roots=d.traffic.set.roots,pc=d.traffic.parkedCount;return{visible:roots.slice(0,pc).filter(r=>r.visible).length,total:pc,parkedShadowCasters:roots.slice(0,pc).filter(r=>{let cast=false;r.traverse(n=>{if(n.isMesh&&n.castShadow)cast=true});return cast}).length}})()`);
+if(closeLod.visible>=closeLod.total*.75||closeLod.parkedShadowCasters!==0)throw new Error('close mobile camera still renders/shadows too many parked cars: '+JSON.stringify(closeLod));
+await screenshot('main-intersection-day-top');
+const overviewLod=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.camera.position.set(238,226,344);d.controls.target.set(-8,0,8);d.controls.update();return true})()`);await sleep(180);
+const overviewVisible=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;d.updateViewTrafficLod(true);const roots=d.traffic.set.roots,pc=d.traffic.parkedCount;return{visible:roots.slice(0,pc).filter(r=>r.visible).length,total:pc}})()`);
+if(overviewVisible.visible<overviewVisible.total*.9)throw new Error('overview parking density was over-culled: '+JSON.stringify(overviewVisible));
+console.log('MOBILE VIEW LOD',JSON.stringify({closeLod,overviewVisible}));
+await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.camera.position.set(m.x+48,58,m.z+52);d.controls.target.set(m.x,0,m.z);d.controls.update();return true})()`);await sleep(120);
 await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,m=d.MAIN_INTERSECTION;d.camera.position.set(m.x+2,7,m.z-49);d.controls.target.set(m.x,3.1,m.z);d.controls.update();return true})()`);await sleep(220);await screenshot('main-intersection-signals');
+const shadowDefer=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,save=d.controls.target.clone();d.shadowTrack.at=0;d.shadowTrack.deferred=false;d.interaction.controlsActive=true;d.controls.target.x+=20;const before=d.shadowTrack.at;d.maybeUpdateShadow(performance.now(),false);const during={at:d.shadowTrack.at,deferred:d.shadowTrack.deferred};d.interaction.controlsActive=false;d.maybeUpdateShadow(performance.now(),true);const settled={at:d.shadowTrack.at,deferred:d.shadowTrack.deferred};d.controls.target.copy(save);d.controls.update();return{before,during,settled}})()`);
+if(!shadowDefer.during.deferred||shadowDefer.during.at!==shadowDefer.before||shadowDefer.settled.deferred||shadowDefer.settled.at<=shadowDefer.before)throw new Error('camera gesture shadow deferral failed: '+JSON.stringify(shadowDefer));
+console.log('CAMERA SHADOW DEFERRAL',JSON.stringify(shadowDefer));
 
 /* Existing non-Drive traffic must obey the signal too. Put one northbound car
  * just before the south stop line, hold its axis red, then release it on green. */
@@ -297,15 +323,17 @@ console.log('MOBILE FULLSCREEN ACTIVATE UI',JSON.stringify(mobileFsUi));
 await screenshot('mobile-drive-activation');
 
 await clickSelector('.cm3d-fullscreen');
-await sleep(500);
+await waitFor(`(()=>!document.fullscreenElement&&document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label')==='Enter fullscreen')()`,2500,60);
 fullscreenState=await ev(`(()=>({host:!!document.fullscreenElement,label:document.querySelector('.cm3d-fullscreen')?.getAttribute('aria-label'),overflow:document.body.style.overflow}))()`);
 if(fullscreenState.host||fullscreenState.label!=='Enter fullscreen'||fullscreenState.overflow!=='')throw new Error(`fullscreen exit button failed: ${JSON.stringify(fullscreenState)}`);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,d=f.__DAVIS_TWIN_DEBUG__,a=f.document.querySelector('#mobileDriveActivate'),j=f.document.querySelector('#driveJoystick');return a.hidden&&j.hidden&&!d.drive.touch.active&&d.drive.touch.pointerId===null})()`,2500,60);
 const mobileAfterExit=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden,touch:f.__DAVIS_TWIN_DEBUG__.drive.touch}})()`);
 if(!mobileAfterExit.activateHidden||!mobileAfterExit.joystickHidden||mobileAfterExit.touch.active||mobileAfterExit.touch.x||mobileAfterExit.touch.y)throw new Error('mobile controls did not clean up on fullscreen exit: '+JSON.stringify(mobileAfterExit));
 console.log('FULLSCREEN EXIT BUTTON',JSON.stringify({...fullscreenState,mobileAfterExit}));
 
 await clickSelector('.cm3d-fullscreen');
-await sleep(400);
+await waitFor(`(()=>!!document.fullscreenElement&&window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.actualFullscreen())()`,2500,60);
+await waitFor(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return !f.document.querySelector('#mobileDriveActivate').hidden&&f.document.querySelector('#driveJoystick').hidden})()`,2500,60);
 const mobileBeforeDrive=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow;return{activateHidden:f.document.querySelector('#mobileDriveActivate').hidden,joystickHidden:f.document.querySelector('#driveJoystick').hidden}})()`);
 if(mobileBeforeDrive.activateHidden||!mobileBeforeDrive.joystickHidden)throw new Error('mobile activation control missing before Drive: '+JSON.stringify(mobileBeforeDrive));
 await clickSelectorInFrame('#mobileDriveActivate');
@@ -313,9 +341,12 @@ await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__D
 const mobileDriveUi=await ev(`(()=>{const f=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow,j=f.document.querySelector('#driveJoystick'),a=f.document.querySelector('#mobileDriveActivate'),r=j.getBoundingClientRect();return{activateHidden:a.hidden,joystickHidden:j.hidden,size:[r.width,r.height],opacity:getComputedStyle(j).opacity}})()`);
 if(!mobileDriveUi.activateHidden||mobileDriveUi.joystickHidden||mobileDriveUi.size[0]<88||mobileDriveUi.size[0]>155)throw new Error('mobile joystick visibility/size failed: '+JSON.stringify(mobileDriveUi));
 console.log('MOBILE DRIVE ACTIVATED',JSON.stringify(mobileDriveUi));
-const mobileDrivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,roots=d.traffic.set.roots,pc=d.traffic.parkedCount,save=d.drive.renderPos.clone();d.refreshVehicleLightBudget();const dynamic=d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit?.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length;d.drive.renderPos.set(d.MAIN_INTERSECTION.x,0,d.MAIN_INTERSECTION.z);d.updateDriveTrafficLod();const atIntersection={parked:roots.slice(0,pc).filter(r=>r.visible).length,moving:roots.slice(pc).filter(r=>r.visible).length};d.drive.renderPos.copy(save);d.updateDriveTrafficLod();return{parked:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length,dynamic,atIntersection,lod:{parked:Math.sqrt(d.drivePerf.parkedLodSq),moving:Math.sqrt(d.drivePerf.movingLodSq),transit:Math.sqrt(d.drivePerf.transitLodSq)}}})()`);
-if(mobileDrivePerf.frozen!==mobileDrivePerf.parked||mobileDrivePerf.dynamic>1||mobileDrivePerf.atIntersection.parked>=mobileDrivePerf.parked||mobileDrivePerf.lod.parked>170||mobileDrivePerf.lod.moving<250)throw new Error('mobile Drive performance budget regressed: '+JSON.stringify(mobileDrivePerf));
+const mobileDrivePerf=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,roots=d.traffic.set.roots,pc=d.traffic.parkedCount,save=d.drive.renderPos.clone();d.refreshVehicleLightBudget();d.updateMobileNpcLightPool(d.ST.night,1/60,performance.now());const dynamic=d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit?.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length;d.drive.renderPos.set(d.MAIN_INTERSECTION.x,0,d.MAIN_INTERSECTION.z);d.updateDriveTrafficLod();const atIntersection={parked:roots.slice(0,pc).filter(r=>r.visible).length,moving:roots.slice(pc).filter(r=>r.visible).length};d.drive.renderPos.copy(save);d.updateDriveTrafficLod();return{parked:pc,frozen:roots.slice(0,pc).filter(r=>!r.matrixAutoUpdate).length,dynamic,atIntersection,pr:d.renderer.getPixelRatio(),maxPr:d.drivePerf.maxPr,pool:{initialized:d.mobileNpcLightPool.initialized,lights:d.mobileNpcLightPool.lights.length,switches:d.mobileNpcLightPool.switches,target:!!d.mobileNpcLightPool.target},lod:{parked:Math.sqrt(d.drivePerf.parkedLodSq),moving:Math.sqrt(d.drivePerf.movingLodSq),transit:Math.sqrt(d.drivePerf.transitLodSq)}}})()`);
+if(mobileDrivePerf.frozen!==mobileDrivePerf.parked||mobileDrivePerf.dynamic!==0||mobileDrivePerf.atIntersection.parked>=mobileDrivePerf.parked||mobileDrivePerf.lod.parked>170||mobileDrivePerf.lod.moving<250||mobileDrivePerf.maxPr<1.29||!mobileDrivePerf.pool.initialized||mobileDrivePerf.pool.lights!==4)throw new Error('mobile Drive performance/sharpness budget regressed: '+JSON.stringify(mobileDrivePerf));
 console.log('MOBILE DRIVE PERFORMANCE BUDGET',JSON.stringify(mobileDrivePerf));
+const poolHandoff=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,pool=d.mobileNpcLightPool,save=d.camera.position.clone(),beforeIds=pool.lights.map(l=>l.uuid),beforeSwitches=pool.switches,current=pool.target,alt=(d.traffic.cars.map(c=>c.lightRig).find(r=>r&&r!==current&&r.root.visible)||d.transit.vehicles.map(v=>v.lightRig).find(r=>r&&r!==current));if(!alt)return{ok:false};const p=alt.root.getWorldPosition(new d.THREE.Vector3());d.camera.position.copy(p);pool.lastSwitch=performance.now()-1000;d.refreshVehicleLightBudget();d.updateMobileNpcLightPool(Math.max(.5,d.ST.night),1/60,performance.now());const out={ok:true,sameLights:beforeIds.every((id,i)=>pool.lights[i].uuid===id),switchDelta:pool.switches-beforeSwitches,rigDynamic:d.traffic.cars.filter(c=>c.lightRig?.dynamicEnabled).length+(d.transit?.vehicles||[]).filter(v=>v.lightRig?.dynamicEnabled).length,visiblePool:pool.lights.filter(l=>l.visible).length};d.camera.position.copy(save);return out})()`);
+if(!poolHandoff.ok||!poolHandoff.sameLights||poolHandoff.switchDelta>1||poolHandoff.rigDynamic!==0||poolHandoff.visiblePool!==4)throw new Error('pooled nearest-vehicle light handoff regressed: '+JSON.stringify(poolHandoff));
+console.log('POOLED NPC LIGHT HANDOFF',JSON.stringify(poolHandoff));
 
 const touchMove=await joystickTouch(.72,.92,520);
 const touchState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,i=d.readDriveInput(),v=d.drive.body.linvel();return{touch:{...d.drive.touch},input:i,speed:Math.hypot(v.x,v.z),steer:d.drive.steer,tune:d.DRIVE_TUNE}})()`);
@@ -415,11 +446,19 @@ console.log("DRIVE WHEEL LAYOUT",JSON.stringify(wheelLayout));
 if(wheelMapping.length!==3||!wheelMapping.some(w=>/FrontLeftWheel/i.test(w.node))||!wheelMapping.some(w=>/FrontRightWheel/i.test(w.node))||!wheelMapping.some(w=>/BackWheels/i.test(w.node)))throw new Error('native wheel groups were not mapped: '+JSON.stringify(wheelMapping));
 const wheelBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
 const wheelContinuousBefore=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>pivot.rotation.x)`);
-await key('KeyW',false); await key('KeyA',false); await sleep(500);
-const wheelAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))`);
+await key('KeyW',false); await key('KeyA',false);
+/* Wait on the actual Drive state rather than a fixed wall-clock delay. On a
+ * busy software-rendered CI frame, 500 ms can contain very few animation
+ * frames even though input handling and wheel steering are correct. */
+await waitFor(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__,v=d.drive.body?.linvel?.();return Math.abs(d.drive.steer)>.08&&v&&Math.hypot(v.x,v.z)>.5})()`,2400,50);
+const wheelAfterState=await ev(`(()=>{const d=window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__;return{steer:d.drive.steer,wheels:d.drive.objWheels.map(({pivot})=>({x:pivot.rotation.x,y:pivot.rotation.y}))}})()`);
+const wheelAfter=wheelAfterState.wheels;
+await sleep(220);
 const wheelContinuousAfter=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.map(({pivot})=>pivot.rotation.x)`);
 await key('KeyA'); await key('KeyW');
-if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.max(...wheelContinuousAfter.map((x,i)=>Math.abs(x-wheelContinuousBefore[i])))<.15||Math.abs(wheelAfter[0].y-wheelBefore[0].y)<.01||Math.abs(wheelAfter[1].y-wheelBefore[1].y)<.01)throw new Error(`native wheel visuals did not roll continuously/steer: ${JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelContinuousBefore,wheelContinuousAfter})}`);
+const steerDelta0=wheelAfter[0].y-wheelBefore[0].y,steerDelta1=wheelAfter[1].y-wheelBefore[1].y;
+const steerVisual=Math.min(Math.abs(steerDelta0),Math.abs(steerDelta1)),frontAgreement=Math.abs(steerDelta0-steerDelta1),rearSteer=Math.abs(wheelAfter[2].y-wheelBefore[2].y);
+if(Math.max(...wheelAfter.map((w,i)=>Math.abs(w.x-wheelBefore[i].x)))<.01||Math.max(...wheelContinuousAfter.map((x,i)=>Math.abs(x-wheelContinuousBefore[i])))<.15||Math.abs(wheelAfterState.steer)<.08||steerVisual<.05||frontAgreement>.03||rearSteer>.03)throw new Error(`native wheel visuals did not roll continuously/follow Drive steering: ${JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelContinuousBefore,wheelContinuousAfter,driveSteer:wheelAfterState.steer,steerVisual,frontAgreement,rearSteer})}`);
 const wheelMaterials=await ev(`window.__SC_CAMPUS_MAP_3D__.frame.contentWindow.__DAVIS_TWIN_DEBUG__.drive.objWheels.flatMap(({node})=>{const out=[];node.traverse(o=>{if(o.isMesh){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m?.color&&out.push(m.color.getHexString()))}});return out})`);
 if(!wheelMaterials.some(c=>c==='111820'||c==='9aa5b1'))throw new Error(`native wheel materials were not made visible: ${JSON.stringify(wheelMaterials)}`);
 console.log('NATIVE WHEELS',JSON.stringify({wheelMapping,wheelBefore,wheelAfter,wheelMaterials}));
