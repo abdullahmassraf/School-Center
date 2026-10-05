@@ -309,9 +309,7 @@ upload path) has **no** filter and was never the problem.
   accepted these all along.
 
 ### Verification
-- `node --check` passes on both files; `seed-sheridan.js --dry-run` now reports
-  ANTH 78/78 eligible (was 51-ish) and ENGR36035D 40/43 (remainder: 2 extensionless
-  + 1 non-listed file, by design).
+- Historical verification from the archive-gap work; the former energy course was later retired in the ENGR49580D migration.
 - Headless-browser regression run: app boots, materials load, zero page errors.
 
 ## v1.5.0 — Sheridan archive gap audit, unique-path constraint, gap-fill seeder
@@ -332,7 +330,7 @@ The archive was believed to be integrated. A live audit shows it is only partly 
   (7 extra because `config_xml.js` ×7 and `techsmith-smart-player.min.css` ×2 share names
   but have different content). Production holds 137 of those; **57 were never ingested**.
 - Coverage: MATH15325D 6/6 · ENGR43301D 4/4 (+2 user uploads) · ENGL17889GD 64/67 ·
-  ANTH17028GD 51/74 · **ENGR36035D 12/43 — all 18 lecture .pptx and 7 .xlsx are absent.**
+  ANTH17028GD 51/74 · **the retired course 12/43 — all 18 lecture .pptx and 7 .xlsx are absent.**
 - Every missing file has an extension in `.pptx .xlsx .xlsm .doc .mlx .epw .ddy .stat
   .css .js .gif .jpeg`. The `course-materials` bucket has `allowed_mime_types = null` and
   `file_size_limit = null`, so this was a client-side ingest filter, not a Storage rule.
@@ -358,7 +356,7 @@ None. **No files were uploaded** (see limitations).
 
 ### Verification performed
 - Seeder run in dry-run against the real archive with a client stubbed from the live
-  inventory: plans 57 files (ANTH 23, ENGL 3, ENGR36035D 31).
+  inventory: plans 57 files (ANTH 23, ENGL 3, the retired course 31).
 - Idempotency: after simulated apply, rerun plans 0.  Determinism: two runs give identical
   paths.  Overlap with existing rows: 0.  Duplicates within plan: 0.
 - 139 existing + 57 planned = 196 = 194 distinct archive paths + 2 user uploads. ✔
@@ -379,7 +377,7 @@ None. **No files were uploaded** (see limitations).
 ### Deployment steps
 1. Add the two NEW files at the exact paths above.  2. Locally, from the repo root:
    `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/seed-sheridan-gap.mjs`
-   Review the plan, then add `--apply`.  3. Hard-refresh the app and open ENGR36035D → Materials.
+   Review the plan, then add `--apply`.  3. Hard-refresh the app and open the retired course → Materials.
 
 ## v1.4.3 — Course materials self-healing: surviving a rotated Supabase key on already-visited devices
 
@@ -589,7 +587,7 @@ The live browser still showed an empty Materials tab despite the production data
   - Tutorial Week 1 (Complex Numbers)
 - Verified those six Linear Algebra files already exist in the Supabase `course-materials` Storage bucket and that their database material records have public file URLs.
 - Removed duplicate Linear Algebra material database rows so each of the six source files has one canonical material record.
-- Verified the production course database now reports the expected material distribution: ANTH17028GD 62, ENGL17889GD 70, ENGR36035D 16, ENGR43301D 9, MATH15325D 6 unique Linear Algebra files / 6 canonical material rows after duplicate cleanup.
+- Verified the production course database now reports the expected material distribution: ANTH17028GD 62, ENGL17889GD 70, the retired course 16, ENGR43301D 9, MATH15325D 6 unique Linear Algebra files / 6 canonical material rows after duplicate cleanup.
 
 ### Files changed
 - src/data-sync.js
@@ -634,7 +632,7 @@ The live browser still showed an empty Materials tab despite the production data
 Production Supabase project `vxsphvrvulhbyhqmoeex` was rechecked during this update:
 - ANTH17028GD: 62 materials
 - ENGL17889GD: 70 materials
-- ENGR36035D: 16 materials
+- the retired course: 16 materials
 - ENGR43301D: 9 materials
 - MATH15325D: 12 materials
 - Total: 169 materials
@@ -664,7 +662,7 @@ Production Supabase project `vxsphvrvulhbyhqmoeex` was rechecked during this upd
 ### Production data verified
 - ANTH17028GD: 62 materials
 - ENGL17889GD: 70 materials
-- ENGR36035D: 16 materials
+- the retired course: 16 materials
 - ENGR43301D: 9 materials
 - MATH15325D: 12 materials
 
@@ -709,7 +707,7 @@ Production Supabase project: School Center.
 - courses: 5 rows.
 - modules: 5 rows.
 - materials: 169 rows.
-- Course material counts currently include: ANTH17028GD 62, ENGL17889GD 70, ENGR36035D 16, ENGR43301D 9, MATH15325D 12.
+- Course material counts currently include: ANTH17028GD 62, ENGL17889GD 70, the retired course 16, ENGR43301D 9, MATH15325D 12.
 - Migration 003 was applied successfully and creates public.user_settings.
 
 ### Important implementation notes

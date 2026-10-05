@@ -117,23 +117,18 @@ function decodeB64Utf8(b64){
    STATIC COURSE METADATA & AUTHORITATIVE FALL 2026 SCHEDULE
    ========================================================================= */
 export const FALL_2026_SCHEDULE = [
-  // MONDAY
-  { day: 1, dayName: 'Mon', start: '11:00 AM', end: '12:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'C328', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
-  { day: 1, dayName: 'Mon', start: '1:00 PM', end: '3:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lab', room: 'J301', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
-  { day: 1, dayName: 'Mon', start: '3:00 PM', end: '4:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'J301', instructor: 'TBA', accent: '#8B7CF6' },
-  
-  // TUESDAY
-  { day: 2, dayName: 'Tue', start: '9:00 AM', end: '12:00 PM', courseId: 'engr36035d', courseCode: 'ENGR 36035D', courseName: 'Intro to Energy Systems', type: 'Lecture', room: 'C271', instructor: 'Amin Ghobeity', accent: '#34D1BF' },
-  
-  // WEDNESDAY
-  { day: 3, dayName: 'Wed', start: '10:00 AM', end: '12:00 PM', courseId: 'math15325d', courseCode: 'MATH 15325D', courseName: 'Linear Algebra', type: 'Lecture', room: 'J301', instructor: 'Cyrus Hosseini', accent: '#8B7CF6' },
-  
-  // THURSDAY
-  { day: 4, dayName: 'Thu', start: '3:00 PM', end: '5:00 PM', courseId: 'engr36035d', courseCode: 'ENGR 36035D', courseName: 'Intro to Energy Systems', type: 'Lab', room: 'A305', instructor: 'Amin Ghobeity', accent: '#34D1BF' },
-  
-  // FRIDAY
-  { day: 5, dayName: 'Fri', start: '1:00 PM', end: '4:00 PM', courseId: 'engr43301d', courseCode: 'ENGR 43301D', courseName: 'Economics & Entrepreneurship', type: 'Lecture', room: 'Online (VTL)', instructor: 'Manju Sunil Varghese', accent: '#F5A623' }
+ {day:1,dayName:'Mon',start:'11:00 AM',end:'12:00 PM',courseId:'math15325d',courseCode:'MATH 15325D',courseName:'Linear Algebra',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet',accent:'#8B7CF6'},
+ {day:1,dayName:'Mon',start:'1:00 PM',end:'3:00 PM',courseId:'math15325d',courseCode:'MATH 15325D',courseName:'Linear Algebra',type:'Lab',room:'DAV-A302',instructor:'Dr. Harpreet',accent:'#8B7CF6'},
+ {day:1,dayName:'Mon',start:'3:00 PM',end:'4:00 PM',courseId:'math15325d',courseCode:'MATH 15325D',courseName:'Linear Algebra',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet',accent:'#8B7CF6'},
+ {day:3,dayName:'Wed',start:'10:00 AM',end:'12:00 PM',courseId:'math15325d',courseCode:'MATH 15325D',courseName:'Linear Algebra',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet',accent:'#8B7CF6'},
+ {day:4,dayName:'Thu',start:'1:00 PM',end:'4:00 PM',courseId:'engr49580d',courseCode:'ENGR 49580D',courseName:'Technology, Society and Sustainability',type:'Lecture',room:'DAV-M6',instructor:'Jon Berge, Ph.D., P.Eng.',accent:'#34D1BF'},
+ {day:5,dayName:'Fri',start:'1:00 PM',end:'4:00 PM',courseId:'engr43301d',courseCode:'ENGR 43301D',courseName:'Economics & Entrepreneurship',type:'Lecture',room:'Online (VTL)',instructor:'Manju Sunil Varghese',accent:'#F5A623'}
 ];
+export const TSS_COURSE_DESCRIPTION = 'Students study the impact of science and technological developments on society and analyze how technological changes affect society, the environment, population, and health. They assess the impact, benefits, consequences, and implications of the inter-relationship between technology, society and sustainability. Students investigate examples of technological failures and their impacts.';
+export const TSS_MODULES = ['Thinking about Sustainability','Energy (historical and contemporary perspectives)','Infrastructure (contemporary perspectives)','Food (historical and contemporary perspectives)','Contemporary and Emerging Technologies','Failures of Technology'];
+export const TSS_EVALUATION = [['Assignments (4 × 5%)','20%'],['Project Proposal / Progress Report','5%'],['Project Presentation','15%'],['Presentation Handout','10%'],['Project Essay','30%'],['Final Exam','20%']];
+export const TSS_TIMELINE = [['1','Sep 10','World-views, Preconceptions, Biases and How to Change your Mind','In-class activity'],['2','Sep 17','The Life Cycle Perspective and the Role of Public Policy; Pollution and Climate Change','In-class activity'],['3','Sep 24','Nuclear Energy','In-class activity'],['4','Oct 1','Infrastructure and Environmental Assessment','In-class activity'],['5','Oct 8','Social Impacts of Infrastructure','In-class activity'],['6','Oct 15','Biomass, Fossil Fuels','In-class activity'],['7','Oct 22','Fossil Fuels','In-class activity'],['8','Nov 5','Food and Agriculture','In-class activity'],['9','Nov 12','Technology and Healthcare','In-class activity'],['10','Nov 19','Information Technology, Information Security, Social Media and Surveillance','In-class activity'],['11','Nov 26','Failures of Technology, Whistleblowing, Disclosure, and Unintended Consequences','In-class activity'],['12','Dec 3','Individual Essay Assignment Peer Teach','Presentation'],['13','Dec 10','Individual Essay Assignment Peer Teach','Presentation'],['14','TBA','Final Test','Final exam']];
+function coursePathId(){const p=window.location.pathname.match(/\/(engr49580d)\/?$/i)?.[1];const q=new URLSearchParams(window.location.search).get('course');return (p||q||'').toLowerCase()==='engr49580d'?'engr49580d':null;}
 
 export function getClassesForDate(dateInput) {
   let d;
@@ -199,14 +194,9 @@ function renderDeadlineAgendaItems(deadlines) {
 
 const STATIC_COURSES = [
   {
-    id:'math15325d', code:'MATH 15325D', name:'Linear Algebra', instructor:'Cyrus Hosseini, PhD PEng',
+    id:'math15325d', code:'MATH 15325D', name:'Linear Algebra', instructor:'Dr. Harpreet',
     hasMaterial:true, accent:'#8B7CF6',
-    schedule:[
-      {day:'Mon', start:'11:00 AM', end:'12:00 PM', type:'Lecture', room:'C328', instructor:'Cyrus Hosseini'},
-      {day:'Mon', start:'1:00 PM', end:'3:00 PM', type:'Lab', room:'J301', instructor:'Cyrus Hosseini'},
-      {day:'Mon', start:'3:00 PM', end:'4:00 PM', type:'Lecture', room:'J301', instructor:'TBA'},
-      {day:'Wed', start:'10:00 AM', end:'12:00 PM', type:'Lecture', room:'J301', instructor:'Cyrus Hosseini'},
-    ],
+    schedule:[{day:'Mon',start:'11:00 AM',end:'12:00 PM',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet'},{day:'Mon',start:'1:00 PM',end:'3:00 PM',type:'Lab',room:'DAV-A302',instructor:'Dr. Harpreet'},{day:'Mon',start:'3:00 PM',end:'4:00 PM',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet'},{day:'Wed',start:'10:00 AM',end:'12:00 PM',type:'Lecture',room:'DAV-C308',instructor:'Dr. Harpreet'}],
     evaluation:[
       ['Assignments (3 @ 5% each)','15%'],
       ['Quizzes (2 @ 10% each)','20%'],
@@ -252,37 +242,7 @@ const STATIC_COURSES = [
       }
     ]
   },
-  {
-    id:'engr36035d', code:'ENGR 36035D', name:'Intro to Energy Systems', instructor:'Amin Ghobeity',
-    hasMaterial:true, accent:'#34D1BF',
-    schedule:[
-      {day:'Tue', start:'9:00 AM', end:'12:00 PM', type:'Lecture', room:'C271', instructor:'Amin Ghobeity'},
-      {day:'Thu', start:'3:00 PM', end:'5:00 PM', type:'Lab', room:'A305', instructor:'Amin Ghobeity'},
-    ],
-    evaluation:[
-      ['Quizzes (4 @ 5%)','20%'],
-      ['Assignments (3 @ 5%)','15%'],
-      ['Midterm Exam','25%'],
-      ['Laboratory Reports','15%'],
-      ['Final Exam','25%'],
-    ],
-    textbook:'Energy Systems Engineering: Evaluation and Implementation, Vanek & Albright, 3rd ed.',
-    syllabus:[
-      ['1','Sep 8','Energy Fundamentals — First & Second laws of thermodynamics, energy units & conversions','Review Quiz'],
-      ['2','Sep 15','Fossil Fuels — Combustion chemistry, coal, oil, natural gas, emissions modeling','Quiz 1 (5%)'],
-      ['3','Sep 22','Rankine & Brayton Cycles — Steam and gas turbine power generation cycles','Assignment 1 (5%)']
-    ],
-    lectures:[
-      {
-        title:'Module 1 — Energy Fundamentals & Thermodynamics',
-        concepts:[
-          ['First Law of Thermodynamics','Conservation of energy: $\\Delta U = Q - W$.'],
-          ['Second Law of Thermodynamics','Entropy of an isolated system always increases. Carnot efficiency $\\eta_C = 1 - T_C / T_H$.']
-        ]
-      }
-    ],
-    worksheets:[]
-  },
+  {id:'engr49580d',code:'ENGR 49580D',name:'Technology, Society and Sustainability',instructor:'Jon Berge, Ph.D., P.Eng.',hasMaterial:true,accent:'#34D1BF',credits:3.0,hours:42,description:TSS_COURSE_DESCRIPTION,schedule:[{day:'Thu',start:'1:00 PM',end:'4:00 PM',type:'Lecture',room:'DAV-M6',instructor:'Jon Berge, Ph.D., P.Eng.'}],evaluation:TSS_EVALUATION,syllabus:TSS_TIMELINE,modules:TSS_MODULES.map((title,index)=>({title,order:index+1})),lectures:[],worksheets:[]},
   {
     id:'engr43301d', code:'ENGR 43301D', name:'Economics & Entrepreneurship', instructor:'Manju Sunil Varghese',
     hasMaterial:true, accent:'#F5A623',
@@ -555,8 +515,8 @@ async function stopThemeCloudSync() {
    APPLICATION STATE & ACTIVE INSTANCES
    ========================================================================= */
 let state = {
-  view: 'today', // today | calendar | courses | ai | settings
-  courseId: null, // when navigating inside a specific course
+  view: coursePathId() ? 'courses' : 'today', // today | calendar | courses | ai | settings
+  courseId: coursePathId(), // when navigating inside a specific course
   courseTab: 'overview', // overview | materials | assignments | notes
   selectedCalendarDay: new Date().toDateString(),
   searchQuery: '',
@@ -1425,8 +1385,12 @@ function renderCourseDetailView(c) {
         <div class="surface-content" style="padding:16px;">
           <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Instructor & Classroom</div>
           <div style="font-size:1.05rem;font-weight:600;margin-top:2px;">${c.instructor || 'Instructor'}</div>
-          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span>• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'C328'}</span>${renderShowLocationButton(s.room, 'padding:2px 8px;font-size:0.72rem;min-height:0;')}</div>`).join('')}
+          ${(c.schedule || []).map(s => `<div style="font-size:0.85rem;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span>• ${s.day} ${s.start}–${s.end} (${s.type}) · Room ${s.room || 'TBA'}</span>${renderShowLocationButton(s.room, 'padding:2px 8px;font-size:0.72rem;min-height:0;')}</div>`).join('')}
         </div>
+
+        ${c.description ? `<div class="surface-content" style="padding:16px;"><div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:6px;">Course Description</div><p style="margin:0;line-height:1.6;">${escapeHtml(c.description)}</p><div style="font-size:0.82rem;color:var(--muted);margin-top:8px;">${c.credits} credits · ${c.hours} instructional hours</div></div>` : ''}
+        ${c.modules?.length ? `<div class="surface-content" style="padding:16px;"><div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:8px;">Course Modules</div><ol style="margin:0;padding-left:22px;line-height:1.8;">${c.modules.map(module => `<li>${escapeHtml(module.title)}</li>`).join('')}</ol></div>` : ''}
+        ${c.syllabus?.length ? `<div class="surface-content" style="padding:16px;"><div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:8px;">Course Timeline</div>${c.syllabus.map(([week, date, topics]) => `<div style="padding:8px 0;border-bottom:1px solid var(--hairline);"><b>Week ${escapeHtml(week)} · ${escapeHtml(date)}</b><div style="font-size:0.85rem;color:var(--muted);margin-top:3px;">${escapeHtml(topics)}</div></div>`).join('')}</div>` : ''}
 
         ${c.evaluation ? `
           <div class="surface-content" style="padding:16px;">
@@ -1645,7 +1609,7 @@ function renderCourseDetailView(c) {
       </div>
       <div class="course-header">
         <h2 class="headfont">${c.code} — ${c.name}</h2>
-        <div class="meta">${c.instructor || 'Instructor'}</div>
+        <div class="meta">${c.instructor || 'Instructor'}${c.credits ? ` · ${c.credits} credits · ${c.hours} hours` : ''}</div>
       </div>
       <div class="course-tabs">
         ${tabs.map(t => `
@@ -3502,7 +3466,7 @@ async function toggleAiLiveTranscription() {
     fetchEphemeralToken: async () => {
       try { return await getEphemeralLiveToken(); } catch (error) { console.warn('Secure live token unavailable:', error); return null; }
     },
-    customVocabulary: ['School Center','Linear Algebra','MATH 15325D','ENGR 36035D','ENGR 43301D','Energy Systems','Economics & Entrepreneurship','Gemini','Supabase'],
+    customVocabulary: ['School Center','Linear Algebra','MATH 15325D','ENGR 49580D','Technology Society Sustainability','ENGR 43301D','Economics & Entrepreneurship','Gemini','Supabase'],
     onStatus: status => {
       if (status === 'connecting' || status === 'listening') state.aiTranscribing = true;
       if (status === 'stopped' || status === 'closed') state.aiTranscribing = false;

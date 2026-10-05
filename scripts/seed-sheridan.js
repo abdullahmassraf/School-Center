@@ -29,14 +29,17 @@ const COURSE_MAPPINGS = [
     folder: 'Linear Algebra MATH15325D',
     code: 'MATH15325D',
     name: 'Linear Algebra',
-    instructor: 'Cyrus Hosseini, PhD PEng',
+    instructor: 'Dr. Harpreet',
     color: '#8B7CF6'
   },
   {
-    folder: 'Introduction to Energy Systems ENGR36035D',
-    code: 'ENGR36035D',
-    name: 'Introduction to Energy Systems',
-    instructor: 'Dr. Amin',
+    folder: 'Technology, Society and Sustainability ENGR49580D',
+    code: 'ENGR49580D',
+    name: 'Technology, Society and Sustainability',
+    instructor: 'Jon Berge, Ph.D., P.Eng.',
+    schedule: 'Thu 1:00 PM–4:00 PM (Lecture)',
+    room: 'DAV-M6',
+    maxFileSizeBytes: 50 * 1024 * 1024,
     color: '#34D1BF'
   },
   {
@@ -157,7 +160,7 @@ async function runSeed() {
         '.css', '.js', '.mjs', '.json',
         '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'
       ].includes(ext);
-      const isUnderLimit = stats.size <= MAX_FILE_SIZE_BYTES;
+      const isUnderLimit = stats.size <= (mapping.maxFileSizeBytes || MAX_FILE_SIZE_BYTES);
       return isSupportedType && isUnderLimit;
     });
 
@@ -184,6 +187,8 @@ async function runSeed() {
           code: mapping.code,
           name: mapping.name,
           instructor: mapping.instructor,
+          schedule: mapping.schedule || null,
+          room: mapping.room || null,
           color: mapping.color
         },
         { onConflict: 'code' }

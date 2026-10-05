@@ -17,17 +17,12 @@ const COURSE_SIGNATURES = [
     ]
   },
   {
-    id: 'engr36035d',
-    code: 'ENGR36035D',
-    name: 'Introduction to Energy Systems',
+    id: 'engr49580d',
+    code: 'ENGR49580D',
+    name: 'Technology, Society and Sustainability',
     accent: '#34D1BF',
-    codes: ['ENGR36035D', 'ENGR36035', 'ENGR 36035'],
-    keywords: [
-      'energy systems', 'thermo', 'thermodynamics', 'diesel engine',
-      'heat transfer', 'rankine', 'brayton', 'efficiency', 'combustion',
-      'turbine', 'power plant', 'refrigeration', 'entropy', 'enthalpy',
-      'atomic mass', 'isotopes', 'dr. amin', 'energy'
-    ]
+    codes: ['ENGR49580D', 'ENGR49580', 'ENGR 49580'],
+    keywords: ['technology, society and sustainability', 'sustainability', 'worldviews', 'life cycle perspective', 'public policy', 'social impacts of infrastructure', 'infrastructure and environmental assessment', 'food and agriculture', 'technology and healthcare', 'information security', 'failures of technology', 'whistleblowing', 'jon berge']
   },
   {
     id: 'engr43301d',

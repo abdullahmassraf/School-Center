@@ -473,13 +473,13 @@ function icon(name, cls){ return `<span class="icon-inline ${cls||''}">${ICONS[n
 
 const COURSES = [
   {
-    id:'math15325d', code:'MATH15325D', name:'Linear Algebra', instructor:'Cyrus Hosseini, PhD PEng',
+    id:'math15325d', code:'MATH15325D', name:'Linear Algebra', instructor:'Dr. Harpreet',
     hasMaterial:true, accent:'#8B7CF6', hasPracticeStudio:true,
     schedule:[
-      {day:'Mon', start:'11:00 AM', end:'12:00 PM', type:'Lecture', room:'C328'},
-      {day:'Mon', start:'1:00 PM', end:'3:00 PM', type:'Lab', room:'J301'},
-      {day:'Mon', start:'3:00 PM', end:'4:00 PM', type:'Lecture', room:'J301'},
-      {day:'Wed', start:'10:00 AM', end:'12:00 PM', type:'Lecture', room:'J301'},
+      {day:'Mon', start:'11:00 AM', end:'12:00 PM', type:'Lecture', room:'DAV-C308'},
+      {day:'Mon', start:'1:00 PM', end:'3:00 PM', type:'Lab', room:'DAV-A302'},
+      {day:'Mon', start:'3:00 PM', end:'4:00 PM', type:'Lecture', room:'DAV-C308'},
+      {day:'Wed', start:'10:00 AM', end:'12:00 PM', type:'Lecture', room:'DAV-C308'},
     ],
     evaluation:[
       ['4 Quizzes (5% each)','20%'],['3 Assignments (4%,3%,3%)','10%'],
@@ -563,100 +563,15 @@ const COURSES = [
       }
     ]
   },
-  {id:'engr36035d', code:'ENGR36035D', name:'Intro to Energy Systems', instructor:'Amin Ghobeity', hasMaterial:true, accent:'#34D1BF',
-    schedule:[
-      {day:'Tue', start:'9:00 AM', end:'12:00 PM', type:'Lecture', room:'C271'},
-      {day:'Thu', start:'3:00 PM', end:'5:00 PM', type:'Lab', room:'A305'},
-    ],
-    evaluation:[
-      ['Laboratory Reports (3 × 5%)','15%'],['Assignments (3 × 5%)','15%'],
-      ['Midterm Exam','25%'],['BUS Project (report + presentation)','15%'],['Final Exam','30%']
-    ],
-    textbook:'Energy Systems Engineering: Evaluation and Implementation — Vanek, Albright, Angenent, McGraw-Hill, 3rd ed.',
-    syllabus:[
-      ['1','—','Introduction to Energy Issues — classification/terminology, conventional sources, conversion efficiencies, worldwide supply/demand history, environmental impact, CO2 relationships, carbon cycle',''],
-      ['2','—','Fuel in Energy Systems — origins, classification, physical/chemical properties, non-conventional fuels','Assignment 1 (5%) · Lab Report 1 (5%)'],
-      ['3','—','Combustion Cycles of Power Plants — steam & gas turbine plants, Rankine/reheat/regenerative cycles, Brayton cycle, combined cycles, cogeneration',''],
-      ['—','—','Midterm Exam','25%'],
-      ['4','—','Climate Change Issues — greenhouse effect/gases, carbon cycle, modeling anthropogenic climate change','Assignment 2 (5%) · Lab Report 2 (5%)'],
-      ['5','—','Alternative Energy Sources — solar PV, solar-thermal, wind, geothermal, nuclear, biomass, fuel cells, ocean energy','Assignment 3 (5%) · Lab Report 3 (5%)'],
-      ['6','—','Modeling & Simulation of Energy Systems — integrated system modeling, life-cycle analysis, ROI, Monte-Carlo simulation','BUS Project (15%)'],
-      ['—','—','Final Exam','30%'],
-    ],
-    lectures:[
-      {
-        title:'Module 1, Part 1 — Introduction to Energy and Power',
-        concepts:[
-          ['Energy forms','Kinetic, potential, internal/thermal energy, and work (work = force × distance; work and energy share units).'],
-          ['Units of work','SI: Joule (1 J = 1 N·m). US: lbf·ft. 1 J ≈ 0.74 lbf·ft.'],
-          ['Energy vs power','Power is energy expended or work done per unit time.'],
-          ['Units of thermal energy','1 Btu = 1,055 J = 252 calories; 1 calorie = 4.186 J. Btu raises 1 lbm of water by 1°F; calorie raises 1 g of water by 1°C.'],
-          ['Heating value of a fuel','Energy released burning a unit mass/volume of fuel. LHV: water leaves as vapor. HHV: water fully condensed, recovering heat of vaporization.'],
-          ['Common fuel energy content','Coal ≈10,000 Btu/lb, diesel/fuel oil ≈139,000 Btu/gal, gasoline ≈124,000 Btu/gal, natural gas ≈1,000 Btu/ft³, wood ≈20,000,000 Btu/cord.'],
-          ['Efficiency (AFUE)','Annual Fuel Utilization Efficiency — combustion efficiency plus other losses (heat loss, start-up/cooldown) for space heating systems.'],
-          ['Power plant efficiency chain','Generator efficiency = electrical output / mechanical input. Thermal efficiency = net electrical output / fuel energy input.'],
-          ['EER / SEER','Cooling efficiency ratios in Btu/Wh. Annual power use ≈ (cooling capacity in Btu/h) ÷ SEER.'],
-          ['Refrigeration ton (RT)','1 RT = 12,000 Btu/hr — standard HVAC capacity unit.'],
-        ]
-      },
-      {
-        title:'Module 1, Part 1 — Energy Issues',
-        concepts:[
-          ['Issues framework','Energy consumption, consumption per capita, vs. GDP, vs. HDI, climate change, and paths forward.'],
-          ['GDP vs energy use','Growth in GDP has historically tracked growth in energy demand; efficiency and structural economic shifts can weaken that link (falling energy intensity).'],
-          ['Human Development Index (HDI)','Average of life expectancy index, GDP index, and education index (itself from adult literacy + gross enrollment); scaled 0 (worst) to 1 (best) — a broader life-quality measure than GDP alone.'],
-          ['Greenhouse effect','Atmosphere admits visible light but traps reradiated heat, like a greenhouse — key GHGs are CO2 (mainly fossil fuel combustion), methane, nitrous oxide, and CFCs.'],
-          ['Climate change drivers','CO2 concentration rising due to human fossil fuel combustion; roughly a 4 Gt/year carbon imbalance; effects include receding ice, extreme heat, ecosystem range shifts, coral bleaching.'],
-          ['Path to 2100','A scenario targeting ~100 million Btu/person for 9 billion people, shifting away from the ~85% fossil mix of 2000 via nuclear and carbon capture.'],
-        ]
-      },
-      {
-        title:'Module 1, Part 2 — Tools for Analysis: Growth Models',
-        concepts:[
-          ['Exponential growth model','Good for short-term prediction of early adoption of a new energy technology.'],
-          ['Logistic growth model','Growth rate slows as adoption approaches a ceiling F (max market penetration); shaped by fitted parameters c₁, c₂ against historical penetration data.'],
-          ['Worked example (EV adoption)','With fixed 1M vehicles/year production and F=100%, fitting c₁=−5.29, c₂=1.40 to 2013–2014 EV counts predicts 252,000 EVs (25.2% penetration) by 2016.'],
-        ]
-      },
-      {
-        title:'Module 1, Part 2 — Tools for Analysis: Economics',
-        concepts:[
-          ['Key economic parameters','Initial capital cost, interest rate, net present value (NPV), capital recovery factor (CRF), annuity, project term, annual capital cost (ACC).'],
-          ['CRF viability rule','EPRI guideline: a power plant is generally economically viable if CRF < 12%.'],
-          ['Economic equivalence','Cash flows depend on interest rate, amount, and timing — moved to a common point in time (usually present value) to compare alternatives.'],
-          ['Simple payback vs discounted cash flow','Simple payback ignores the time-value of money; discounted cash flow analysis accounts for it — a project can look viable by payback but not by NPV at a given MARR.'],
-          ['MARR','Minimum Attractive Rate of Return — the minimum interest rate for a project to be attractive; not less than expected inflation; treated like an interest rate in these calculations.'],
-          ['Compound interest notation','i = interest rate/period, N = number of periods, P = present sum, F = future sum, A = uniform end-of-period cash flow, S = salvage value.'],
-          ['P↔F factors','F = P(1+i)ᴺ (single payment compound amount); P = F/(1+i)ᴺ (single payment present worth) — "brings" a future amount to the present for NPV work.'],
-          ['Uniform series factors','Relates a level annual amount A to a present sum P or future sum F over N periods at rate i (used both to find how much a series of savings grows to, and how much a lump sum could pay out annually).'],
-          ['NPV rule','NPV > 0 indicates a financially viable project; computed from initial cost, annuities, and salvage value discounted at the MARR.'],
-          ['Levelized Cost of Energy (LCOE)','Standard metric for comparing electricity production technologies on a common cost-per-energy basis, especially renewables.'],
-        ]
-      }
-    ],
-    worksheets:[
-      {
-        title:'Module 1 — Class Problems',
-        items:[
-          'Natural gas volumetric flow rate to heat water 70°F→120°F at 20 gpm; estimate yearly CO2 emissions at AFUE 80%.',
-          'Daily fuel consumption for an oil/gas furnace delivering 50,000 Btu/hr at 90% combustion efficiency.',
-          'Compute a country\'s HDI from literacy, enrollment, life expectancy, and GDP data; compare its HDI/energy-intensity ratio to the chapter\'s scatter charts.',
-          'Yearly coal consumption and CO2 emissions of a 350 MW plant (38% thermal efficiency, 80% combustion efficiency, 90% generator efficiency, 90% availability).',
-          'Present-economy comparison of two electric motors (purchase price, maintenance, efficiency) for a 75 hp, 8 hr/day, 365 day/year duty at $0.16/kWh.',
-          'Annual electricity consumption of a 5-ton AC unit, SEER 16, running ~1,200 hrs/year.',
-        ]
-      },
-      {
-        title:'Module 1 Part 2 — Class Problems',
-        items:[
-          'Exponential growth: emerging-country energy use went 136 EJ (1990) → 198 EJ (2004); project 2020 consumption.',
-          'Per-capita energy: compute US GJ/person (2004); project global stabilization level at 10B people and US per-capita intensity; use the logistic model with 1900/1950 data points to estimate when the world reaches 97% of that level.',
-          'CRF for a $60M investment, 8-year term, $16M annuity — evaluate against the EPRI <12% guideline.',
-          'NPV of a $360,000 renewable plant (50 kW avg output, $0.039/kWh, 25-yr horizon, $20,000 salvage, 6% MARR); find the operating credit/kWh needed to break even.',
-          'NPV of an $8M project over 10 years at 7% MARR given a table of ten yearly annuities.',
-        ]
-      }
-    ]},
+  {
+    id:'engr49580d', code:'ENGR49580D', name:'Technology, Society and Sustainability', instructor:'Jon Berge, Ph.D., P.Eng.',
+    hasMaterial:true, accent:'#34D1BF', credits:3.0, hours:42,
+    description:'Students study the impact of science and technological developments on society and analyze how technological changes affect society, the environment, population, and health. They assess the impact, benefits, consequences, and implications of the inter-relationship between technology, society and sustainability. Students investigate examples of technological failures and their impacts.',
+    schedule:[{day:'Thu', start:'1:00 PM', end:'4:00 PM', type:'Lecture', room:'DAV-M6'}],
+    evaluation:[['Assignments (4 × 5%)','20%'],['Project Proposal / Progress Report','5%'],['Project Presentation','15%'],['Presentation Handout','10%'],['Project Essay','30%'],['Final Exam','20%']],
+    syllabus:[['1','Sep 10','World-views, Preconceptions, Biases and How to Change your Mind','In-class activity'],['2','Sep 17','The Life Cycle Perspective and the Role of Public Policy; Pollution and Climate Change','In-class activity'],['3','Sep 24','Nuclear Energy','In-class activity'],['4','Oct 1','Infrastructure and Environmental Assessment','In-class activity'],['5','Oct 8','Social Impacts of Infrastructure','In-class activity'],['6','Oct 15','Biomass, Fossil Fuels','In-class activity'],['7','Oct 22','Fossil Fuels','In-class activity'],['8','Nov 5','Food and Agriculture','In-class activity'],['9','Nov 12','Technology and Healthcare','In-class activity'],['10','Nov 19','Information Technology, Information Security, Social Media and Surveillance','In-class activity'],['11','Nov 26','Failures of Technology, Whistleblowing, Disclosure, and Unintended Consequences','In-class activity'],['12','Dec 3','Individual Essay Assignment Peer Teach','Presentation'],['13','Dec 10','Individual Essay Assignment Peer Teach','Presentation'],['14','TBA','Final Test','Final exam']],
+    lectures:[], worksheets:[]
+  },
   {id:'engr43301d', code:'ENGR43301D', name:'Economics & Entrepreneurship', instructor:'Manju Sunil Varghese', hasMaterial:true, accent:'#F5A623',
     schedule:[
       {day:'Fri', start:'1:00 PM', end:'4:00 PM', type:'Lecture', room:'Online (VTL)'},

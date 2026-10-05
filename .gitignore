@@ -6,6 +6,10 @@ Thumbs.db
 # Local Supabase temp dir
 supabase/.temp/
 
+# Keep the replaced ENGR49580D source archive; leave other local course files ignored.
+!Sheridan/Technology, Society and Sustainability ENGR49580D/
+!Sheridan/Technology, Society and Sustainability ENGR49580D/**
+
 # Local course files (seeded to Supabase Storage; too large for git)
 Sheridan/
 
