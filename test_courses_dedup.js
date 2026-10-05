@@ -8,16 +8,16 @@ console.log('Testing cleanCourseCode...');
 assert.strictEqual(cleanCourseCode('MATH 15325D'), 'MATH15325D');
 assert.strictEqual(cleanCourseCode('MATH15325D'), 'MATH15325D');
 assert.strictEqual(cleanCourseCode('math15325d'), 'MATH15325D');
-assert.strictEqual(cleanCourseCode('ENGR 36035D'), 'ENGR36035D');
-assert.strictEqual(cleanCourseCode('ENGR36035D'), 'ENGR36035D');
+assert.strictEqual(cleanCourseCode('ENGR 49580D'), 'ENGR49580D');
+assert.strictEqual(cleanCourseCode('ENGR49580D'), 'ENGR49580D');
 assert.strictEqual(cleanCourseCode('ENGR 43301D'), 'ENGR43301D');
 assert.strictEqual(cleanCourseCode('ANTH 17028GD'), 'ANTH17028GD');
 assert.strictEqual(cleanCourseCode('ENGL 17889GD'), 'ENGL17889GD');
 
 // Simulate Supabase response with unspaced course codes
 const dbCourses = [
-  { id: 'uuid-1', code: 'MATH15325D', name: 'Linear Algebra', instructor: 'Cyrus Hosseini, PhD PEng' },
-  { id: 'uuid-2', code: 'ENGR36035D', name: 'Introduction to Energy Systems', instructor: 'Dr. Amin' },
+  { id: 'uuid-1', code: 'MATH15325D', name: 'Linear Algebra', instructor: 'Dr. Harpreet' },
+  { id: 'uuid-2', code: 'ENGR49580D', name: 'Technology, Society and Sustainability', instructor: 'Jon Berge, Ph.D., P.Eng.' },
   { id: 'uuid-3', code: 'ENGR43301D', name: 'Economics & Entrepreneurship', instructor: 'Prof. Stewart' },
   { id: 'uuid-4', code: 'ANTH17028GD', name: 'Anthropology of Health', instructor: 'Jaime Ginter' },
   { id: 'uuid-5', code: 'ENGL17889GD', name: 'Composition & Rhetoric', instructor: 'Professor' }
@@ -26,7 +26,7 @@ const dbCourses = [
 // Initial static courses
 let testCourses = [
   { id:'math15325d', code:'MATH 15325D', name:'Linear Algebra' },
-  { id:'engr36035d', code:'ENGR 36035D', name:'Intro to Energy Systems' },
+  { id:'engr49580d', code:'ENGR 49580D', name:'Technology, Society and Sustainability' },
   { id:'engr43301d', code:'ENGR 43301D', name:'Economics & Entrepreneurship' },
   { id:'anth17028gd', code:'ANTH 17028GD', name:'Anthropology of Health' },
   { id:'engl17889gd', code:'ENGL 17889GD', name:'Composition & Rhetoric' }

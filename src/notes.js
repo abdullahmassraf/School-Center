@@ -52,11 +52,11 @@ class NotesManager {
       },
       {
         id: 'note_2',
-        title: 'Diesel Cycle Thermal Efficiency Review',
-        courseId: 'engr36035d',
-        content: 'In the ideal Diesel cycle, heat addition occurs at constant pressure, unlike the Otto cycle (constant volume). The cutoff ratio r_c = V3 / V2 represents the expansion during combustion. Efficiency decreases as cutoff ratio increases for a fixed compression ratio.',
+        title: 'Technology, Society and Sustainability: Course Themes',
+        courseId: 'engr49580d',
+        content: 'Consider how technological change affects society, the environment, population, and health. Evaluate benefits, consequences, and sustainability across a technology’s life cycle.',
         attachments: [],
-        tags: ['thermo', 'diesel', 'efficiency'],
+        tags: ['sustainability', 'technology', 'society'],
         aiGenerated: null,
         versionHistory: [
           { version: 1, timestamp: Date.now() - 86400000, changeSummary: 'Lab prep notes' }

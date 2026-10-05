@@ -87,7 +87,8 @@ const ROUNDABOUT = { cx: 396, cy: 706, r: 42 };
  *  non-physical rooms ("Online (VTL)") or unknown buildings. */
 export function getBuildingIdForRoom(room) {
   if (!room) return null;
-  const m = String(room).trim().match(/^([A-Za-z])/);
+  const normalized = String(room).trim().replace(/^DAV(?:IS)?[-\s]*/i, '');
+  const m = normalized.match(/^([A-Za-z])/);
   if (!m) return null;
   const code = m[1].toUpperCase();
   return CAMPUS_BUILDINGS[code] ? code : null;

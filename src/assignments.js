@@ -63,24 +63,24 @@ class AssignmentsManager {
       },
       {
         id: 'asg_engr_1',
-        title: 'Diesel Engine Efficiency Lab Report',
-        courseId: 'engr36035d',
-        description: 'Prepare a 4-page formal short form report on the test bed fuel consumption vs. engine output power.',
+        title: 'Individual Essay Assignment: Proposal and Progress Report',
+        courseId: 'engr49580d',
+        description: 'Develop a proposal and progress report for an individual essay connecting a contemporary example with course themes.',
         dueDate: d2.toISOString(),
         status: 'not_started',
         priority: 'medium',
         assignmentType: 'report',
         sourceFiles: [
-          { id: 'f2', name: 'Short_Form_Lab_Report_Template.docx', size: 98000, type: 'docx', uploadedAt: Date.now() - 172800000 }
+          { id: 'f2', name: 'Individual Essay Assignment.pdf', size: 55293, type: 'pdf', uploadedAt: Date.now() - 172800000 }
         ],
         generatedFiles: [],
         requirementsChecklist: [
-          { id: 'c4', text: 'Plot brake thermal efficiency vs. RPM', done: false },
-          { id: 'c5', text: 'Include error analysis on fuel flow meter', done: false },
-          { id: 'c6', text: 'Format references in IEEE style', done: false }
+          { id: 'c4', text: 'Choose a contemporary example connected to course themes', done: false },
+          { id: 'c5', text: 'Prepare the proposal and progress report', done: false },
+          { id: 'c6', text: 'Develop the essay, peer-teach presentation, and handout', done: false }
         ],
         notes: '',
-        aiSummary: 'Experimental data analysis comparing brake thermal efficiency across five test bed load points.',
+        aiSummary: 'An individual essay project exploring a contemporary example through technology, society, and sustainability themes.',
         versionHistory: [
           { version: 1, timestamp: Date.now() - 172800000, changeSummary: 'Created lab report brief' }
         ],
